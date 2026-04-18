@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+{% block content %}
+<section class="index">
+  <h1>{{ site.title }}</h1>
+  <ul class="post-list">
+    {% for p in page.posts %}
+    <li>
+      <a href="{{ p.url }}">{{ p.title }}</a>
+      {% if p.date %}<time datetime="{{ p.date }}">{{ p.date }}</time>{% endif %}
+      {% if p.description %}<p class="excerpt">{{ p.description }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

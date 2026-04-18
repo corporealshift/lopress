@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block content %}
+<section class="tag">
+  <h1>Tagged: {{ page.tag }}</h1>
+  <ul class="post-list">
+    {% for p in page.posts %}
+    <li><a href="{{ p.url }}">{{ p.title }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
