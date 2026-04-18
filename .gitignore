@@ -1,1 +1,6 @@
 .superpowers/
+/target
+**/*.rs.bk
+Cargo.lock
+/www
+/**/www
