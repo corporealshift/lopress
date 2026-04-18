@@ -5,5 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tera = { workspace = true }
+thiserror = { workspace = true }
+include_dir = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
