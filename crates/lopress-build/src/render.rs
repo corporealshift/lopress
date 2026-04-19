@@ -54,7 +54,11 @@ fn write_block(
             let _ = writeln!(out, "<pre><code{class}>{text}</code></pre>");
         }
         "list" => {
-            let ordered = b.attrs.get("ordered").and_then(|v| v.as_bool()).unwrap_or(false);
+            let ordered = b
+                .attrs
+                .get("ordered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let tag = if ordered { "ol" } else { "ul" };
             let _ = writeln!(out, "<{tag}>");
             for item in &b.children {
@@ -145,10 +149,7 @@ mod tests {
     fn renders_paragraph_and_heading() {
         let doc = Document {
             front_matter: FrontMatter::default(),
-            blocks: vec![
-                Block::heading(2, "Hi"),
-                Block::paragraph("body"),
-            ],
+            blocks: vec![Block::heading(2, "Hi"), Block::paragraph("body")],
         };
         let tera = Tera::default();
         let html = render_body(&doc, &empty_registry(), &tera).unwrap();

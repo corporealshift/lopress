@@ -20,8 +20,7 @@ impl PluginRegistry {
     pub fn insert(&mut self, plugin: LoadedPlugin) -> Result<(), PluginError> {
         let pi = self.plugins.len();
         if plugin.manifest.theme {
-            self.theme_index
-                .insert(plugin.manifest.name.clone(), pi);
+            self.theme_index.insert(plugin.manifest.name.clone(), pi);
         }
         for (bi, block) in plugin.manifest.blocks.iter().enumerate() {
             if self.block_index.contains_key(&block.name) {

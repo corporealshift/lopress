@@ -1,10 +1,13 @@
-use thiserror::Error;
 use std::path::PathBuf;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("I/O error at {path}: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("manifest error at {path}: {message}")]
     Manifest { path: PathBuf, message: String },
     #[error("plugin `{name}` declares template `{template}` but file does not exist")]

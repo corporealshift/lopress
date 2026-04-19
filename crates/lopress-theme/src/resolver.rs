@@ -21,10 +21,7 @@ impl std::fmt::Debug for ResolvedTheme {
     }
 }
 
-pub fn resolve(
-    registry: &PluginRegistry,
-    theme_name: &str,
-) -> Result<ResolvedTheme, ThemeError> {
+pub fn resolve(registry: &PluginRegistry, theme_name: &str) -> Result<ResolvedTheme, ThemeError> {
     // If a plugin with this name exists and is a theme, use it (overriding
     // the built-in when name == "default").
     if let Some(plugin) = registry.theme(theme_name) {

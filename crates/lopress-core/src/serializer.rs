@@ -81,7 +81,11 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
             out.push_str("```\n");
         }
         "list" => {
-            let ordered = b.attrs.get("ordered").and_then(|v| v.as_bool()).unwrap_or(false);
+            let ordered = b
+                .attrs
+                .get("ordered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             for (idx, item) in b.children.iter().enumerate() {
                 let mut inner = String::new();
                 for c in &item.children {

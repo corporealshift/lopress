@@ -54,7 +54,8 @@ mod tests {
         let d = TempDir::new().unwrap();
         let p = d.path().join("cache.json");
         let mut c = VariantCache::default();
-        c.entries.insert("abc-400-webp".into(), "foo.400w.webp".into());
+        c.entries
+            .insert("abc-400-webp".into(), "foo.400w.webp".into());
         c.save(&p).unwrap();
         let loaded = VariantCache::load(&p).unwrap();
         assert_eq!(c.entries, loaded.entries);

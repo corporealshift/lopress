@@ -1,6 +1,6 @@
 use crate::cache::{hash_file, variant_filename, VariantCache};
 use crate::error::AssetError;
-use image::{ImageReader, DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, ImageReader};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -109,8 +109,7 @@ fn write_webp(img: &DynamicImage, out: &Path) -> Result<(), AssetError> {
     let rgba = img.to_rgba8();
     let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
     let encoded = encoder.encode(80.0);
-    std::fs::write(out, encoded.to_vec())
-        .map_err(AssetError::from)
+    std::fs::write(out, encoded.to_vec()).map_err(AssetError::from)
 }
 
 #[cfg(test)]
@@ -121,7 +120,9 @@ mod tests {
 
     fn make_image(path: &Path, w: u32, h: u32) {
         let mut img = RgbImage::new(w, h);
-        for p in img.pixels_mut() { *p = Rgb([200, 100, 50]); }
+        for p in img.pixels_mut() {
+            *p = Rgb([200, 100, 50]);
+        }
         img.save(path).unwrap();
     }
 

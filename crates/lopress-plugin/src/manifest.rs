@@ -54,11 +54,10 @@ pub fn parse_manifest(path: &Path) -> Result<PluginManifest, PluginError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let manifest: PluginManifest =
-        toml::from_str(&src).map_err(|e| PluginError::Manifest {
-            path: path.to_path_buf(),
-            message: e.to_string(),
-        })?;
+    let manifest: PluginManifest = toml::from_str(&src).map_err(|e| PluginError::Manifest {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
     Ok(manifest)
 }
 

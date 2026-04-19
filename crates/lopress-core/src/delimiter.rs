@@ -3,8 +3,15 @@ use crate::error::ParseError;
 /// A delimiter token found in source.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Delim {
-    Open { name: String, attrs_json: String, span: (usize, usize) },
-    Close { name: String, span: (usize, usize) },
+    Open {
+        name: String,
+        attrs_json: String,
+        span: (usize, usize),
+    },
+    Close {
+        name: String,
+        span: (usize, usize),
+    },
 }
 
 /// Scan `src` for lopress block delimiters. Returns them in source order.
@@ -81,7 +88,9 @@ mod tests {
         let ds = scan(src).unwrap();
         assert_eq!(ds.len(), 2);
         match &ds[0] {
-            Delim::Open { name, attrs_json, .. } => {
+            Delim::Open {
+                name, attrs_json, ..
+            } => {
                 assert_eq!(name, "video");
                 assert_eq!(attrs_json, r#"{"src":"a.mp4"}"#);
             }
@@ -98,7 +107,10 @@ mod tests {
         let src = "<!-- lopress:callout -->\nhi\n<!-- /lopress:callout -->";
         let ds = scan(src).unwrap();
         assert_eq!(ds.len(), 2);
-        if let Delim::Open { name, attrs_json, .. } = &ds[0] {
+        if let Delim::Open {
+            name, attrs_json, ..
+        } = &ds[0]
+        {
             assert_eq!(name, "callout");
             assert_eq!(attrs_json, "");
         } else {

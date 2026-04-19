@@ -234,11 +234,7 @@ fn render_one_page(
     write_page(www, slug, &html)
 }
 
-fn render_index(
-    www: &Path,
-    site: &SiteCtx,
-    theme: &ThemeEngine,
-) -> Result<(), BuildError> {
+fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(), BuildError> {
     let page = PageCtx {
         kind: PageKind::Index,
         title: site.title.clone(),

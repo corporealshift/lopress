@@ -9,7 +9,10 @@ use serde_json::{json, Value};
 pub fn parse(src: &str) -> Result<Document, ParseError> {
     let (front_matter, body) = frontmatter::split(src)?;
     let blocks = parse_body(body)?;
-    Ok(Document { front_matter, blocks })
+    Ok(Document {
+        front_matter,
+        blocks,
+    })
 }
 
 fn parse_body(body: &str) -> Result<Vec<Block>, ParseError> {
@@ -48,7 +51,11 @@ fn build_tree(
             out.extend(parse_plain_markdown(&body[cursor..next_span.0])?);
         }
         match delims[*idx].clone() {
-            delimiter::Delim::Open { name, attrs_json, span } => {
+            delimiter::Delim::Open {
+                name,
+                attrs_json,
+                span,
+            } => {
                 *idx += 1;
                 let (children, _) = build_tree(body, delims, idx, span.1, end, Some(&name))?;
                 let attrs = if attrs_json.is_empty() {
@@ -78,28 +85,26 @@ fn build_tree(
                     cursor = span.1;
                 }
             }
-            delimiter::Delim::Close { name, span } => {
-                match expected_close {
-                    Some(exp) if exp == name => {
-                        *idx += 1;
-                        return Ok((out, true));
-                    }
-                    Some(exp) => {
-                        return Err(ParseError::MismatchedClose {
-                            expected: exp.to_string(),
-                            actual: name,
-                            line: line_of(body, span.0),
-                        });
-                    }
-                    None => {
-                        return Err(ParseError::MismatchedClose {
-                            expected: "<none>".into(),
-                            actual: name,
-                            line: line_of(body, span.0),
-                        });
-                    }
+            delimiter::Delim::Close { name, span } => match expected_close {
+                Some(exp) if exp == name => {
+                    *idx += 1;
+                    return Ok((out, true));
                 }
-            }
+                Some(exp) => {
+                    return Err(ParseError::MismatchedClose {
+                        expected: exp.to_string(),
+                        actual: name,
+                        line: line_of(body, span.0),
+                    });
+                }
+                None => {
+                    return Err(ParseError::MismatchedClose {
+                        expected: "<none>".into(),
+                        actual: name,
+                        line: line_of(body, span.0),
+                    });
+                }
+            },
         }
     }
 
@@ -131,10 +136,7 @@ fn parse_plain_markdown(body: &str) -> Result<Vec<Block>, ParseError> {
     parse_blocks(&mut parser, None)
 }
 
-fn parse_blocks(
-    parser: &mut Parser<'_>,
-    stop: Option<TagEnd>,
-) -> Result<Vec<Block>, ParseError> {
+fn parse_blocks(parser: &mut Parser<'_>, stop: Option<TagEnd>) -> Result<Vec<Block>, ParseError> {
     let mut blocks = Vec::new();
     while let Some(event) = parser.next() {
         if let Event::End(ref end) = event {
@@ -149,10 +151,7 @@ fn parse_blocks(
     Ok(blocks)
 }
 
-fn parse_one(
-    event: Event<'_>,
-    parser: &mut Parser<'_>,
-) -> Result<Option<Block>, ParseError> {
+fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>, ParseError> {
     Ok(Some(match event {
         Event::Start(Tag::Paragraph) => {
             let (text, image) = consume_inline(parser, TagEnd::Paragraph);
@@ -236,9 +235,17 @@ fn parse_one(
                 text: None,
             }
         }
-        Event::Html(_) | Event::InlineHtml(_) | Event::Text(_) | Event::Code(_)
-        | Event::SoftBreak | Event::HardBreak | Event::Rule | Event::TaskListMarker(_)
-        | Event::FootnoteReference(_) | Event::Start(_) | Event::End(_) => {
+        Event::Html(_)
+        | Event::InlineHtml(_)
+        | Event::Text(_)
+        | Event::Code(_)
+        | Event::SoftBreak
+        | Event::HardBreak
+        | Event::Rule
+        | Event::TaskListMarker(_)
+        | Event::FootnoteReference(_)
+        | Event::Start(_)
+        | Event::End(_) => {
             return Ok(None);
         }
     }))
@@ -262,7 +269,12 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
             }
             Event::SoftBreak => text.push('\n'),
             Event::HardBreak => text.push('\n'),
-            Event::Start(Tag::Image { dest_url, title: _, id: _, .. }) => {
+            Event::Start(Tag::Image {
+                dest_url,
+                title: _,
+                id: _,
+                ..
+            }) => {
                 let src = dest_url.to_string();
                 let mut alt = String::new();
                 for inner in parser.by_ref() {
@@ -373,10 +385,7 @@ after
         let d = parse(src).unwrap();
         let names: Vec<&str> = d.blocks.iter().map(|b| b.r#type.as_str()).collect();
         assert_eq!(names, vec!["paragraph", "lopress:video", "paragraph"]);
-        assert_eq!(
-            d.blocks[1].attrs,
-            json!({"src":"a.mp4"})
-        );
+        assert_eq!(d.blocks[1].attrs, json!({"src":"a.mp4"}));
         assert!(d.blocks[1].children.is_empty());
     }
 

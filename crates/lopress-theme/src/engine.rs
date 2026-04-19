@@ -1,5 +1,5 @@
-use crate::error::ThemeError;
 use crate::context::RenderContext;
+use crate::error::ThemeError;
 use tera::Tera;
 
 pub struct ThemeEngine {

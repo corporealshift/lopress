@@ -33,7 +33,11 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
 fn minimal_site_builds_expected_files() {
     let (_tmp, root) = copy_fixture("minimal");
     let report = build(&root).unwrap();
-    assert!(report.failures.is_empty(), "failures: {failures:?}", failures = report.failures);
+    assert!(
+        report.failures.is_empty(),
+        "failures: {failures:?}",
+        failures = report.failures
+    );
 
     let www = root.join("www");
     assert!(www.join("index.html").exists());

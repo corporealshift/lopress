@@ -94,13 +94,27 @@ impl Workspace {
         })
     }
 
-    pub fn src_dir(&self) -> PathBuf { self.root.join("src") }
-    pub fn posts_dir(&self) -> PathBuf { self.src_dir().join("posts") }
-    pub fn pages_dir(&self) -> PathBuf { self.src_dir().join("pages") }
-    pub fn images_dir(&self) -> PathBuf { self.src_dir().join("images") }
-    pub fn plugins_dir(&self) -> PathBuf { self.root.join("plugins") }
-    pub fn www_dir(&self) -> PathBuf { self.root.join("www") }
-    pub fn cache_path(&self) -> PathBuf { self.www_dir().join(".lopress-cache.json") }
+    pub fn src_dir(&self) -> PathBuf {
+        self.root.join("src")
+    }
+    pub fn posts_dir(&self) -> PathBuf {
+        self.src_dir().join("posts")
+    }
+    pub fn pages_dir(&self) -> PathBuf {
+        self.src_dir().join("pages")
+    }
+    pub fn images_dir(&self) -> PathBuf {
+        self.src_dir().join("images")
+    }
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.root.join("plugins")
+    }
+    pub fn www_dir(&self) -> PathBuf {
+        self.root.join("www")
+    }
+    pub fn cache_path(&self) -> PathBuf {
+        self.www_dir().join(".lopress-cache.json")
+    }
 }
 
 #[cfg(test)]

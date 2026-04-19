@@ -3,10 +3,7 @@ use crate::manifest::parse_manifest;
 use crate::registry::{LoadedPlugin, PluginRegistry};
 use std::path::Path;
 
-pub fn load_dir(
-    dir: &Path,
-    enabled: Option<&[String]>,
-) -> Result<PluginRegistry, PluginError> {
+pub fn load_dir(dir: &Path, enabled: Option<&[String]>) -> Result<PluginRegistry, PluginError> {
     let mut reg = PluginRegistry::default();
     if !dir.exists() {
         return Ok(reg);

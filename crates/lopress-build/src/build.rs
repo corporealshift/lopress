@@ -3,8 +3,8 @@ use crate::feed;
 use crate::not_found;
 use crate::pages;
 use crate::robots;
-use crate::sitemap;
 use crate::site::Workspace;
+use crate::sitemap;
 use lopress_assets::{process_image, VariantCache, VariantSpec};
 use lopress_plugin::load_dir;
 use lopress_theme::{resolve, SiteCtx};
@@ -46,9 +46,8 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
             let template = &block.template;
             let key = format!("{plugin_name}::{template}");
             let src = std::fs::read_to_string(plugin.root.join(&block.template))?;
-            tera.add_raw_template(&key, &src).map_err(|e| {
-                BuildError::Config(format!("plugin template `{key}`: {e}"))
-            })?;
+            tera.add_raw_template(&key, &src)
+                .map_err(|e| BuildError::Config(format!("plugin template `{key}`: {e}")))?;
         }
     }
 
@@ -169,10 +168,7 @@ fn theme_templates(
     Ok(out)
 }
 
-fn write_theme_css(
-    ws: &Workspace,
-    theme: &lopress_theme::ResolvedTheme,
-) -> Result<(), BuildError> {
+fn write_theme_css(ws: &Workspace, theme: &lopress_theme::ResolvedTheme) -> Result<(), BuildError> {
     let target = ws.www_dir().join("assets").join("theme.css");
     std::fs::create_dir_all(target.parent().unwrap())?;
     std::fs::write(target, &theme.css_content)?;

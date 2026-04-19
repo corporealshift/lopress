@@ -78,6 +78,9 @@ mod tests {
     fn extra_fields_captured_in_extra() {
         let input = "---\ntitle: t\ncustom: value\n---\nbody\n";
         let (fm, _) = split(input).unwrap();
-        assert_eq!(fm.extra.get("custom").and_then(|v| v.as_str()), Some("value"));
+        assert_eq!(
+            fm.extra.get("custom").and_then(|v| v.as_str()),
+            Some("value")
+        );
     }
 }

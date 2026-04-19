@@ -15,5 +15,9 @@ pub enum ParseError {
     UnterminatedBlock { block_type: String, line: usize },
 
     #[error("mismatched block close: expected `{expected}`, got `{actual}` at line {line}")]
-    MismatchedClose { expected: String, actual: String, line: usize },
+    MismatchedClose {
+        expected: String,
+        actual: String,
+        line: usize,
+    },
 }
