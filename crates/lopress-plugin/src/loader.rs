@@ -53,11 +53,10 @@ mod tests {
 
     fn make_plugin(root: &std::path::Path, name: &str, block: Option<&str>) {
         std::fs::create_dir_all(root).unwrap();
-        let mut toml_src = format!("name = \"{}\"\nversion = \"0.1.0\"\n", name);
+        let mut toml_src = format!("name = \"{name}\"\nversion = \"0.1.0\"\n");
         if let Some(b) = block {
             toml_src.push_str(&format!(
-                "\n[[blocks]]\nname = \"{}\"\ntemplate = \"blocks/x.html\"\n",
-                b
+                "\n[[blocks]]\nname = \"{b}\"\ntemplate = \"blocks/x.html\"\n"
             ));
             let tpl = root.join("blocks");
             std::fs::create_dir_all(&tpl).unwrap();

@@ -16,7 +16,7 @@ fn arb_heading() -> impl Strategy<Value = Block> {
 
 fn arb_custom_block() -> impl Strategy<Value = Block> {
     ("video|callout|note", arb_text()).prop_map(|(name, body)| Block {
-        r#type: format!("lopress:{}", name),
+        r#type: format!("lopress:{name}"),
         attrs: json!({ "id": body.len() }),
         children: vec![Block::paragraph(body)],
         text: None,

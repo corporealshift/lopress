@@ -109,7 +109,7 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
         "image" => {
             let src = b.attrs.get("src").and_then(|v| v.as_str()).unwrap_or("");
             let alt = b.attrs.get("alt").and_then(|v| v.as_str()).unwrap_or("");
-            let _ = writeln!(out, "![{}]({})", alt, src);
+            let _ = writeln!(out, "![{alt}]({src})");
         }
         custom if custom.starts_with("lopress:") => {
             let name = &custom["lopress:".len()..];

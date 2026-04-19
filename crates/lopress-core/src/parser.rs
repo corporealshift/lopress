@@ -60,7 +60,7 @@ fn build_tree(
                     })?
                 };
                 out.push(Block {
-                    r#type: format!("lopress:{}", name),
+                    r#type: format!("lopress:{name}"),
                     attrs,
                     children,
                     text: None,
@@ -199,7 +199,7 @@ fn parse_one(
                 CodeBlockKind::Indented => String::new(),
             };
             let mut body = String::new();
-            while let Some(ev) = parser.next() {
+            for ev in parser.by_ref() {
                 match ev {
                     Event::Text(t) => body.push_str(&t),
                     Event::End(TagEnd::CodeBlock) => break,
@@ -265,7 +265,7 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
             Event::Start(Tag::Image { dest_url, title: _, id: _, .. }) => {
                 let src = dest_url.to_string();
                 let mut alt = String::new();
-                while let Some(inner) = parser.next() {
+                for inner in parser.by_ref() {
                     match inner {
                         Event::Text(t) => alt.push_str(&t),
                         Event::End(TagEnd::Image) => break,
@@ -281,7 +281,7 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
             }
             Event::Start(Tag::Link { .. }) => {
                 other_text = true;
-                while let Some(inner) = parser.next() {
+                for inner in parser.by_ref() {
                     match inner {
                         Event::Text(t) => text.push_str(&t),
                         Event::End(TagEnd::Link) => break,

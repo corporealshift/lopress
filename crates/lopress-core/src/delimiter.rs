@@ -34,8 +34,7 @@ pub fn scan(src: &str) -> Result<Vec<Delim>, ParseError> {
                 let name = after_slash.trim().to_string();
                 if name.is_empty() {
                     return Err(ParseError::FrontMatter(format!(
-                        "empty close delimiter at byte {}",
-                        i
+                        "empty close delimiter at byte {i}"
                     )));
                 }
                 out.push(Delim::Close { name, span });
@@ -125,8 +124,8 @@ mod tests {
         let names: Vec<_> = ds
             .iter()
             .map(|d| match d {
-                Delim::Open { name, .. } => format!("+{}", name),
-                Delim::Close { name, .. } => format!("-{}", name),
+                Delim::Open { name, .. } => format!("+{name}"),
+                Delim::Close { name, .. } => format!("-{name}"),
             })
             .collect();
         assert_eq!(
