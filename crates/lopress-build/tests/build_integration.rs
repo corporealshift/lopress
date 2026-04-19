@@ -58,3 +58,27 @@ fn minimal_site_builds_expected_files() {
     assert!(feed.contains("<title>Hello</title>"));
     assert!(feed.contains("https://example.com/posts/hello/"));
 }
+
+#[test]
+fn drafts_are_excluded_from_every_output() {
+    let (_tmp, root) = copy_fixture("with-draft");
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www = root.join("www");
+    assert!(www.join("posts/done/index.html").exists());
+    assert!(
+        !www.join("posts/wip/index.html").exists(),
+        "draft post was written"
+    );
+
+    let feed = fs::read_to_string(www.join("feed.xml")).unwrap();
+    assert!(!feed.contains("WIP"), "draft appears in feed");
+
+    let sitemap = fs::read_to_string(www.join("sitemap.xml")).unwrap();
+    assert!(!sitemap.contains("wip"), "draft appears in sitemap");
+
+    let index = fs::read_to_string(www.join("index.html")).unwrap();
+    assert!(!index.contains("WIP"), "draft appears in index");
+}
