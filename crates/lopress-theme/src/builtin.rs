@@ -31,6 +31,13 @@ pub fn default_css() -> &'static str {
         .unwrap_or("")
 }
 
+/// Return the source of a built-in template by filename, or None.
+pub fn builtin_template(name: &str) -> Option<&'static str> {
+    DEFAULT
+        .get_file(format!("templates/{name}"))?
+        .contents_utf8()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

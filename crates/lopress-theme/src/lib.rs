@@ -4,7 +4,7 @@ pub mod engine;
 pub mod error;
 pub mod resolver;
 
-pub use builtin::{default_css, default_engine};
+pub use builtin::{builtin_template, default_css, default_engine};
 pub use context::{NavItem, PageCtx, PageKind, PostSummary, RenderContext, SiteCtx};
 pub use engine::ThemeEngine;
 pub use error::ThemeError;
