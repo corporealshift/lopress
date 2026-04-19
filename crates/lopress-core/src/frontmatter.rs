@@ -8,29 +8,37 @@ use crate::types::FrontMatter;
 pub fn split(input: &str) -> Result<(FrontMatter, &str), ParseError> {
     // A front-matter block starts with a line that is exactly "---" and ends
     // with a subsequent line that is exactly "---". The content between is YAML.
+    // Line terminators may be LF or CRLF (Windows checkouts with autocrlf).
     let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input); // BOM tolerance
-    if !trimmed.starts_with("---\n") && trimmed != "---" {
+    let open_len = if trimmed.starts_with("---\r\n") {
+        5
+    } else if trimmed.starts_with("---\n") {
+        4
+    } else {
         return Ok((FrontMatter::default(), input));
-    }
-    let after_open = &trimmed[4..]; // skip "---\n"
-    let close = after_open
-        .lines()
-        .scan(0usize, |offset, line| {
-            let start = *offset;
-            *offset += line.len() + 1; // assume trailing \n
-            Some((start, line))
-        })
-        .find(|(_, line)| *line == "---")
-        .ok_or_else(|| ParseError::FrontMatter("unterminated front-matter".into()))?;
+    };
 
-    let (close_offset, _) = close;
+    let after_open = &trimmed[open_len..];
+    let mut offset = 0usize;
+    let mut close: Option<(usize, usize)> = None;
+    for segment in after_open.split_inclusive('\n') {
+        let content = segment.trim_end_matches('\n').trim_end_matches('\r');
+        if content == "---" {
+            close = Some((offset, segment.len()));
+            break;
+        }
+        offset += segment.len();
+    }
+    let (close_offset, close_segment_len) =
+        close.ok_or_else(|| ParseError::FrontMatter("unterminated front-matter".into()))?;
+
     let yaml_src = &after_open[..close_offset];
     let fm: FrontMatter = if yaml_src.trim().is_empty() {
         FrontMatter::default()
     } else {
         serde_yaml::from_str(yaml_src)?
     };
-    let body_start = 4 + close_offset + "---\n".len();
+    let body_start = open_len + close_offset + close_segment_len;
     let body = if body_start >= trimmed.len() {
         ""
     } else {
@@ -72,6 +80,16 @@ mod tests {
     fn unterminated_frontmatter_errors() {
         let input = "---\ntitle: oops\n# body\n";
         assert!(split(input).is_err());
+    }
+
+    #[test]
+    fn accepts_crlf_line_endings() {
+        let input = "---\r\ntitle: Hi\r\ndraft: true\r\ntags: [intro]\r\n---\r\n# body\r\n";
+        let (fm, body) = split(input).unwrap();
+        assert_eq!(fm.title.as_deref(), Some("Hi"));
+        assert!(fm.draft);
+        assert_eq!(fm.tags, vec!["intro".to_string()]);
+        assert_eq!(body, "# body\r\n");
     }
 
     #[test]
