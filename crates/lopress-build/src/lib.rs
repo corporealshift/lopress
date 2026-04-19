@@ -1,4 +1,5 @@
 pub mod build;
+pub mod cache;
 pub mod error;
 pub mod feed;
 pub mod not_found;
@@ -9,6 +10,7 @@ pub mod site;
 pub mod sitemap;
 
 pub use build::{build, BuildReport};
+pub use cache::{BuildCache, PageEntry};
 pub use error::{BuildError, PageFailure};
 pub use pages::{discover, post_summaries, render_all, DiscoveredPost};
 pub use render::render_body;
