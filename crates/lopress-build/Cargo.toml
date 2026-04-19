@@ -5,5 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+quick-xml = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+walkdir = { workspace = true }
+lopress-core = { path = "../lopress-core" }
+lopress-plugin = { path = "../lopress-plugin" }
+lopress-theme = { path = "../lopress-theme" }
+lopress-assets = { path = "../lopress-assets" }
 
 [dev-dependencies]
+tempfile = { workspace = true }
