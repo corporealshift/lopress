@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}{{ page.title }} — {{ site.title }}{% endblock %}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if page.description %}<meta name="description" content="{{ page.description }}">{% endif %}
+<link rel="canonical" href="{{ page.canonical }}">
+<link rel="stylesheet" href="/assets/theme.css">
+<meta property="og:title" content="{{ page.title }}">
+{% if page.description %}<meta property="og:description" content="{{ page.description }}">{% endif %}
+{% if page.og_image %}<meta property="og:image" content="{{ page.og_image }}">{% endif %}
+<meta name="twitter:card" content="summary_large_image">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<header class="site-header">
+  <a class="site-title" href="/">{{ site.title }}</a>
+  <nav class="site-nav">
+    {% for item in site.nav %}<a href="{{ item.href }}">{{ item.label }}</a>{% endfor %}
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <a href="/feed.xml">RSS</a>
+</footer>
+</body>
+</html>

@@ -1,0 +1,17 @@
+[package]
+name = "lopress-theme"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tera = { workspace = true }
+thiserror = { workspace = true }
+include_dir = { workspace = true }
+chrono = { workspace = true }
+lopress-plugin = { path = "../lopress-plugin" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

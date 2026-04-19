@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lopress-core",
+    "crates/lopress-plugin",
+    "crates/lopress-theme",
+    "crates/lopress-assets",
+    "crates/lopress-build",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "TBD"
+repository = "https://github.com/kdiedrick/lopress"
+
+[workspace.dependencies]
+anyhow = "1"
+blake3 = "1.5"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+image = "0.25"
+include_dir = "0.7"
+proptest = "1"
+pulldown-cmark = "0.10"
+quick-xml = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+tera = "1.19"
+thiserror = "1"
+toml = "0.8"
+walkdir = "2"
+webp = "0.3"
+
+[package]
+name = "lopress"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "lopress"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+lopress-build = { path = "crates/lopress-build" }

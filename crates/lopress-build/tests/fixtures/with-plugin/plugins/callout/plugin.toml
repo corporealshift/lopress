@@ -1,0 +1,9 @@
+name = "callout"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:callout"
+template = "blocks/callout.html"
+
+[blocks.attrs]
+kind = { type = "string", required = false, ui = "select", options = ["info","warning"] }

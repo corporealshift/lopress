@@ -1,0 +1,433 @@
+use crate::delimiter;
+use crate::error::ParseError;
+use crate::frontmatter;
+use crate::types::{Block, Document};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
+use serde_json::{json, Value};
+
+/// Parse a markdown source (with optional front-matter) into a Document.
+pub fn parse(src: &str) -> Result<Document, ParseError> {
+    let (front_matter, body) = frontmatter::split(src)?;
+    let blocks = parse_body(body)?;
+    Ok(Document {
+        front_matter,
+        blocks,
+    })
+}
+
+fn parse_body(body: &str) -> Result<Vec<Block>, ParseError> {
+    let delims = delimiter::scan(body)?;
+    if delims.is_empty() {
+        return parse_plain_markdown(body);
+    }
+    let mut idx = 0usize;
+    let (blocks, _) = build_tree(body, &delims, &mut idx, 0, body.len(), None)?;
+    Ok(blocks)
+}
+
+/// Build blocks for the slice `body[start..end]`, consuming delimiters from
+/// `delims[*idx..]`. If `expected_close` is Some, the function returns when
+/// it encounters that closing delimiter (consuming it).
+fn build_tree(
+    body: &str,
+    delims: &[delimiter::Delim],
+    idx: &mut usize,
+    start: usize,
+    end: usize,
+    expected_close: Option<&str>,
+) -> Result<(Vec<Block>, bool), ParseError> {
+    let mut out = Vec::new();
+    let mut cursor = start;
+
+    while *idx < delims.len() {
+        let next_span = match &delims[*idx] {
+            delimiter::Delim::Open { span, .. } | delimiter::Delim::Close { span, .. } => *span,
+        };
+        if next_span.0 >= end {
+            break;
+        }
+        // Flush plain markdown before this delimiter.
+        if cursor < next_span.0 {
+            out.extend(parse_plain_markdown(&body[cursor..next_span.0])?);
+        }
+        match delims[*idx].clone() {
+            delimiter::Delim::Open {
+                name,
+                attrs_json,
+                span,
+            } => {
+                *idx += 1;
+                let (children, _) = build_tree(body, delims, idx, span.1, end, Some(&name))?;
+                let attrs = if attrs_json.is_empty() {
+                    Value::Object(Default::default())
+                } else {
+                    serde_json::from_str(&attrs_json).map_err(|e| ParseError::BlockAttrs {
+                        line: line_of(body, span.0),
+                        message: e.to_string(),
+                    })?
+                };
+                out.push(Block {
+                    r#type: format!("lopress:{name}"),
+                    attrs,
+                    children,
+                    text: None,
+                });
+                // Cursor now sits just past the matching close (consumed in inner call).
+                // We need to know where that close ended; easiest: look at the last
+                // delimiter we just consumed.
+                if *idx > 0 {
+                    if let delimiter::Delim::Close { span: cspan, .. } = &delims[*idx - 1] {
+                        cursor = cspan.1;
+                    } else {
+                        cursor = span.1;
+                    }
+                } else {
+                    cursor = span.1;
+                }
+            }
+            delimiter::Delim::Close { name, span } => match expected_close {
+                Some(exp) if exp == name => {
+                    *idx += 1;
+                    return Ok((out, true));
+                }
+                Some(exp) => {
+                    return Err(ParseError::MismatchedClose {
+                        expected: exp.to_string(),
+                        actual: name,
+                        line: line_of(body, span.0),
+                    });
+                }
+                None => {
+                    return Err(ParseError::MismatchedClose {
+                        expected: "<none>".into(),
+                        actual: name,
+                        line: line_of(body, span.0),
+                    });
+                }
+            },
+        }
+    }
+
+    if let Some(exp) = expected_close {
+        return Err(ParseError::UnterminatedBlock {
+            block_type: exp.to_string(),
+            line: 0,
+        });
+    }
+
+    // Flush trailing plain markdown.
+    if cursor < end {
+        out.extend(parse_plain_markdown(&body[cursor..end])?);
+    }
+
+    Ok((out, false))
+}
+
+fn line_of(src: &str, byte_offset: usize) -> usize {
+    src[..byte_offset.min(src.len())]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1
+}
+
+fn parse_plain_markdown(body: &str) -> Result<Vec<Block>, ParseError> {
+    let mut parser = Parser::new(body);
+    parse_blocks(&mut parser, None)
+}
+
+fn parse_blocks(parser: &mut Parser<'_>, stop: Option<TagEnd>) -> Result<Vec<Block>, ParseError> {
+    let mut blocks = Vec::new();
+    while let Some(event) = parser.next() {
+        if let Event::End(ref end) = event {
+            if Some(end) == stop.as_ref() {
+                return Ok(blocks);
+            }
+        }
+        if let Some(block) = parse_one(event, parser)? {
+            blocks.push(block);
+        }
+    }
+    Ok(blocks)
+}
+
+fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>, ParseError> {
+    Ok(Some(match event {
+        Event::Start(Tag::Paragraph) => {
+            let (text, image) = consume_inline(parser, TagEnd::Paragraph);
+            if let Some(img) = image {
+                img
+            } else {
+                Block {
+                    r#type: "paragraph".into(),
+                    attrs: json!({}),
+                    children: vec![],
+                    text: Some(text),
+                }
+            }
+        }
+        Event::Start(Tag::Heading { level, .. }) => {
+            let lvl = match level {
+                HeadingLevel::H1 => 1,
+                HeadingLevel::H2 => 2,
+                HeadingLevel::H3 => 3,
+                HeadingLevel::H4 => 4,
+                HeadingLevel::H5 => 5,
+                HeadingLevel::H6 => 6,
+            };
+            let (text, _) = consume_inline(parser, TagEnd::Heading(level));
+            Block {
+                r#type: "heading".into(),
+                attrs: json!({ "level": lvl }),
+                children: vec![],
+                text: Some(text),
+            }
+        }
+        Event::Start(Tag::BlockQuote) => {
+            let children = parse_blocks(parser, Some(TagEnd::BlockQuote))?;
+            Block {
+                r#type: "quote".into(),
+                attrs: json!({}),
+                children,
+                text: None,
+            }
+        }
+        Event::Start(Tag::CodeBlock(kind)) => {
+            let lang = match kind {
+                CodeBlockKind::Fenced(l) => l.to_string(),
+                CodeBlockKind::Indented => String::new(),
+            };
+            let mut body = String::new();
+            for ev in parser.by_ref() {
+                match ev {
+                    Event::Text(t) => body.push_str(&t),
+                    Event::End(TagEnd::CodeBlock) => break,
+                    _ => {}
+                }
+            }
+            Block {
+                r#type: "code_block".into(),
+                attrs: if lang.is_empty() {
+                    json!({})
+                } else {
+                    json!({ "lang": lang })
+                },
+                children: vec![],
+                text: Some(body),
+            }
+        }
+        Event::Start(Tag::List(first)) => {
+            let ordered = first.is_some();
+            let children = parse_blocks(parser, Some(TagEnd::List(ordered)))?;
+            Block {
+                r#type: "list".into(),
+                attrs: json!({ "ordered": ordered }),
+                children,
+                text: None,
+            }
+        }
+        Event::Start(Tag::Item) => {
+            let children = parse_blocks(parser, Some(TagEnd::Item))?;
+            Block {
+                r#type: "list_item".into(),
+                attrs: json!({}),
+                children,
+                text: None,
+            }
+        }
+        Event::Html(_)
+        | Event::InlineHtml(_)
+        | Event::Text(_)
+        | Event::Code(_)
+        | Event::SoftBreak
+        | Event::HardBreak
+        | Event::Rule
+        | Event::TaskListMarker(_)
+        | Event::FootnoteReference(_)
+        | Event::Start(_)
+        | Event::End(_) => {
+            return Ok(None);
+        }
+    }))
+}
+
+fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block>) {
+    let mut text = String::new();
+    let mut only_image: Option<Block> = None;
+    let mut other_text = false;
+    while let Some(ev) = parser.next() {
+        match ev {
+            Event::Text(t) => {
+                other_text = other_text || !t.trim().is_empty();
+                text.push_str(&t);
+            }
+            Event::Code(t) => {
+                other_text = true;
+                text.push('`');
+                text.push_str(&t);
+                text.push('`');
+            }
+            Event::SoftBreak => text.push('\n'),
+            Event::HardBreak => text.push('\n'),
+            Event::Start(Tag::Image {
+                dest_url,
+                title: _,
+                id: _,
+                ..
+            }) => {
+                let src = dest_url.to_string();
+                let mut alt = String::new();
+                for inner in parser.by_ref() {
+                    match inner {
+                        Event::Text(t) => alt.push_str(&t),
+                        Event::End(TagEnd::Image) => break,
+                        _ => {}
+                    }
+                }
+                only_image = Some(Block {
+                    r#type: "image".into(),
+                    attrs: json!({ "src": src, "alt": alt }),
+                    children: vec![],
+                    text: None,
+                });
+            }
+            Event::Start(Tag::Link { .. }) => {
+                other_text = true;
+                for inner in parser.by_ref() {
+                    match inner {
+                        Event::Text(t) => text.push_str(&t),
+                        Event::End(TagEnd::Link) => break,
+                        _ => {}
+                    }
+                }
+            }
+            Event::Start(Tag::Emphasis) => text.push('*'),
+            Event::End(TagEnd::Emphasis) => text.push('*'),
+            Event::Start(Tag::Strong) => text.push_str("**"),
+            Event::End(TagEnd::Strong) => text.push_str("**"),
+            Event::End(ref e) if *e == end => break,
+            _ => {}
+        }
+    }
+    if !other_text && only_image.is_some() {
+        (text, only_image)
+    } else {
+        (text, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn types(blocks: &[Block]) -> Vec<&str> {
+        blocks.iter().map(|b| b.r#type.as_str()).collect()
+    }
+
+    #[test]
+    fn parses_front_matter_and_single_paragraph() {
+        let d = parse("---\ntitle: X\n---\nhello\n").unwrap();
+        assert_eq!(d.front_matter.title.as_deref(), Some("X"));
+        assert_eq!(types(&d.blocks), vec!["paragraph"]);
+        assert_eq!(d.blocks[0].text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn parses_heading_level() {
+        let d = parse("## H2 heading\n").unwrap();
+        assert_eq!(d.blocks.len(), 1);
+        assert_eq!(d.blocks[0].r#type, "heading");
+        assert_eq!(d.blocks[0].attrs, json!({"level": 2}));
+        assert_eq!(d.blocks[0].text.as_deref(), Some("H2 heading"));
+    }
+
+    #[test]
+    fn parses_unordered_list() {
+        let d = parse("- one\n- two\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["list"]);
+        assert_eq!(d.blocks[0].attrs, json!({"ordered": false}));
+        assert_eq!(d.blocks[0].children.len(), 2);
+        assert_eq!(d.blocks[0].children[0].r#type, "list_item");
+    }
+
+    #[test]
+    fn parses_fenced_code_block_with_language() {
+        let d = parse("```rust\nfn main() {}\n```\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["code_block"]);
+        assert_eq!(d.blocks[0].attrs, json!({"lang": "rust"}));
+        assert_eq!(d.blocks[0].text.as_deref(), Some("fn main() {}\n"));
+    }
+
+    #[test]
+    fn parses_blockquote_containing_paragraph() {
+        let d = parse("> quoted\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["quote"]);
+        assert_eq!(d.blocks[0].children.len(), 1);
+        assert_eq!(d.blocks[0].children[0].r#type, "paragraph");
+    }
+
+    #[test]
+    fn parses_image_block_from_standalone_markdown_image() {
+        let d = parse("![alt](foo.jpg)\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["image"]);
+        assert_eq!(d.blocks[0].attrs, json!({"src": "foo.jpg", "alt": "alt"}));
+    }
+
+    #[test]
+    fn parses_self_closing_custom_block() {
+        let src = r#"before
+
+<!-- lopress:video {"src":"a.mp4"} -->
+<!-- /lopress:video -->
+
+after
+"#;
+        let d = parse(src).unwrap();
+        let names: Vec<&str> = d.blocks.iter().map(|b| b.r#type.as_str()).collect();
+        assert_eq!(names, vec!["paragraph", "lopress:video", "paragraph"]);
+        assert_eq!(d.blocks[1].attrs, json!({"src":"a.mp4"}));
+        assert!(d.blocks[1].children.is_empty());
+    }
+
+    #[test]
+    fn parses_custom_block_with_inner_markdown() {
+        let src = "<!-- lopress:callout {\"kind\":\"warning\"} -->\nbody para\n<!-- /lopress:callout -->\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.blocks.len(), 1);
+        assert_eq!(d.blocks[0].r#type, "lopress:callout");
+        assert_eq!(d.blocks[0].attrs, json!({"kind": "warning"}));
+        assert_eq!(d.blocks[0].children.len(), 1);
+        assert_eq!(d.blocks[0].children[0].r#type, "paragraph");
+    }
+
+    #[test]
+    fn parses_nested_columns() {
+        let src = concat!(
+            "<!-- lopress:columns {\"count\":2} -->\n",
+            "<!-- lopress:column -->\nleft\n<!-- /lopress:column -->\n",
+            "<!-- lopress:column -->\nright\n<!-- /lopress:column -->\n",
+            "<!-- /lopress:columns -->\n",
+        );
+        let d = parse(src).unwrap();
+        assert_eq!(d.blocks.len(), 1);
+        let cols = &d.blocks[0];
+        assert_eq!(cols.r#type, "lopress:columns");
+        assert_eq!(cols.children.len(), 2);
+        for col in &cols.children {
+            assert_eq!(col.r#type, "lopress:column");
+            assert_eq!(col.children.len(), 1);
+        }
+    }
+
+    #[test]
+    fn mismatched_close_is_error() {
+        let src = "<!-- lopress:a -->\n<!-- /lopress:b -->\n";
+        assert!(parse(src).is_err());
+    }
+
+    #[test]
+    fn unterminated_open_is_error() {
+        let src = "<!-- lopress:a -->\nhi\n";
+        assert!(parse(src).is_err());
+    }
+}

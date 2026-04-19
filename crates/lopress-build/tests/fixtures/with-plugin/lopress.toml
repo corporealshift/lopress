@@ -1,0 +1,6 @@
+[site]
+title = "Plugin Test"
+base_url = "https://example.com"
+
+[plugins]
+enabled = ["callout"]

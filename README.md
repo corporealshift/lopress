@@ -4,7 +4,7 @@ A desktop blog-authoring tool with a Gutenberg-style block editor and a built-in
 
 Point lopress at a directory. Write posts in a block editor. Save. The directory now contains a static website — HTML, CSS, images, optional JavaScript — ready to deploy anywhere.
 
-**Status: pre-implementation.** The design is in [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md). No code yet.
+**Status: CLI works; GUI in progress.** The CLI static site generator (`lopress build`, `lopress new`) is implemented. The egui-based block editor and webview preview are planned for a later phase. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design and [`docs/superpowers/plans/`](docs/superpowers/plans/) for implementation plans.
 
 ## What lopress is
 
@@ -79,12 +79,18 @@ Planned as phase-2 escape hatches (not v1): WASM renderers for blocks whose outp
 - Auto-generated: `feed.xml`, `sitemap.xml`, `robots.txt`, `404.html`, OpenGraph/Twitter card meta tags.
 - Image pipeline: source images in `src/images/` generate responsive WebP variants (default widths 400/800/1600 px), emitted as `<picture>` with `srcset`. Variants cached by source hash.
 
-## Building (once code exists)
+## Usage
+
+Create a new workspace and build it:
 
 ```
 cargo build --release
-./target/release/lopress
+./target/release/lopress new my-site --title "My Blog" --base-url "https://myblog.example.com"
+./target/release/lopress build my-site
+# Open my-site/www/index.html in a browser.
 ```
+
+The `www/` output is a complete static site — copy it to any static host.
 
 ## License
 

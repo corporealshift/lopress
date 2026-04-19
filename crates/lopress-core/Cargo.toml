@@ -1,0 +1,16 @@
+[package]
+name = "lopress-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+pulldown-cmark = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
