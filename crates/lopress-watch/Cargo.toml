@@ -1,0 +1,12 @@
+[package]
+name = "lopress-watch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+notify = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

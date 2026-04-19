@@ -6,6 +6,7 @@ members = [
     "crates/lopress-theme",
     "crates/lopress-assets",
     "crates/lopress-build",
+    "crates/lopress-watch",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 image = "0.25"
 include_dir = "0.7"
+notify = "6"
 proptest = "1"
 pulldown-cmark = "0.10"
 quick-xml = "0.31"
