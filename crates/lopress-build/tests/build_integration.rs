@@ -82,3 +82,20 @@ fn drafts_are_excluded_from_every_output() {
     let index = fs::read_to_string(www.join("index.html")).unwrap();
     assert!(!index.contains("WIP"), "draft appears in index");
 }
+
+#[test]
+fn plugin_block_renders_with_inner_content_and_asset_is_copied() {
+    let (_tmp, root) = copy_fixture("with-plugin");
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www = root.join("www");
+    let html = fs::read_to_string(www.join("posts/demo/index.html")).unwrap();
+    assert!(html.contains("class=\"callout callout-warning\""));
+    assert!(html.contains("Inside"));
+    assert!(html.contains("<p>Before."));
+    assert!(html.contains("<p>After."));
+
+    assert!(www.join("assets/callout/callout.css").exists());
+}
