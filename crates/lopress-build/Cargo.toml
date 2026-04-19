@@ -22,3 +22,4 @@ lopress-assets = { path = "../lopress-assets" }
 [dev-dependencies]
 tempfile = { workspace = true }
 walkdir = { workspace = true }
+image = { workspace = true }

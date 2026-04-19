@@ -99,3 +99,39 @@ fn plugin_block_renders_with_inner_content_and_asset_is_copied() {
 
     assert!(www.join("assets/callout/callout.css").exists());
 }
+
+#[test]
+fn image_pipeline_produces_variants_and_caches_on_rerun() {
+    use image::{Rgb, RgbImage};
+
+    let (_tmp, root) = copy_fixture("with-images");
+    let images = root.join("src/images");
+    fs::create_dir_all(&images).unwrap();
+    let src_img = images.join("photo.jpg");
+    let mut img = RgbImage::new(2000, 1500);
+    for p in img.pixels_mut() {
+        *p = Rgb([120, 180, 255]);
+    }
+    img.save(&src_img).unwrap();
+
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www_images = root.join("www/images");
+    assert!(www_images.join("photo.jpg").exists());
+    assert!(www_images.join("photo.400w.webp").exists());
+    assert!(www_images.join("photo.800w.webp").exists());
+    assert!(www_images.join("photo.1600w.webp").exists());
+
+    let mtime_before = fs::metadata(www_images.join("photo.800w.webp"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    build(&root).unwrap();
+    let mtime_after = fs::metadata(www_images.join("photo.800w.webp"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(mtime_before, mtime_after, "cached variant was regenerated");
+}
