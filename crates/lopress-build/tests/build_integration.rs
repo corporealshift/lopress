@@ -139,3 +139,61 @@ fn image_pipeline_produces_variants_and_caches_on_rerun() {
         .unwrap();
     assert_eq!(mtime_before, mtime_after, "cached variant was regenerated");
 }
+
+#[test]
+fn incremental_skips_unchanged_posts() {
+    let (_tmp, root) = copy_fixture("minimal");
+    let r1 = build(&root).unwrap();
+    assert!(r1.failures.is_empty());
+    let first_rendered = r1.pages_rendered;
+    assert!(first_rendered >= 1);
+
+    let r2 = build(&root).unwrap();
+    assert!(r2.failures.is_empty());
+    assert_eq!(r2.pages_rendered, 0, "second build should render nothing");
+    assert!(r2.pages_skipped >= 1);
+}
+
+#[test]
+fn editing_one_post_rerenders_only_that_post() {
+    let (_tmp, root) = copy_fixture("minimal");
+    build(&root).unwrap();
+
+    let hello = root.join("src/posts/hello.md");
+    let src = fs::read_to_string(&hello).unwrap();
+    fs::write(&hello, format!("{src}\nextra content\n")).unwrap();
+
+    let r2 = build(&root).unwrap();
+    assert_eq!(r2.pages_rendered, 1, "only hello.md should re-render");
+    assert!(r2.pages_skipped >= 1);
+}
+
+#[test]
+fn editing_config_triggers_full_rebuild() {
+    let (_tmp, root) = copy_fixture("minimal");
+    let r1 = build(&root).unwrap();
+    let rendered_first = r1.pages_rendered;
+
+    let cfg = root.join("lopress.toml");
+    let src = fs::read_to_string(&cfg).unwrap();
+    fs::write(&cfg, format!("{src}\n# comment\n")).unwrap();
+
+    let r2 = build(&root).unwrap();
+    assert_eq!(
+        r2.pages_rendered, rendered_first,
+        "config change should rerender everything"
+    );
+    assert_eq!(r2.pages_skipped, 0);
+}
+
+#[test]
+fn deleted_post_is_removed_from_output() {
+    let (_tmp, root) = copy_fixture("minimal");
+    build(&root).unwrap();
+    let out = root.join("www/posts/hello/index.html");
+    assert!(out.exists());
+
+    fs::remove_file(root.join("src/posts/hello.md")).unwrap();
+    build(&root).unwrap();
+    assert!(!out.exists(), "deleted post should be pruned from www/");
+}
