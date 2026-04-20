@@ -39,8 +39,8 @@ fn build_tree(
     let mut out = Vec::new();
     let mut cursor = start;
 
-    while *idx < delims.len() {
-        let next_span = match &delims[*idx] {
+    while let Some(current) = delims.get(*idx).cloned() {
+        let next_span = match &current {
             delimiter::Delim::Open { span, .. } | delimiter::Delim::Close { span, .. } => *span,
         };
         if next_span.0 >= end {
@@ -48,9 +48,15 @@ fn build_tree(
         }
         // Flush plain markdown before this delimiter.
         if cursor < next_span.0 {
-            out.extend(parse_plain_markdown(&body[cursor..next_span.0])?);
+            let slice = body
+                .get(cursor..next_span.0)
+                .ok_or_else(|| ParseError::BlockAttrs {
+                    line: line_of(body, cursor),
+                    message: "invalid body span while flushing markdown".into(),
+                })?;
+            out.extend(parse_plain_markdown(slice)?);
         }
-        match delims[*idx].clone() {
+        match current {
             delimiter::Delim::Open {
                 name,
                 attrs_json,
@@ -72,18 +78,16 @@ fn build_tree(
                     children,
                     text: None,
                 });
-                // Cursor now sits just past the matching close (consumed in inner call).
-                // We need to know where that close ended; easiest: look at the last
-                // delimiter we just consumed.
-                if *idx > 0 {
-                    if let delimiter::Delim::Close { span: cspan, .. } = &delims[*idx - 1] {
-                        cursor = cspan.1;
-                    } else {
-                        cursor = span.1;
-                    }
-                } else {
-                    cursor = span.1;
-                }
+                // Cursor sits just past the matching close consumed in the inner call.
+                // Peek at the just-consumed delimiter to learn where it ended.
+                cursor = idx
+                    .checked_sub(1)
+                    .and_then(|i| delims.get(i))
+                    .and_then(|d| match d {
+                        delimiter::Delim::Close { span: cspan, .. } => Some(cspan.1),
+                        _ => None,
+                    })
+                    .unwrap_or(span.1);
             }
             delimiter::Delim::Close { name, span } => match expected_close {
                 Some(exp) if exp == name => {
@@ -117,14 +121,22 @@ fn build_tree(
 
     // Flush trailing plain markdown.
     if cursor < end {
-        out.extend(parse_plain_markdown(&body[cursor..end])?);
+        let slice = body
+            .get(cursor..end)
+            .ok_or_else(|| ParseError::BlockAttrs {
+                line: line_of(body, cursor),
+                message: "invalid trailing body span".into(),
+            })?;
+        out.extend(parse_plain_markdown(slice)?);
     }
 
     Ok((out, false))
 }
 
 fn line_of(src: &str, byte_offset: usize) -> usize {
-    src[..byte_offset.min(src.len())]
+    let cap = byte_offset.min(src.len());
+    src.get(..cap)
+        .unwrap_or("")
         .bytes()
         .filter(|&b| b == b'\n')
         .count()

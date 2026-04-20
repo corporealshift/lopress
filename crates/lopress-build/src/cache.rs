@@ -103,17 +103,21 @@ pub fn hash_config(workspace: &Workspace) -> Result<String, BuildError> {
 pub fn hash_theme(theme: &ResolvedTheme) -> Result<String, BuildError> {
     let mut items: Vec<(String, Vec<u8>)> = Vec::new();
     if let Some(css_path) = &theme.css_path {
-        let templates_dir = css_path.parent().unwrap().join("templates");
+        let Some(css_parent) = css_path.parent() else {
+            return Err(BuildError::Config(format!(
+                "theme css path has no parent: {}",
+                css_path.display()
+            )));
+        };
+        let templates_dir = css_parent.join("templates");
         if templates_dir.exists() {
             for entry in std::fs::read_dir(&templates_dir)? {
                 let entry = entry?;
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("html") {
-                    let name = entry
-                        .path()
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .into_owned();
+                    let Some(name_os) = entry.path().file_name().map(|s| s.to_owned()) else {
+                        continue;
+                    };
+                    let name = name_os.to_string_lossy().into_owned();
                     let bytes = std::fs::read(entry.path())?;
                     items.push((format!("tpl/{name}"), bytes));
                 }
@@ -154,7 +158,9 @@ pub fn hash_plugins(registry: &PluginRegistry) -> Result<String, BuildError> {
             for entry in walkdir::WalkDir::new(&assets) {
                 let entry = entry.map_err(std::io::Error::other)?;
                 if entry.file_type().is_file() {
-                    let rel = entry.path().strip_prefix(&assets).unwrap();
+                    let Ok(rel) = entry.path().strip_prefix(&assets) else {
+                        continue;
+                    };
                     let key = format!(
                         "{name}/assets/{}",
                         rel.components()

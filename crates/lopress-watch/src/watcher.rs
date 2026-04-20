@@ -106,15 +106,16 @@ fn debounce_loop(
                 deadline = Some(Instant::now() + DEBOUNCE);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let (Some(d), Some(cs)) = (deadline, pending.as_ref()) {
-                    if Instant::now() >= d && !cs.is_empty() {
-                        let cs = pending.take().unwrap();
+                let Some(d) = deadline else { continue };
+                let Some(cs) = pending.as_ref() else { continue };
+                if cs.is_empty() {
+                    pending = None;
+                    deadline = None;
+                } else if Instant::now() >= d {
+                    if let Some(cs) = pending.take() {
                         on_change(cs);
-                        deadline = None;
-                    } else if cs.is_empty() {
-                        pending = None;
-                        deadline = None;
                     }
+                    deadline = None;
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,

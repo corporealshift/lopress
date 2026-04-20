@@ -18,7 +18,9 @@ pub fn split(input: &str) -> Result<(FrontMatter, &str), ParseError> {
         return Ok((FrontMatter::default(), input));
     };
 
-    let after_open = &trimmed[open_len..];
+    let after_open = trimmed
+        .get(open_len..)
+        .ok_or_else(|| ParseError::FrontMatter("truncated front-matter opener".into()))?;
     let mut offset = 0usize;
     let mut close: Option<(usize, usize)> = None;
     for segment in after_open.split_inclusive('\n') {
@@ -32,18 +34,16 @@ pub fn split(input: &str) -> Result<(FrontMatter, &str), ParseError> {
     let (close_offset, close_segment_len) =
         close.ok_or_else(|| ParseError::FrontMatter("unterminated front-matter".into()))?;
 
-    let yaml_src = &after_open[..close_offset];
+    let yaml_src = after_open
+        .get(..close_offset)
+        .ok_or_else(|| ParseError::FrontMatter("invalid front-matter body span".into()))?;
     let fm: FrontMatter = if yaml_src.trim().is_empty() {
         FrontMatter::default()
     } else {
         serde_yaml::from_str(yaml_src)?
     };
     let body_start = open_len + close_offset + close_segment_len;
-    let body = if body_start >= trimmed.len() {
-        ""
-    } else {
-        &trimmed[body_start..]
-    };
+    let body = trimmed.get(body_start..).unwrap_or("");
     Ok((fm, body))
 }
 

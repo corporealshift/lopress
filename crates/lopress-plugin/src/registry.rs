@@ -34,13 +34,13 @@ impl PluginRegistry {
 
     pub fn block(&self, name: &str) -> Option<(&LoadedPlugin, &BlockDecl)> {
         let (pi, bi) = *self.block_index.get(name)?;
-        let plugin = &self.plugins[pi];
-        let decl = &plugin.manifest.blocks[bi];
+        let plugin = self.plugins.get(pi)?;
+        let decl = plugin.manifest.blocks.get(bi)?;
         Some((plugin, decl))
     }
 
     pub fn theme(&self, name: &str) -> Option<&LoadedPlugin> {
         let pi = *self.theme_index.get(name)?;
-        Some(&self.plugins[pi])
+        self.plugins.get(pi)
     }
 }

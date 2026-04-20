@@ -226,11 +226,20 @@ fn theme_templates(
 ) -> Result<Vec<(String, String)>, BuildError> {
     let mut out = Vec::new();
     if let Some(css_path) = &theme.css_path {
-        let templates_dir = css_path.parent().unwrap().join("templates");
+        let Some(css_parent) = css_path.parent() else {
+            return Err(BuildError::Config(format!(
+                "theme css path has no parent: {}",
+                css_path.display()
+            )));
+        };
+        let templates_dir = css_parent.join("templates");
         for entry in std::fs::read_dir(templates_dir)? {
             let entry = entry?;
             if entry.path().extension().and_then(|s| s.to_str()) == Some("html") {
-                let name = entry.path().file_name().unwrap().to_string_lossy().into();
+                let Some(name_os) = entry.path().file_name().map(|s| s.to_owned()) else {
+                    continue;
+                };
+                let name = name_os.to_string_lossy().into_owned();
                 let contents = std::fs::read_to_string(entry.path())?;
                 out.push((name, contents));
             }
@@ -254,7 +263,9 @@ fn theme_templates(
 
 fn write_theme_css(ws: &Workspace, theme: &lopress_theme::ResolvedTheme) -> Result<(), BuildError> {
     let target = ws.www_dir().join("assets").join("theme.css");
-    std::fs::create_dir_all(target.parent().unwrap())?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(target, &theme.css_content)?;
     Ok(())
 }
@@ -274,7 +285,9 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), BuildError> {
     std::fs::create_dir_all(to)?;
     for entry in walkdir::WalkDir::new(from) {
         let entry = entry.map_err(std::io::Error::other)?;
-        let rel = entry.path().strip_prefix(from).unwrap();
+        let Ok(rel) = entry.path().strip_prefix(from) else {
+            continue;
+        };
         let dst = to.join(rel);
         if entry.file_type().is_dir() {
             std::fs::create_dir_all(&dst)?;

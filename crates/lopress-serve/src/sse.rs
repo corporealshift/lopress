@@ -1,11 +1,18 @@
 use std::io::Write;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Default)]
 pub struct Subscribers {
     inner: Arc<Mutex<Vec<TcpStream>>>,
+}
+
+fn lock_subscribers(m: &Mutex<Vec<TcpStream>>) -> MutexGuard<'_, Vec<TcpStream>> {
+    // A poisoned mutex here just means a previous write panicked mid-send;
+    // the Vec is still coherent, so recover the guard rather than propagating
+    // the panic to every subsequent SSE client.
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Subscribers {
@@ -20,12 +27,12 @@ impl Subscribers {
              retry: 1000\n\n"
         )?;
         stream.flush()?;
-        self.inner.lock().unwrap().push(stream);
+        lock_subscribers(&self.inner).push(stream);
         Ok(())
     }
 
     pub fn broadcast_reload(&self) {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_subscribers(&self.inner);
         guard.retain_mut(|s| {
             write!(s, "event: reload\ndata: {{}}\n\n")
                 .and_then(|_| s.flush())
@@ -42,7 +49,7 @@ impl Subscribers {
                     continue;
                 }
                 last = Instant::now();
-                let mut guard = self.inner.lock().unwrap();
+                let mut guard = lock_subscribers(&self.inner);
                 guard.retain_mut(|s| write!(s, ":ping\n\n").and_then(|_| s.flush()).is_ok());
             }
         })
@@ -50,7 +57,7 @@ impl Subscribers {
 
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.inner.lock().unwrap().len()
+        lock_subscribers(&self.inner).len()
     }
 }
 

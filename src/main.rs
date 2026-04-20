@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(
@@ -41,7 +42,7 @@ enum Command {
     },
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Command::Build { workspace } => {
@@ -54,16 +55,20 @@ fn main() -> anyhow::Result<()> {
             for f in &report.failures {
                 eprintln!("  FAIL {}: {}", f.path.display(), f.message);
             }
-            if !report.failures.is_empty() {
-                std::process::exit(1);
+            if report.failures.is_empty() {
+                Ok(ExitCode::SUCCESS)
+            } else {
+                Ok(ExitCode::FAILURE)
             }
-            Ok(())
         }
         Command::New {
             dir,
             title,
             base_url,
-        } => scaffold::new_site(&dir, &title, &base_url),
+        } => {
+            scaffold::new_site(&dir, &title, &base_url)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Serve {
             workspace,
             bind,
@@ -76,7 +81,7 @@ fn main() -> anyhow::Result<()> {
                 port,
                 open_browser: !no_open,
             })?;
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
@@ -85,7 +90,7 @@ mod scaffold {
     use anyhow::{bail, Result};
     use std::path::Path;
 
-    pub fn new_site(dir: &Path, title: &str, base_url: &str) -> Result<()> {
+    pub(crate) fn new_site(dir: &Path, title: &str, base_url: &str) -> Result<()> {
         if dir.exists() {
             let non_empty = std::fs::read_dir(dir)?.next().is_some();
             if non_empty {

@@ -79,7 +79,9 @@ pub fn write_response(
 #[allow(dead_code)]
 pub fn drain(stream: &TcpStream) {
     let mut buf = [0u8; 1024];
-    let mut s = stream.try_clone().unwrap();
+    let Ok(mut s) = stream.try_clone() else {
+        return;
+    };
     let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(50)));
     while s.read(&mut buf).unwrap_or(0) > 0 {}
 }

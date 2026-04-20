@@ -11,16 +11,17 @@ pub fn inject_reload_script(html: &[u8]) -> Vec<u8> {
         Err(_) => return html.to_vec(),
     };
     if let Some(idx) = s.rfind("</body>") {
-        let mut out = String::with_capacity(s.len() + RELOAD_SCRIPT.len());
-        out.push_str(&s[..idx]);
-        out.push_str(RELOAD_SCRIPT);
-        out.push_str(&s[idx..]);
-        out.into_bytes()
-    } else {
-        let mut v = html.to_vec();
-        v.extend_from_slice(RELOAD_SCRIPT.as_bytes());
-        v
+        if let (Some(head), Some(tail)) = (s.get(..idx), s.get(idx..)) {
+            let mut out = String::with_capacity(s.len() + RELOAD_SCRIPT.len());
+            out.push_str(head);
+            out.push_str(RELOAD_SCRIPT);
+            out.push_str(tail);
+            return out.into_bytes();
+        }
     }
+    let mut v = html.to_vec();
+    v.extend_from_slice(RELOAD_SCRIPT.as_bytes());
+    v
 }
 
 #[cfg(test)]
