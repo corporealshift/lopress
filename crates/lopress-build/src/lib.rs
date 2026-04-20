@@ -12,6 +12,6 @@ pub mod sitemap;
 pub use build::{build, BuildReport};
 pub use cache::{BuildCache, PageEntry};
 pub use error::{BuildError, PageFailure};
-pub use pages::{discover, post_summaries, render_all, DiscoveredPost};
+pub use pages::{discover, post_summaries, render_all, DiscoveredPost, RenderStats};
 pub use render::render_body;
 pub use site::{SiteConfig, Workspace};

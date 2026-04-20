@@ -1,3 +1,4 @@
+use crate::cache::{self, BuildCache};
 use crate::error::{BuildError, PageFailure};
 use crate::feed;
 use crate::not_found;
@@ -13,12 +14,13 @@ use tera::Tera;
 
 pub struct BuildReport {
     pub pages_written: usize,
+    pub pages_rendered: usize,
+    pub pages_skipped: usize,
     pub failures: Vec<PageFailure>,
 }
 
 pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let ws = Workspace::load(workspace)?;
-    std::fs::create_dir_all(ws.www_dir())?;
 
     // Plugins
     let registry = load_dir(
@@ -32,6 +34,37 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
 
     // Theme
     let theme = resolve(&registry, &ws.config.site.theme)?;
+
+    // Load cache and compute global hashes
+    let mut build_cache = BuildCache::load(&ws.cache_path())?;
+    let cfg_hash = cache::hash_config(&ws)?;
+    let theme_hash = cache::hash_theme(&theme)?;
+    let plugins_hash = cache::hash_plugins(&registry)?;
+
+    let force_full = build_cache.config_hash != cfg_hash
+        || build_cache.theme_hash != theme_hash
+        || build_cache.plugins_hash != plugins_hash;
+
+    // On a forced full rebuild: wipe page cache entries and clear www/
+    if force_full {
+        build_cache.pages.clear();
+        if ws.www_dir().exists() {
+            for entry in std::fs::read_dir(ws.www_dir())? {
+                let entry = entry?;
+                let name = entry.file_name();
+                if name == ".lopress-image-cache.json" {
+                    continue;
+                }
+                let p = entry.path();
+                if p.is_dir() {
+                    std::fs::remove_dir_all(&p)?;
+                } else {
+                    std::fs::remove_file(&p)?;
+                }
+            }
+        }
+        std::fs::create_dir_all(ws.www_dir())?;
+    }
 
     // Build a shared Tera that knows every theme template and every plugin
     // block template, namespaced by plugin name.
@@ -56,6 +89,20 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let (pages_src, page_failures) = pages::discover(&ws.pages_dir(), "page")?;
     failures.extend(page_failures);
 
+    // Render posts and pages (cache-aware)
+    let stats = pages::render_all(
+        &ws,
+        &registry,
+        &theme.engine,
+        &tera,
+        &posts,
+        &pages_src,
+        &mut build_cache,
+        force_full,
+    )?;
+    failures.extend(stats.failures.iter().cloned());
+
+    // Build summaries for aggregate pages
     let summaries = pages::post_summaries(&posts, &ws.config.site.base_url);
 
     let site_ctx = SiteCtx {
@@ -75,33 +122,57 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         posts: summaries.clone(),
     };
 
-    let render_failures =
-        pages::render_all(&ws, &registry, &theme.engine, &tera, &posts, &pages_src)?;
-    failures.extend(render_failures);
+    // Regenerate aggregate pages only when content changed or forced
+    let regen_aggregates = force_full || stats.post_set_changed;
+    let tag_map = pages::build_tag_map(&summaries);
+    let tag_count = tag_map.len();
 
-    feed::write(&ws.www_dir(), &site_ctx)?;
-    let page_urls: Vec<String> = pages_src
-        .iter()
-        .map(|p| {
-            let slug = &p.slug;
-            format!("/{slug}/")
-        })
-        .collect();
-    let tag_urls: Vec<String> = tag_urls_for(&summaries);
-    sitemap::write(&ws.www_dir(), &site_ctx, &page_urls, &tag_urls)?;
-    robots::write(&ws.www_dir(), &ws.config)?;
-    not_found::write(&ws.www_dir(), &site_ctx, &theme.engine)?;
+    if regen_aggregates {
+        feed::write(&ws.www_dir(), &site_ctx)?;
+        let page_urls: Vec<String> = pages_src
+            .iter()
+            .map(|p| {
+                let slug = &p.slug;
+                format!("/{slug}/")
+            })
+            .collect();
+        let tag_urls: Vec<String> = tag_urls_for(&summaries);
+        sitemap::write(&ws.www_dir(), &site_ctx, &page_urls, &tag_urls)?;
+        robots::write(&ws.www_dir(), &ws.config)?;
+        not_found::write(&ws.www_dir(), &site_ctx, &theme.engine)?;
 
-    write_theme_css(&ws, &theme)?;
+        if let Err(e) = pages::render_index(&ws.www_dir(), &site_ctx, &theme.engine) {
+            failures.push(PageFailure {
+                path: ws.www_dir().join("index.html"),
+                message: e.to_string(),
+            });
+        }
 
-    for plugin in &registry.plugins {
-        let assets = plugin.root.join("assets");
-        if assets.exists() {
-            let target = ws.www_dir().join("assets").join(&plugin.manifest.name);
-            copy_dir(&assets, &target)?;
+        for (tag, tag_posts) in &tag_map {
+            if let Err(e) =
+                pages::render_tag(&ws.www_dir(), &site_ctx, tag, tag_posts, &theme.engine)
+            {
+                failures.push(PageFailure {
+                    path: ws.www_dir().join(format!("tags/{tag}/index.html")),
+                    message: e.to_string(),
+                });
+            }
         }
     }
 
+    // Theme assets: only on full rebuild
+    if force_full {
+        write_theme_css(&ws, &theme)?;
+        for plugin in &registry.plugins {
+            let assets = plugin.root.join("assets");
+            if assets.exists() {
+                let target = ws.www_dir().join("assets").join(&plugin.manifest.name);
+                copy_dir(&assets, &target)?;
+            }
+        }
+    }
+
+    // Image pipeline (always run — has its own per-file cache)
     let mut img_cache = VariantCache::load(&ws.www_dir().join(".lopress-image-cache.json"))?;
     let spec = VariantSpec {
         widths: ws.config.build.image_variants.clone(),
@@ -125,13 +196,26 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     }
     img_cache.save(&ws.www_dir().join(".lopress-image-cache.json"))?;
 
-    let pages_written = posts.iter().filter(|p| !p.doc.front_matter.draft).count()
-        + pages_src.len()
-        + tag_urls.len()
-        + 1;
+    // Update and persist cache
+    build_cache.config_hash = cfg_hash;
+    build_cache.theme_hash = theme_hash;
+    build_cache.plugins_hash = plugins_hash;
+    build_cache.save(&ws.cache_path())?;
+
+    // Count pages_written: non-draft content pages + tag archives + index
+    let pages_written = build_cache
+        .pages
+        .values()
+        .filter(|e| !e.is_draft)
+        .map(|e| e.outputs.len())
+        .sum::<usize>()
+        + tag_count
+        + 1; // index.html
 
     Ok(BuildReport {
         pages_written,
+        pages_rendered: stats.pages_rendered,
+        pages_skipped: stats.pages_skipped,
         failures,
     })
 }

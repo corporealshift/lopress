@@ -1,10 +1,11 @@
+use crate::cache::{self, PageEntry};
 use crate::error::{BuildError, PageFailure};
 use crate::render::render_body;
 use crate::site::Workspace;
 use lopress_core::{parse, Document};
 use lopress_plugin::PluginRegistry;
 use lopress_theme::{PageCtx, PageKind, PostSummary, RenderContext, SiteCtx, ThemeEngine};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -12,6 +13,13 @@ pub struct DiscoveredPost {
     pub source_path: PathBuf,
     pub slug: String,
     pub doc: Document,
+}
+
+pub struct RenderStats {
+    pub pages_rendered: usize,
+    pub pages_skipped: usize,
+    pub post_set_changed: bool,
+    pub failures: Vec<PageFailure>,
 }
 
 /// Walk `dir` and return all `*.md` files paired with their parsed Document
@@ -85,8 +93,9 @@ pub fn post_summaries(posts: &[DiscoveredPost], _base_url: &str) -> Vec<PostSumm
     out
 }
 
-/// Render every post/page into www/ via the theme engine. Returns page
-/// failures; successful pages have already been written.
+/// Render every post/page into www/ via the theme engine, consulting the
+/// cache to skip unchanged files. Returns per-file stats.
+#[allow(clippy::too_many_arguments)]
 pub fn render_all(
     workspace: &Workspace,
     registry: &PluginRegistry,
@@ -94,7 +103,9 @@ pub fn render_all(
     tera_shared: &tera::Tera,
     posts: &[DiscoveredPost],
     pages: &[DiscoveredPost],
-) -> Result<Vec<PageFailure>, BuildError> {
+    cache: &mut crate::cache::BuildCache,
+    force_full: bool,
+) -> Result<RenderStats, BuildError> {
     let www = workspace.www_dir();
     std::fs::create_dir_all(&www)?;
     let summaries = post_summaries(posts, &workspace.config.site.base_url);
@@ -117,54 +128,152 @@ pub fn render_all(
     };
 
     let mut failures = Vec::new();
+    let mut pages_rendered: usize = 0;
+    let mut pages_skipped: usize = 0;
 
+    // Build the set of live keys (all posts + pages, including drafts) for
+    // orphan detection.
+    let mut live_keys: BTreeSet<String> = BTreeSet::new();
+
+    // --- Posts ---
     for p in posts {
-        if p.doc.front_matter.draft {
+        let key = cache::rel_key(&workspace.root, &p.source_path);
+        live_keys.insert(key.clone());
+
+        let is_draft = p.doc.front_matter.draft;
+        let source_hash = cache::hash_file(&p.source_path)?;
+        let outputs = vec![format!("posts/{}/index.html", p.slug)];
+
+        if is_draft {
+            // Record draft entry but do not render body.
+            cache.pages.insert(
+                key,
+                PageEntry {
+                    source_hash,
+                    outputs: vec![],
+                    tags: p.doc.front_matter.tags.clone(),
+                    is_draft: true,
+                    title: p.doc.front_matter.title.clone(),
+                    date: p.doc.front_matter.date.map(|d| d.to_string()),
+                },
+            );
             continue;
         }
-        if let Err(e) = render_one_post(&www, &site_ctx, p, registry, theme, tera_shared) {
-            failures.push(PageFailure {
-                path: p.source_path.clone(),
-                message: e.to_string(),
+
+        let should_skip = !force_full
+            && cache.pages.get(&key).is_some_and(|e| {
+                e.source_hash == source_hash && e.outputs.iter().all(|o| www.join(o).exists())
             });
+
+        if should_skip {
+            pages_skipped += 1;
+        } else {
+            match render_one_post(&www, &site_ctx, p, registry, theme, tera_shared) {
+                Ok(()) => {
+                    cache.pages.insert(
+                        key,
+                        PageEntry {
+                            source_hash,
+                            outputs,
+                            tags: p.doc.front_matter.tags.clone(),
+                            is_draft: false,
+                            title: p.doc.front_matter.title.clone(),
+                            date: p.doc.front_matter.date.map(|d| d.to_string()),
+                        },
+                    );
+                    pages_rendered += 1;
+                }
+                Err(e) => {
+                    failures.push(PageFailure {
+                        path: p.source_path.clone(),
+                        message: e.to_string(),
+                    });
+                }
+            }
         }
     }
 
+    // --- Pages ---
     for p in pages {
-        if let Err(e) = render_one_page(&www, &site_ctx, p, registry, theme, tera_shared) {
-            failures.push(PageFailure {
-                path: p.source_path.clone(),
-                message: e.to_string(),
+        let key = cache::rel_key(&workspace.root, &p.source_path);
+        live_keys.insert(key.clone());
+
+        let source_hash = cache::hash_file(&p.source_path)?;
+        let outputs = vec![format!("{}/index.html", p.slug)];
+
+        let should_skip = !force_full
+            && cache.pages.get(&key).is_some_and(|e| {
+                e.source_hash == source_hash && e.outputs.iter().all(|o| www.join(o).exists())
             });
+
+        if should_skip {
+            pages_skipped += 1;
+        } else {
+            match render_one_page(&www, &site_ctx, p, registry, theme, tera_shared) {
+                Ok(()) => {
+                    cache.pages.insert(
+                        key,
+                        PageEntry {
+                            source_hash,
+                            outputs,
+                            tags: p.doc.front_matter.tags.clone(),
+                            is_draft: false,
+                            title: p.doc.front_matter.title.clone(),
+                            date: p.doc.front_matter.date.map(|d| d.to_string()),
+                        },
+                    );
+                    pages_rendered += 1;
+                }
+                Err(e) => {
+                    failures.push(PageFailure {
+                        path: p.source_path.clone(),
+                        message: e.to_string(),
+                    });
+                }
+            }
         }
     }
 
-    if let Err(e) = render_index(&www, &site_ctx, theme) {
-        failures.push(PageFailure {
-            path: www.join("index.html"),
-            message: e.to_string(),
-        });
-    }
+    let pruned_anything = prune_orphans(workspace, cache, &live_keys)?;
+    let post_set_changed = pages_rendered > 0 || pruned_anything;
 
-    let mut by_tag: BTreeMap<String, Vec<PostSummary>> = BTreeMap::new();
-    for s in &summaries {
-        for t in &s.tags {
-            by_tag.entry(t.clone()).or_default().push(s.clone());
-        }
-    }
-    for (tag, tag_posts) in by_tag {
-        if let Err(e) = render_tag(&www, &site_ctx, &tag, &tag_posts, theme) {
-            failures.push(PageFailure {
-                path: www.join(format!("tags/{tag}/index.html")),
-                message: e.to_string(),
-            });
-        }
-    }
-
-    Ok(failures)
+    Ok(RenderStats {
+        pages_rendered,
+        pages_skipped,
+        post_set_changed,
+        failures,
+    })
 }
 
-fn render_one_post(
+/// Remove cache entries (and their output files) for source files that no
+/// longer exist. Returns `true` if anything was pruned.
+pub fn prune_orphans(
+    workspace: &Workspace,
+    cache: &mut crate::cache::BuildCache,
+    live_keys: &BTreeSet<String>,
+) -> Result<bool, BuildError> {
+    let stale: Vec<String> = cache
+        .pages
+        .keys()
+        .filter(|k| !live_keys.contains(*k))
+        .cloned()
+        .collect();
+    let changed = !stale.is_empty();
+    for key in stale {
+        if let Some(entry) = cache.pages.remove(&key) {
+            for output in &entry.outputs {
+                let p = workspace.www_dir().join(output);
+                let _ = std::fs::remove_file(&p);
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            }
+        }
+    }
+    Ok(changed)
+}
+
+pub fn render_one_post(
     www: &Path,
     site: &SiteCtx,
     post: &DiscoveredPost,
@@ -199,7 +308,7 @@ fn render_one_post(
     write_page(www, &format!("posts/{slug}"), &html)
 }
 
-fn render_one_page(
+pub fn render_one_page(
     www: &Path,
     site: &SiteCtx,
     p: &DiscoveredPost,
@@ -234,7 +343,7 @@ fn render_one_page(
     write_page(www, slug, &html)
 }
 
-fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(), BuildError> {
+pub fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(), BuildError> {
     let page = PageCtx {
         kind: PageKind::Index,
         title: site.title.clone(),
@@ -254,7 +363,7 @@ fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(), B
     Ok(())
 }
 
-fn render_tag(
+pub fn render_tag(
     www: &Path,
     site: &SiteCtx,
     tag: &str,
@@ -278,6 +387,17 @@ fn render_tag(
     };
     let html = theme.render("tag.html", &RenderContext { site, page: &page })?;
     write_page(www, &format!("tags/{tag}"), &html)
+}
+
+/// Build a tag → posts map from a summaries slice.
+pub fn build_tag_map(summaries: &[PostSummary]) -> BTreeMap<String, Vec<PostSummary>> {
+    let mut by_tag: BTreeMap<String, Vec<PostSummary>> = BTreeMap::new();
+    for s in summaries {
+        for t in &s.tags {
+            by_tag.entry(t.clone()).or_default().push(s.clone());
+        }
+    }
+    by_tag
 }
 
 fn write_page(www: &Path, rel_dir: &str, html: &str) -> Result<(), BuildError> {
