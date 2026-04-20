@@ -1072,6 +1072,7 @@ dependencies = [
  "anyhow",
  "clap",
  "lopress-build",
+ "lopress-serve",
 ]
 
 [[package]]
@@ -1092,6 +1093,7 @@ name = "lopress-build"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "chrono",
  "image",
  "lopress-assets",
@@ -1131,6 +1133,16 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "walkdir",
+]
+
+[[package]]
+name = "lopress-serve"
+version = "0.1.0"
+dependencies = [
+ "lopress-build",
+ "lopress-watch",
+ "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -28,6 +28,17 @@ enum Command {
         #[arg(long, default_value = "https://example.com")]
         base_url: String,
     },
+    /// Start a dev server with live reload.
+    Serve {
+        /// Workspace directory.
+        workspace: PathBuf,
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -53,6 +64,20 @@ fn main() -> anyhow::Result<()> {
             title,
             base_url,
         } => scaffold::new_site(&dir, &title, &base_url),
+        Command::Serve {
+            workspace,
+            bind,
+            port,
+            no_open,
+        } => {
+            lopress_serve::serve(lopress_serve::ServeOptions {
+                workspace,
+                bind,
+                port,
+                open_browser: !no_open,
+            })?;
+            Ok(())
+        }
     }
 }
 

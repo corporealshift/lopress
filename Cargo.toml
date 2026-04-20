@@ -52,3 +52,4 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 clap = { workspace = true }
 lopress-build = { path = "crates/lopress-build" }
+lopress-serve = { path = "crates/lopress-serve" }
