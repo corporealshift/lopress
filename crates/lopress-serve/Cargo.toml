@@ -11,3 +11,6 @@ lopress-watch = { path = "../lopress-watch" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

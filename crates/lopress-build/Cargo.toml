@@ -24,3 +24,6 @@ lopress-assets = { path = "../lopress-assets" }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
 image = { workspace = true }
+
+[lints]
+workspace = true

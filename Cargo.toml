@@ -17,6 +17,36 @@ rust-version = "1.85"
 license = "TBD"
 repository = "https://github.com/kdiedrick/lopress"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Panic-avoidance: make sudden termination paths explicit.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+exit = "deny"
+dbg_macro = "deny"
+integer_division = "deny"
+
+# Numeric cast discipline: prefer From / TryFrom over `as`.
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_lossless = "deny"
+
+# Docs on public fallibility. missing_errors_doc is a dedicated future docs
+# pass — demoted for now so it doesn't block the real bug-catching lints.
+missing_panics_doc = "warn"
+missing_errors_doc = "allow"
+
 [workspace.dependencies]
 anyhow = "1"
 blake3 = "1.5"
@@ -53,3 +83,6 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 lopress-build = { path = "crates/lopress-build" }
 lopress-serve = { path = "crates/lopress-serve" }
+
+[lints]
+workspace = true
