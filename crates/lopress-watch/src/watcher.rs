@@ -33,7 +33,14 @@ impl Watcher {
         workspace: &Path,
         mut on_change: impl FnMut(ChangeSet) + Send + 'static,
     ) -> Result<Self, WatchError> {
-        let workspace = workspace.to_path_buf();
+        // Canonicalize so classify() can match event paths from notify,
+        // which on macOS resolves symlinks like /var -> /private/var and on
+        // Windows returns \\?\-prefixed paths. Without this, every event
+        // fails strip_prefix against a non-canonical workspace and gets
+        // bucketed as Ignored.
+        let workspace = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.to_path_buf());
         let (tx, rx) = mpsc::channel::<Event>();
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
