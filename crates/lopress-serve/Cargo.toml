@@ -1,0 +1,13 @@
+[package]
+name = "lopress-serve"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+lopress-build = { path = "../lopress-build" }
+lopress-watch = { path = "../lopress-watch" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
