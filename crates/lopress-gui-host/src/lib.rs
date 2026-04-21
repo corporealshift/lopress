@@ -19,3 +19,6 @@
 pub mod document;
 pub mod error;
 pub mod session;
+
+pub use document::LoadedDocument;
+pub use error::{LoadError, OpenError, SaveError};
