@@ -14,7 +14,6 @@ pub enum LoadError {
     Io(#[from] std::io::Error),
     #[error("parse error at line {line}: {message}")]
     Parse {
-        #[allow(dead_code)]
         raw: String,
         line: u32,
         message: String,
