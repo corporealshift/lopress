@@ -25,4 +25,4 @@ pub mod server;
 pub mod sse;
 
 pub use error::ServeError;
-pub use server::{serve, ServeOptions};
+pub use server::{serve, serve_in_background, ServeOptions, ServerHandle};

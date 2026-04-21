@@ -140,3 +140,62 @@ fn open_url(url: &str) {
         .args(["/C", "start", "", url])
         .spawn();
 }
+
+/// A running background HTTP+SSE server. Drop to stop the ping thread;
+/// the accept thread runs until process exit.
+pub struct ServerHandle {
+    /// The bound URL, e.g. `"http://127.0.0.1:8080"`.
+    pub url: String,
+    subscribers: Subscribers,
+}
+
+impl ServerHandle {
+    /// Broadcast a reload event to all connected SSE clients.
+    pub fn broadcast_reload(&self) {
+        self.subscribers.broadcast_reload();
+    }
+}
+
+/// Bind a static file server for `www_dir` on a background thread.
+/// Does **not** run an initial build — the caller is responsible.
+/// Port 0 selects an ephemeral port; the resolved URL is in `ServerHandle::url`.
+///
+/// # Errors
+/// Returns `ServeError::Bind` if the port is already in use.
+pub fn serve_in_background(
+    www_dir: std::path::PathBuf,
+    bind: String,
+    port: u16,
+) -> Result<ServerHandle, ServeError> {
+    let bind_addr = format!("{bind}:{port}");
+    let listener = TcpListener::bind(&bind_addr).map_err(|source| ServeError::Bind {
+        addr: bind_addr.clone(),
+        source,
+    })?;
+    let local = listener.local_addr().map_err(|source| ServeError::Bind {
+        addr: bind_addr,
+        source,
+    })?;
+    let url = format!("http://{local}");
+
+    let subs = Subscribers::default();
+    let _ping = subs.clone().ping_loop();
+
+    let www = Arc::new(www_dir);
+    let subs_accept = subs.clone();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(stream) = conn else { continue };
+            let www = Arc::clone(&www);
+            let subs = subs_accept.clone();
+            std::thread::spawn(move || {
+                let _ = handle_conn(stream, &www, &subs);
+            });
+        }
+    });
+
+    Ok(ServerHandle {
+        url,
+        subscribers: subs,
+    })
+}
