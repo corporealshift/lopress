@@ -1,1 +1,295 @@
-// stub
+use crate::document::LoadedDocument;
+use crate::error::{LoadError, OpenError, SaveError};
+use lopress_build::Workspace;
+use lopress_core::{parse, serialize, Document};
+use lopress_serve::{serve_in_background, ServerHandle};
+use lopress_watch::{ChangeSet, Watcher};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+// ── Public types ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceSummary {
+    pub root: PathBuf,
+    pub name: String,
+    pub posts: Vec<DocumentRef>,
+    pub pages: Vec<DocumentRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DocumentRef {
+    pub path: PathBuf,
+    pub title: String,
+    pub is_draft: bool,
+    pub has_parse_error: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum BuildStatus {
+    Idle,
+    Building,
+    Ok {
+        pages_rendered: usize,
+        pages_skipped: usize,
+        duration_ms: u64,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ServeStatus {
+    Unavailable { reason: String },
+    Listening { url: String },
+}
+
+// ── Session ──────────────────────────────────────────────────────────────────
+
+pub struct Session {
+    workspace: Arc<Workspace>,
+    summary: Arc<Mutex<WorkspaceSummary>>,
+    build_status: Arc<Mutex<BuildStatus>>,
+    serve_status: ServeStatus,
+    _server: Option<Arc<ServerHandle>>,
+    _watcher: Option<Watcher>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Session {
+    /// Open a workspace. Runs an initial build and starts watch + serve.
+    ///
+    /// # Errors
+    /// Returns `OpenError` if `lopress.toml` is missing or unparseable.
+    pub fn open(workspace_root: &Path) -> Result<Self, OpenError> {
+        // Validate
+        let workspace = Workspace::load(workspace_root)
+            .map_err(|e| OpenError::InvalidWorkspace(e.to_string()))?;
+        let workspace = Arc::new(workspace);
+
+        // Initial build
+        let build_status = Arc::new(Mutex::new(BuildStatus::Idle));
+        {
+            let t0 = std::time::Instant::now();
+            match lopress_build::build(workspace_root) {
+                Ok(r) => {
+                    *lock(&build_status) = BuildStatus::Ok {
+                        pages_rendered: r.pages_rendered,
+                        pages_skipped: r.pages_skipped,
+                        duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    };
+                }
+                Err(e) => {
+                    *lock(&build_status) = BuildStatus::Failed {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        }
+
+        // Serve (non-fatal if bind fails — try 8080 then ephemeral)
+        let www_dir = workspace.www_dir();
+        std::fs::create_dir_all(&www_dir).ok();
+        let (server_arc, serve_status) =
+            match serve_in_background(www_dir.clone(), "127.0.0.1".into(), 8080) {
+                Ok(h) => {
+                    let url = h.url.clone();
+                    (Some(Arc::new(h)), ServeStatus::Listening { url })
+                }
+                Err(_) => match serve_in_background(www_dir, "127.0.0.1".into(), 0) {
+                    Ok(h) => {
+                        let url = h.url.clone();
+                        (Some(Arc::new(h)), ServeStatus::Listening { url })
+                    }
+                    Err(e) => (
+                        None,
+                        ServeStatus::Unavailable {
+                            reason: e.to_string(),
+                        },
+                    ),
+                },
+            };
+
+        // Scan posts/pages
+        let summary = Arc::new(Mutex::new(scan_workspace(&workspace)));
+
+        // Watcher: on change, rebuild and broadcast
+        let ws_root = workspace_root.to_path_buf();
+        let build_status_w = Arc::clone(&build_status);
+        let summary_w = Arc::clone(&summary);
+        let workspace_w = Arc::clone(&workspace);
+        let server_for_watcher = server_arc.clone();
+
+        let watcher = Watcher::spawn(workspace_root, move |_cs: ChangeSet| {
+            *lock(&build_status_w) = BuildStatus::Building;
+            let t0 = std::time::Instant::now();
+            match lopress_build::build(&ws_root) {
+                Ok(r) => {
+                    *lock(&build_status_w) = BuildStatus::Ok {
+                        pages_rendered: r.pages_rendered,
+                        pages_skipped: r.pages_skipped,
+                        duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    };
+                    *lock(&summary_w) = scan_workspace(&workspace_w);
+                    if let Some(srv) = &server_for_watcher {
+                        srv.broadcast_reload();
+                    }
+                }
+                Err(e) => {
+                    *lock(&build_status_w) = BuildStatus::Failed {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        })
+        .ok();
+
+        Ok(Self {
+            workspace,
+            summary,
+            build_status,
+            serve_status,
+            _server: server_arc,
+            _watcher: watcher,
+        })
+    }
+
+    /// Current workspace snapshot.
+    pub fn workspace(&self) -> WorkspaceSummary {
+        lock(&self.summary).clone()
+    }
+
+    /// Load and parse a document.
+    ///
+    /// # Errors
+    /// Returns `LoadError` on I/O or parse failure.
+    pub fn load_document(&self, path: &Path) -> Result<LoadedDocument, LoadError> {
+        let raw = std::fs::read_to_string(path)?;
+        match parse(&raw) {
+            Ok(doc) => Ok(LoadedDocument {
+                path: path.to_path_buf(),
+                front_matter: doc.front_matter,
+                blocks: doc.blocks,
+                dirty: false,
+                dirty_at: None,
+                last_written: path.metadata().and_then(|m| m.modified()).ok(),
+                last_save_error: None,
+            }),
+            Err(e) => Err(LoadError::Parse {
+                raw,
+                line: 0,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    /// Serialize and atomically write a document to disk.
+    ///
+    /// # Errors
+    /// Returns `SaveError` on I/O failure.
+    pub fn save(&self, doc: &LoadedDocument) -> Result<(), SaveError> {
+        let content = serialize(&Document {
+            front_matter: doc.front_matter.clone(),
+            blocks: doc.blocks.clone(),
+        });
+        atomic_write(&doc.path, content.as_bytes())?;
+        Ok(())
+    }
+
+    /// Current build status.
+    pub fn build_status(&self) -> BuildStatus {
+        lock(&self.build_status).clone()
+    }
+
+    /// Current serve status.
+    pub fn serve_status(&self) -> &ServeStatus {
+        &self.serve_status
+    }
+
+    /// URL for the given document in the browser.
+    pub fn preview_url_for(&self, doc_ref: &DocumentRef) -> Option<String> {
+        let url = match &self.serve_status {
+            ServeStatus::Listening { url } => url,
+            ServeStatus::Unavailable { .. } => return None,
+        };
+        let slug = doc_ref
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("index")
+            .to_string();
+        let ws_posts = self.workspace.posts_dir();
+        if doc_ref.path.starts_with(&ws_posts) {
+            Some(format!("{url}/posts/{slug}/"))
+        } else {
+            Some(format!("{url}/{slug}/"))
+        }
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+fn scan_workspace(ws: &Workspace) -> WorkspaceSummary {
+    WorkspaceSummary {
+        root: ws.root.clone(),
+        name: ws.config.site.title.clone(),
+        posts: scan_dir(&ws.posts_dir()),
+        pages: scan_dir(&ws.pages_dir()),
+    }
+}
+
+fn scan_dir(dir: &Path) -> Vec<DocumentRef> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut refs: Vec<DocumentRef> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
+        .map(|e| {
+            let path = e.path();
+            match std::fs::read_to_string(&path).as_deref().map(parse) {
+                Ok(Ok(doc)) => DocumentRef {
+                    title: doc.front_matter.title.unwrap_or_else(|| stem(&path)),
+                    is_draft: doc.front_matter.draft,
+                    has_parse_error: false,
+                    path,
+                },
+                _ => DocumentRef {
+                    title: stem(&path),
+                    is_draft: false,
+                    has_parse_error: true,
+                    path,
+                },
+            }
+        })
+        .collect();
+    refs.sort_by(|a, b| a.path.cmp(&b.path));
+    refs
+}
+
+fn stem(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("untitled")
+        .to_string()
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path has no parent",
+        ));
+    };
+    let tmp = parent.join(format!(
+        ".lopress-tmp-{}",
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("file")
+    ));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}

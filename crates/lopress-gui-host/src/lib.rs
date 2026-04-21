@@ -22,3 +22,4 @@ pub mod session;
 
 pub use document::LoadedDocument;
 pub use error::{LoadError, OpenError, SaveError};
+pub use session::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};
