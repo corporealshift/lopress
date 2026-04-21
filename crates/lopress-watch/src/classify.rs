@@ -24,6 +24,16 @@ pub fn classify(workspace: &Path, path: &Path) -> Bucket {
         Ok(r) => r,
         Err(_) => return Bucket::Ignored,
     };
+    // Any dot component anywhere (e.g. `.git`, `src/.obsidian`,
+    // `plugins/foo/.cache`, `src/posts/.a.md.swp`) is off-limits.
+    for comp in rel.components() {
+        if let std::path::Component::Normal(c) = comp {
+            if c.to_string_lossy().starts_with('.') {
+                return Bucket::Ignored;
+            }
+        }
+    }
+
     let mut comps = rel.components();
     let first = match comps.next() {
         Some(std::path::Component::Normal(c)) => c.to_string_lossy().into_owned(),
@@ -38,7 +48,6 @@ pub fn classify(workspace: &Path, path: &Path) -> Bucket {
         "lopress.toml" => Bucket::Config,
         "src" => Bucket::Source,
         "plugins" => Bucket::Plugins,
-        s if s.starts_with('.') => Bucket::Ignored,
         _ => Bucket::Ignored,
     }
 }
@@ -99,6 +108,18 @@ mod tests {
     #[test]
     fn dotdirs_are_ignored() {
         assert_eq!(classify(&ws(), &ws().join(".git/HEAD")), Bucket::Ignored);
+    }
+
+    #[test]
+    fn nested_dotdirs_are_ignored() {
+        assert_eq!(
+            classify(&ws(), &ws().join("src/.obsidian/workspace.json")),
+            Bucket::Ignored
+        );
+        assert_eq!(
+            classify(&ws(), &ws().join("plugins/foo/.cache/x")),
+            Bucket::Ignored
+        );
     }
 
     #[test]

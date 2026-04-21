@@ -33,27 +33,32 @@ fn make_minimal_workspace(root: &std::path::Path) {
 }
 
 fn start_server(root: std::path::PathBuf) -> u16 {
-    // Bind a listener just to grab an unused port, then drop it.
-    let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = probe.local_addr().unwrap().port();
-    drop(probe);
-
+    // Let the server bind port 0 and tell us the chosen port through a
+    // channel — avoids the bind-then-drop race where another process can
+    // claim the port between probe.drop() and serve.bind().
+    let (tx, rx) = std::sync::mpsc::channel::<std::net::SocketAddr>();
     std::thread::spawn(move || {
         let _ = serve(ServeOptions {
             workspace: root,
             bind: "127.0.0.1".into(),
-            port,
+            port: 0,
             open_browser: false,
+            on_ready: Some(Box::new(move |addr| {
+                let _ = tx.send(addr);
+            })),
         });
     });
-    // Wait for bind.
+    let addr = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("server never signaled ready");
+    // Wait for the accept loop to actually be accepting.
     for _ in 0..50 {
-        std::thread::sleep(Duration::from_millis(100));
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return port;
+        if TcpStream::connect(addr).is_ok() {
+            return addr.port();
         }
+        std::thread::sleep(Duration::from_millis(100));
     }
-    panic!("server never came up on {port}");
+    panic!("server never accepted on {addr}");
 }
 
 fn get(port: u16, path: &str) -> (String, Vec<u8>) {

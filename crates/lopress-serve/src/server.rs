@@ -12,6 +12,9 @@ pub struct ServeOptions {
     pub bind: String,
     pub port: u16,
     pub open_browser: bool,
+    /// Invoked once after the listener is bound, with the actual bound
+    /// address. Used by tests to learn the port when `port: 0` is passed.
+    pub on_ready: Option<Box<dyn FnOnce(std::net::SocketAddr) + Send>>,
 }
 
 pub fn serve(opts: ServeOptions) -> Result<(), ServeError> {
@@ -24,12 +27,21 @@ pub fn serve(opts: ServeOptions) -> Result<(), ServeError> {
         report.failures.len()
     );
 
-    // 2. Bind HTTP listener.
-    let addr = format!("{}:{}", opts.bind, opts.port);
-    let listener = TcpListener::bind(&addr).map_err(|source| ServeError::Bind {
-        addr: addr.clone(),
+    // 2. Bind HTTP listener. Use local_addr() for logging/open so that
+    // `port: 0` (pick an ephemeral port) reports the real port.
+    let bind_addr = format!("{}:{}", opts.bind, opts.port);
+    let listener = TcpListener::bind(&bind_addr).map_err(|source| ServeError::Bind {
+        addr: bind_addr.clone(),
         source,
     })?;
+    let local = listener.local_addr().map_err(|source| ServeError::Bind {
+        addr: bind_addr.clone(),
+        source,
+    })?;
+    let addr = local.to_string();
+    if let Some(cb) = opts.on_ready {
+        cb(local);
+    }
     eprintln!(
         "serving http://{addr}/  (watching {})",
         opts.workspace.display()

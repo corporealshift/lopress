@@ -49,7 +49,18 @@ impl BuildCache {
             return Ok(Self::default());
         }
         let s = std::fs::read_to_string(path)?;
-        let parsed: Self = serde_json::from_str(&s)?;
+        // Cache corruption must not fail the build: fall back to a full
+        // rebuild. Warn so the user has a chance to notice disk issues.
+        let parsed: Self = match serde_json::from_str(&s) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!(
+                    "warning: build cache at {} is unreadable ({e}); doing a full rebuild",
+                    path.display()
+                );
+                return Ok(Self::default());
+            }
+        };
         if parsed.version != CACHE_VERSION {
             return Ok(Self::default());
         }
@@ -222,6 +233,16 @@ mod tests {
         let d = TempDir::new().unwrap();
         let p = d.path().join("cache.json");
         std::fs::write(&p, r#"{"version":99,"pages":{}}"#).unwrap();
+        let back = BuildCache::load(&p).unwrap();
+        assert_eq!(back.version, CACHE_VERSION);
+        assert!(back.pages.is_empty());
+    }
+
+    #[test]
+    fn corrupt_cache_falls_back_to_default() {
+        let d = TempDir::new().unwrap();
+        let p = d.path().join("cache.json");
+        std::fs::write(&p, "{ not valid json ").unwrap();
         let back = BuildCache::load(&p).unwrap();
         assert_eq!(back.version, CACHE_VERSION);
         assert!(back.pages.is_empty());

@@ -80,6 +80,7 @@ fn main() -> anyhow::Result<ExitCode> {
                 bind,
                 port,
                 open_browser: !no_open,
+                on_ready: None,
             })?;
             Ok(ExitCode::SUCCESS)
         }

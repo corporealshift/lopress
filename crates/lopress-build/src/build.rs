@@ -131,6 +131,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         feed::write(&ws.www_dir(), &site_ctx)?;
         let page_urls: Vec<String> = pages_src
             .iter()
+            .filter(|p| !p.doc.front_matter.draft)
             .map(|p| {
                 let slug = &p.slug;
                 format!("/{slug}/")
@@ -146,6 +147,15 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
                 path: ws.www_dir().join("index.html"),
                 message: e.to_string(),
             });
+        }
+
+        // Tag archives are regenerated wholesale: wipe `www/tags/` first so
+        // archives for tags that no longer exist (last post removed or
+        // retagged) don't linger. `tag_map` below recreates the surviving
+        // ones.
+        let tags_dir = ws.www_dir().join("tags");
+        if tags_dir.exists() {
+            std::fs::remove_dir_all(&tags_dir)?;
         }
 
         for (tag, tag_posts) in &tag_map {

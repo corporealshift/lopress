@@ -21,9 +21,11 @@ pub fn resolve(www: &Path, req_path: &str) -> std::io::Result<Resolved> {
     let path = req_path.split('?').next().unwrap_or("");
     let path = path.split('#').next().unwrap_or("");
 
-    // Percent-decoding: we keep it minimal. Reject anything containing `..`
-    // in any form before join.
-    if path.contains("..") {
+    // Reject `..` as a whole path segment (so `/a/../b` is forbidden but
+    // `/foo..bar/` is allowed). The canonical-path-under-www check below is
+    // the real safety net; this just rejects the obviously bad requests
+    // before we touch the filesystem.
+    if path.split('/').any(|seg| seg == "..") {
         return Ok(Resolved::Forbidden);
     }
 
@@ -155,9 +157,27 @@ mod tests {
     #[test]
     fn dotdot_rejected() {
         let d = setup();
-        matches!(
+        assert!(matches!(
             resolve(d.path(), "/../etc/passwd").unwrap(),
             Resolved::Forbidden
-        );
+        ));
+        assert!(matches!(
+            resolve(d.path(), "/a/../b").unwrap(),
+            Resolved::Forbidden
+        ));
+    }
+
+    #[test]
+    fn dots_in_filename_not_rejected() {
+        // `..` inside a segment is a legitimate character, not traversal.
+        let d = setup();
+        std::fs::create_dir_all(d.path().join("foo..bar")).unwrap();
+        std::fs::write(d.path().join("foo..bar/index.html"), "<body>dotted</body>").unwrap();
+        match resolve(d.path(), "/foo..bar/").unwrap() {
+            Resolved::File { body, .. } => {
+                assert!(String::from_utf8(body).unwrap().contains("dotted"));
+            }
+            _ => panic!("expected file"),
+        }
     }
 }

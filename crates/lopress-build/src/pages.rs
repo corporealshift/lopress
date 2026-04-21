@@ -130,6 +130,9 @@ pub fn render_all(
     let mut failures = Vec::new();
     let mut pages_rendered: usize = 0;
     let mut pages_skipped: usize = 0;
+    // Flip whenever a post/page's aggregate-visible metadata changes or a
+    // new/removed source is detected — drives index/feed/sitemap/tag regen.
+    let mut post_set_changed = false;
 
     // Build the set of live keys (all posts + pages, including drafts) for
     // orphan detection.
@@ -142,27 +145,33 @@ pub fn render_all(
 
         let is_draft = p.doc.front_matter.draft;
         let source_hash = cache::hash_file(&p.source_path)?;
-        let outputs = vec![format!("posts/{}/index.html", p.slug)];
+        let new_outputs = if is_draft {
+            vec![]
+        } else {
+            vec![format!("posts/{}/index.html", p.slug)]
+        };
+        let old = cache.pages.get(&key).cloned();
 
         if is_draft {
-            // Record draft entry but do not render body.
-            cache.pages.insert(
-                key,
-                PageEntry {
-                    source_hash,
-                    outputs: vec![],
-                    tags: p.doc.front_matter.tags.clone(),
-                    is_draft: true,
-                    title: p.doc.front_matter.title.clone(),
-                    date: p.doc.front_matter.date.map(|d| d.to_string()),
-                },
-            );
+            // Don't render body, but clean up any prior outputs so a
+            // published-then-drafted post doesn't keep being served.
+            if let Some(ref old) = old {
+                remove_stale_outputs(&www, &old.outputs, &new_outputs);
+            }
+            let new_entry = build_entry(source_hash, new_outputs, is_draft, &p.doc.front_matter);
+            if aggregate_metadata_changed(old.as_ref(), &new_entry) {
+                post_set_changed = true;
+            }
+            cache.pages.insert(key, new_entry);
             continue;
         }
 
         let should_skip = !force_full
-            && cache.pages.get(&key).is_some_and(|e| {
-                e.source_hash == source_hash && e.outputs.iter().all(|o| www.join(o).exists())
+            && old.as_ref().is_some_and(|e| {
+                e.source_hash == source_hash
+                    && !e.is_draft
+                    && e.outputs == new_outputs
+                    && e.outputs.iter().all(|o| www.join(o).exists())
             });
 
         if should_skip {
@@ -170,17 +179,15 @@ pub fn render_all(
         } else {
             match render_one_post(&www, &site_ctx, p, registry, theme, tera_shared) {
                 Ok(()) => {
-                    cache.pages.insert(
-                        key,
-                        PageEntry {
-                            source_hash,
-                            outputs,
-                            tags: p.doc.front_matter.tags.clone(),
-                            is_draft: false,
-                            title: p.doc.front_matter.title.clone(),
-                            date: p.doc.front_matter.date.map(|d| d.to_string()),
-                        },
-                    );
+                    if let Some(ref old) = old {
+                        remove_stale_outputs(&www, &old.outputs, &new_outputs);
+                    }
+                    let new_entry =
+                        build_entry(source_hash, new_outputs, is_draft, &p.doc.front_matter);
+                    if aggregate_metadata_changed(old.as_ref(), &new_entry) {
+                        post_set_changed = true;
+                    }
+                    cache.pages.insert(key, new_entry);
                     pages_rendered += 1;
                 }
                 Err(e) => {
@@ -198,12 +205,33 @@ pub fn render_all(
         let key = cache::rel_key(&workspace.root, &p.source_path);
         live_keys.insert(key.clone());
 
+        let is_draft = p.doc.front_matter.draft;
         let source_hash = cache::hash_file(&p.source_path)?;
-        let outputs = vec![format!("{}/index.html", p.slug)];
+        let new_outputs = if is_draft {
+            vec![]
+        } else {
+            vec![format!("{}/index.html", p.slug)]
+        };
+        let old = cache.pages.get(&key).cloned();
+
+        if is_draft {
+            if let Some(ref old) = old {
+                remove_stale_outputs(&www, &old.outputs, &new_outputs);
+            }
+            let new_entry = build_entry(source_hash, new_outputs, is_draft, &p.doc.front_matter);
+            if aggregate_metadata_changed(old.as_ref(), &new_entry) {
+                post_set_changed = true;
+            }
+            cache.pages.insert(key, new_entry);
+            continue;
+        }
 
         let should_skip = !force_full
-            && cache.pages.get(&key).is_some_and(|e| {
-                e.source_hash == source_hash && e.outputs.iter().all(|o| www.join(o).exists())
+            && old.as_ref().is_some_and(|e| {
+                e.source_hash == source_hash
+                    && !e.is_draft
+                    && e.outputs == new_outputs
+                    && e.outputs.iter().all(|o| www.join(o).exists())
             });
 
         if should_skip {
@@ -211,17 +239,15 @@ pub fn render_all(
         } else {
             match render_one_page(&www, &site_ctx, p, registry, theme, tera_shared) {
                 Ok(()) => {
-                    cache.pages.insert(
-                        key,
-                        PageEntry {
-                            source_hash,
-                            outputs,
-                            tags: p.doc.front_matter.tags.clone(),
-                            is_draft: false,
-                            title: p.doc.front_matter.title.clone(),
-                            date: p.doc.front_matter.date.map(|d| d.to_string()),
-                        },
-                    );
+                    if let Some(ref old) = old {
+                        remove_stale_outputs(&www, &old.outputs, &new_outputs);
+                    }
+                    let new_entry =
+                        build_entry(source_hash, new_outputs, is_draft, &p.doc.front_matter);
+                    if aggregate_metadata_changed(old.as_ref(), &new_entry) {
+                        post_set_changed = true;
+                    }
+                    cache.pages.insert(key, new_entry);
                     pages_rendered += 1;
                 }
                 Err(e) => {
@@ -235,7 +261,9 @@ pub fn render_all(
     }
 
     let pruned_anything = prune_orphans(workspace, cache, &live_keys)?;
-    let post_set_changed = pages_rendered > 0 || pruned_anything;
+    if pruned_anything {
+        post_set_changed = true;
+    }
 
     Ok(RenderStats {
         pages_rendered,
@@ -243,6 +271,51 @@ pub fn render_all(
         post_set_changed,
         failures,
     })
+}
+
+fn build_entry(
+    source_hash: String,
+    outputs: Vec<String>,
+    is_draft: bool,
+    fm: &lopress_core::FrontMatter,
+) -> PageEntry {
+    PageEntry {
+        source_hash,
+        outputs,
+        tags: fm.tags.clone(),
+        is_draft,
+        title: fm.title.clone(),
+        date: fm.date.map(|d| d.to_string()),
+    }
+}
+
+/// Delete files listed in `old` that are not in `new`. Used when a
+/// post/page's slug changes or it transitions to draft, so stale HTML
+/// doesn't continue to be served.
+fn remove_stale_outputs(www: &Path, old: &[String], new: &[String]) {
+    for output in old {
+        if new.iter().any(|n| n == output) {
+            continue;
+        }
+        let p = www.join(output);
+        let _ = std::fs::remove_file(&p);
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+}
+
+/// Aggregate pages (index/feed/sitemap/tags) depend on the post set's
+/// visible metadata — not the body. Compare the fields that surface in
+/// those views so draft flips, slug/title/date/tag edits, and new/removed
+/// entries trigger regeneration.
+fn aggregate_metadata_changed(old: Option<&PageEntry>, new: &PageEntry) -> bool {
+    let Some(old) = old else { return true };
+    old.is_draft != new.is_draft
+        || old.outputs != new.outputs
+        || old.tags != new.tags
+        || old.title != new.title
+        || old.date != new.date
 }
 
 /// Remove cache entries (and their output files) for source files that no

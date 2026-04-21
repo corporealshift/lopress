@@ -9,14 +9,13 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Default)]
 pub struct ChangeSet {
     pub sources: Vec<PathBuf>,
-    pub theme: Vec<PathBuf>,
     pub plugins: Vec<PathBuf>,
     pub config: bool,
 }
 
 impl ChangeSet {
     pub fn is_empty(&self) -> bool {
-        self.sources.is_empty() && self.theme.is_empty() && self.plugins.is_empty() && !self.config
+        self.sources.is_empty() && self.plugins.is_empty() && !self.config
     }
 }
 
@@ -44,11 +43,15 @@ impl Watcher {
         let (tx, rx) = mpsc::channel::<Event>();
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
-        let mut notify = notify::recommended_watcher(move |res: notify::Result<Event>| {
-            if let Ok(ev) = res {
-                let _ = tx.send(ev);
-            }
-        })?;
+        let mut notify =
+            notify::recommended_watcher(move |res: notify::Result<Event>| match res {
+                Ok(ev) => {
+                    let _ = tx.send(ev);
+                }
+                Err(err) => {
+                    eprintln!("watcher error: {err}");
+                }
+            })?;
 
         // Watch the workspace root recursively. classify() filters per-event.
         if workspace.exists() {
