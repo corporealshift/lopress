@@ -8,6 +8,8 @@ members = [
     "crates/lopress-build",
     "crates/lopress-watch",
     "crates/lopress-serve",
+    "crates/lopress-gui-host",
+    "crates/lopress-editor",
 ]
 
 [workspace.package]
@@ -67,6 +69,10 @@ thiserror = "1"
 toml = "0.8"
 walkdir = "2"
 webp = "0.3"
+eframe = "0.31"
+rfd = "0.15"
+open = "5"
+directories = "6"
 
 [package]
 name = "lopress"
