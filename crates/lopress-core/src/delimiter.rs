@@ -19,8 +19,7 @@ pub enum Delim {
 pub fn scan(src: &str) -> Result<Vec<Delim>, ParseError> {
     let mut out = Vec::new();
     let mut i = 0;
-    loop {
-        let Some(rest) = src.get(i..) else { break };
+    while let Some(rest) = src.get(i..) {
         let Some(open_off) = rest.find("<!--") else {
             break;
         };
