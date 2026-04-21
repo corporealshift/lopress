@@ -18,38 +18,43 @@ pub enum Delim {
 /// Non-lopress HTML comments are ignored.
 pub fn scan(src: &str) -> Result<Vec<Delim>, ParseError> {
     let mut out = Vec::new();
-    let bytes = src.as_bytes();
     let mut i = 0;
-    while i + 4 <= bytes.len() {
-        if &bytes[i..i + 4] == b"<!--" {
-            let rest = &src[i + 4..];
-            let end_off = match rest.find("-->") {
-                Some(o) => o,
-                None => break, // unterminated comment; leave for pulldown-cmark
-            };
-            let inner = rest[..end_off].trim();
-            let span = (i, i + 4 + end_off + 3);
+    while let Some(rest) = src.get(i..) {
+        let Some(open_off) = rest.find("<!--") else {
+            break;
+        };
+        let open_abs = i + open_off;
+        let after_open = open_abs + 4;
+        let Some(body) = src.get(after_open..) else {
+            break;
+        };
+        let Some(close_off) = body.find("-->") else {
+            // unterminated comment; leave for pulldown-cmark
+            break;
+        };
+        let Some(inner_src) = body.get(..close_off) else {
+            break;
+        };
+        let inner = inner_src.trim();
+        let span = (open_abs, after_open + close_off + 3);
 
-            if let Some(after_lop) = inner.strip_prefix("lopress:") {
-                let (name, attrs_json) = split_name_and_attrs(after_lop);
-                out.push(Delim::Open {
-                    name,
-                    attrs_json,
-                    span,
-                });
-            } else if let Some(after_slash) = inner.strip_prefix("/lopress:") {
-                let name = after_slash.trim().to_string();
-                if name.is_empty() {
-                    return Err(ParseError::FrontMatter(format!(
-                        "empty close delimiter at byte {i}"
-                    )));
-                }
-                out.push(Delim::Close { name, span });
+        if let Some(after_lop) = inner.strip_prefix("lopress:") {
+            let (name, attrs_json) = split_name_and_attrs(after_lop);
+            out.push(Delim::Open {
+                name,
+                attrs_json,
+                span,
+            });
+        } else if let Some(after_slash) = inner.strip_prefix("/lopress:") {
+            let name = after_slash.trim().to_string();
+            if name.is_empty() {
+                return Err(ParseError::FrontMatter(format!(
+                    "empty close delimiter at byte {open_abs}"
+                )));
             }
-            i = span.1;
-        } else {
-            i += 1;
+            out.push(Delim::Close { name, span });
         }
+        i = span.1;
     }
     Ok(out)
 }
@@ -57,19 +62,22 @@ pub fn scan(src: &str) -> Result<Vec<Delim>, ParseError> {
 /// Split `"<name> [<json>]"` into the name and the JSON string (empty if absent).
 fn split_name_and_attrs(s: &str) -> (String, String) {
     let s = s.trim();
-    match s.find(|c: char| c.is_whitespace() || c == '{') {
-        Some(split) if s.as_bytes()[split] == b'{' => {
-            let name = s[..split].trim().to_string();
-            let attrs = s[split..].trim().to_string();
-            (name, attrs)
-        }
-        Some(split) => {
-            let name = s[..split].to_string();
-            let attrs = s[split..].trim().to_string();
-            (name, attrs)
-        }
-        None => (s.to_string(), String::new()),
-    }
+    let Some(split) = s.find(|c: char| c.is_whitespace() || c == '{') else {
+        return (s.to_string(), String::new());
+    };
+    let Some(head) = s.get(..split) else {
+        return (s.to_string(), String::new());
+    };
+    let Some(tail) = s.get(split..) else {
+        return (head.to_string(), String::new());
+    };
+    let is_brace = matches!(tail.as_bytes().first(), Some(&b'{'));
+    let name = if is_brace {
+        head.trim().to_string()
+    } else {
+        head.to_string()
+    };
+    (name, tail.trim().to_string())
 }
 
 #[cfg(test)]

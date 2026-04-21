@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+blake3 = { workspace = true }
 chrono = { workspace = true }
 quick-xml = { workspace = true }
 serde = { workspace = true }
@@ -23,3 +24,6 @@ lopress-assets = { path = "../lopress-assets" }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
 image = { workspace = true }
+
+[lints]
+workspace = true

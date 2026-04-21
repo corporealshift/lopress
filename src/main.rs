@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(
@@ -28,9 +29,20 @@ enum Command {
         #[arg(long, default_value = "https://example.com")]
         base_url: String,
     },
+    /// Start a dev server with live reload.
+    Serve {
+        /// Workspace directory.
+        workspace: PathBuf,
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Command::Build { workspace } => {
@@ -43,16 +55,35 @@ fn main() -> anyhow::Result<()> {
             for f in &report.failures {
                 eprintln!("  FAIL {}: {}", f.path.display(), f.message);
             }
-            if !report.failures.is_empty() {
-                std::process::exit(1);
+            if report.failures.is_empty() {
+                Ok(ExitCode::SUCCESS)
+            } else {
+                Ok(ExitCode::FAILURE)
             }
-            Ok(())
         }
         Command::New {
             dir,
             title,
             base_url,
-        } => scaffold::new_site(&dir, &title, &base_url),
+        } => {
+            scaffold::new_site(&dir, &title, &base_url)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Serve {
+            workspace,
+            bind,
+            port,
+            no_open,
+        } => {
+            lopress_serve::serve(lopress_serve::ServeOptions {
+                workspace,
+                bind,
+                port,
+                open_browser: !no_open,
+                on_ready: None,
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -60,7 +91,7 @@ mod scaffold {
     use anyhow::{bail, Result};
     use std::path::Path;
 
-    pub fn new_site(dir: &Path, title: &str, base_url: &str) -> Result<()> {
+    pub(crate) fn new_site(dir: &Path, title: &str, base_url: &str) -> Result<()> {
         if dir.exists() {
             let non_empty = std::fs::read_dir(dir)?.next().is_some();
             if non_empty {

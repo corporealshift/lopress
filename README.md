@@ -4,7 +4,7 @@ A desktop blog-authoring tool with a Gutenberg-style block editor and a built-in
 
 Point lopress at a directory. Write posts in a block editor. Save. The directory now contains a static website — HTML, CSS, images, optional JavaScript — ready to deploy anywhere.
 
-**Status: CLI works; GUI in progress.** The CLI static site generator (`lopress build`, `lopress new`) is implemented. The egui-based block editor and webview preview are planned for a later phase. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design and [`docs/superpowers/plans/`](docs/superpowers/plans/) for implementation plans.
+**Status: CLI works with live-reload dev server; GUI in progress.** `lopress build`, `lopress new`, and `lopress serve` are implemented. The egui-based block editor and webview preview are planned for a later phase. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design and [`docs/superpowers/plans/`](docs/superpowers/plans/) for implementation plans.
 
 ## What lopress is
 
@@ -91,6 +91,20 @@ cargo build --release
 ```
 
 The `www/` output is a complete static site — copy it to any static host.
+
+## Live preview
+
+While authoring, run:
+
+```
+./target/release/lopress serve my-site
+```
+
+This serves `my-site/www/` on `http://127.0.0.1:8080/`, watches the workspace, rebuilds incrementally on every write, and reloads open browser tabs via Server-Sent Events. Flags:
+
+- `--port <n>` — bind port (default 8080).
+- `--bind <addr>` — bind address (default `127.0.0.1`; use `0.0.0.0` to reach it from other devices on your LAN).
+- `--no-open` — skip opening the default browser on startup.
 
 ## License
 

@@ -16,14 +16,10 @@
     )
 )]
 
-pub mod builtin;
-pub mod context;
-pub mod engine;
+pub mod classify;
 pub mod error;
-pub mod resolver;
+pub mod watcher;
 
-pub use builtin::{builtin_template, default_css, default_engine};
-pub use context::{NavItem, PageCtx, PageKind, PostSummary, RenderContext, SiteCtx};
-pub use engine::ThemeEngine;
-pub use error::ThemeError;
-pub use resolver::{resolve, ResolvedTheme};
+pub use classify::{classify, Bucket};
+pub use error::WatchError;
+pub use watcher::{ChangeSet, Watcher};

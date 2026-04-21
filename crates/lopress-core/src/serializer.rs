@@ -6,8 +6,10 @@ use std::fmt::Write;
 pub fn serialize(doc: &Document) -> String {
     let mut out = String::new();
     if !is_default_frontmatter(&doc.front_matter) {
-        let yaml = serde_yaml::to_string(&doc.front_matter)
-            .expect("frontmatter yaml serialization cannot fail for known types");
+        // FrontMatter is a plain owned struct of Option<String>/Vec<String>/bool/
+        // DateTime/Map<String,Value>; serde_yaml has no documented failure path
+        // for these. On the impossible error we emit empty yaml rather than panic.
+        let yaml = serde_yaml::to_string(&doc.front_matter).unwrap_or_default();
         out.push_str("---\n");
         out.push_str(&yaml);
         if !yaml.ends_with('\n') {
@@ -46,8 +48,9 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
             }
         }
         "heading" => {
-            let level = b.attrs.get("level").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-            for _ in 0..level.max(1) {
+            let level_u64 = b.attrs.get("level").and_then(|v| v.as_u64()).unwrap_or(1);
+            let level = usize::try_from(level_u64).unwrap_or(1).max(1);
+            for _ in 0..level {
                 out.push('#');
             }
             out.push(' ');
@@ -116,7 +119,7 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
             let _ = writeln!(out, "![{alt}]({src})");
         }
         custom if custom.starts_with("lopress:") => {
-            let name = &custom["lopress:".len()..];
+            let name = custom.strip_prefix("lopress:").unwrap_or(custom);
             out.push_str("<!-- lopress:");
             out.push_str(name);
             if !is_empty_attrs(&b.attrs) {
