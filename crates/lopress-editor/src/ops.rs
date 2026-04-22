@@ -44,8 +44,12 @@ pub fn merge_with_previous(blocks: &mut Vec<Block>, idx: usize) {
     if idx == 0 || blocks.is_empty() {
         return;
     }
-    let Some(current) = blocks.get(idx).cloned() else { return };
-    let Some(prev) = blocks.get_mut(idx - 1) else { return };
+    let Some(current) = blocks.get(idx).cloned() else {
+        return;
+    };
+    let Some(prev) = blocks.get_mut(idx - 1) else {
+        return;
+    };
     let prev_text = prev.text.get_or_insert_with(String::new);
     if let Some(cur_text) = &current.text {
         prev_text.push_str(cur_text);
@@ -56,7 +60,9 @@ pub fn merge_with_previous(blocks: &mut Vec<Block>, idx: usize) {
 /// Change the type of the block at `idx`. Only `"paragraph"` and `"heading"`
 /// (levels 1–6) are valid targets; other inputs are ignored.
 pub fn change_block_type(blocks: &mut [Block], idx: usize, new_type: &str, level: Option<u8>) {
-    let Some(block) = blocks.get_mut(idx) else { return };
+    let Some(block) = blocks.get_mut(idx) else {
+        return;
+    };
     match new_type {
         "paragraph" => {
             block.r#type = "paragraph".into();
