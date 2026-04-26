@@ -8,12 +8,14 @@ rust-version.workspace = true
 lopress-gui-host = { path = "../lopress-gui-host" }
 lopress-core = { path = "../lopress-core" }
 eframe = { workspace = true }
+egui = { workspace = true }
 rfd = { workspace = true }
 open = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
