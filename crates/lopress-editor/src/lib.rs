@@ -21,3 +21,5 @@ pub mod ops;
 pub mod recents;
 pub mod state;
 pub mod ui;
+
+pub use app::LopressApp;

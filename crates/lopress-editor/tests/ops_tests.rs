@@ -6,8 +6,12 @@
 use lopress_core::Block;
 use lopress_editor::ops;
 
-fn para(t: &str) -> Block { Block::paragraph(t) }
-fn heading(lvl: u8, t: &str) -> Block { Block::heading(lvl, t) }
+fn para(t: &str) -> Block {
+    Block::paragraph(t)
+}
+fn heading(lvl: u8, t: &str) -> Block {
+    Block::heading(lvl, t)
+}
 
 // ── split_block_at_caret ────────────────────────────────────────────────────
 
