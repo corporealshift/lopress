@@ -6,10 +6,8 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
     // Parse error fallback
     if let Some(raw) = &es.parse_error_raw {
         ui.label(
-            egui::RichText::new(
-                es.parse_error_msg.as_deref().unwrap_or("Parse error"),
-            )
-            .color(egui::Color32::RED),
+            egui::RichText::new(es.parse_error_msg.as_deref().unwrap_or("Parse error"))
+                .color(egui::Color32::RED),
         );
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -137,7 +135,11 @@ fn apply_block_action(blocks: &mut Vec<Block>, action: BlockAction) {
     match action {
         BlockAction::Split { idx, caret } => ops::split_block_at_caret(blocks, idx, caret),
         BlockAction::MergeWithPrev { idx } => ops::merge_with_previous(blocks, idx),
-        BlockAction::ChangeType { idx, new_type, level } => {
+        BlockAction::ChangeType {
+            idx,
+            new_type,
+            level,
+        } => {
             ops::change_block_type(blocks, idx, new_type, level);
         }
         BlockAction::Delete { idx } => ops::delete_block(blocks, idx),
@@ -185,8 +187,19 @@ fn placeholder_text(block: &Block) -> String {
 }
 
 enum BlockAction {
-    Split { idx: usize, caret: usize },
-    MergeWithPrev { idx: usize },
-    ChangeType { idx: usize, new_type: &'static str, level: Option<u8> },
-    Delete { idx: usize },
+    Split {
+        idx: usize,
+        caret: usize,
+    },
+    MergeWithPrev {
+        idx: usize,
+    },
+    ChangeType {
+        idx: usize,
+        new_type: &'static str,
+        level: Option<u8>,
+    },
+    Delete {
+        idx: usize,
+    },
 }

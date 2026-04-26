@@ -116,8 +116,7 @@ fn cli_serve(args: &[String]) -> anyhow::Result<ExitCode> {
         }
         i += 1;
     }
-    let workspace =
-        workspace.ok_or_else(|| anyhow::anyhow!("usage: lopress serve <workspace>"))?;
+    let workspace = workspace.ok_or_else(|| anyhow::anyhow!("usage: lopress serve <workspace>"))?;
     lopress_serve::serve(lopress_serve::ServeOptions {
         workspace,
         bind,

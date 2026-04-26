@@ -48,10 +48,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                     ui.end_row();
 
                     ui.label("description");
-                    let desc = doc
-                        .front_matter
-                        .description
-                        .get_or_insert_with(String::new);
+                    let desc = doc.front_matter.description.get_or_insert_with(String::new);
                     if ui
                         .add(
                             egui::TextEdit::multiline(desc)

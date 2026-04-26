@@ -41,7 +41,7 @@ impl eframe::App for LopressApp {
         match &mut self.state {
             AppState::Welcome(ws) => {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let action = ui::welcome::show(ui, ws);
+                    let action = ui::welcome::show(ui, &ws.error);
                     match action {
                         ui::welcome::WelcomeAction::OpenPicker => {
                             if let Some(path) = rfd::FileDialog::new().pick_folder() {
@@ -142,11 +142,9 @@ fn show_editing(ctx: &egui::Context, es: &mut EditingState) -> Option<AppState> 
                         .current_ref
                         .as_ref()
                         .and_then(|r| es.session.preview_url_for(r))
-                        .unwrap_or_else(|| {
-                            match es.session.serve_status() {
-                                lopress_gui_host::ServeStatus::Listening { url } => url.clone(),
-                                lopress_gui_host::ServeStatus::Unavailable { .. } => String::new(),
-                            }
+                        .unwrap_or_else(|| match es.session.serve_status() {
+                            lopress_gui_host::ServeStatus::Listening { url } => url.clone(),
+                            lopress_gui_host::ServeStatus::Unavailable { .. } => String::new(),
                         });
                     if !url.is_empty() {
                         if let Err(e) = open::that(&url) {
