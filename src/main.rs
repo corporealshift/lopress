@@ -1,3 +1,11 @@
+// In release builds on Windows, suppress the console window so the app
+// behaves as a proper GUI application when launched from File Explorer.
+// Debug builds keep the console so CLI subcommands show output during dev.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -25,12 +33,22 @@ fn launch_gui(workspace: Option<PathBuf>) -> anyhow::Result<ExitCode> {
             .with_inner_size([1200.0, 800.0]),
         ..Default::default()
     };
-    eframe::run_native(
+    if let Err(e) = eframe::run_native(
         "lopress",
         options,
         Box::new(move |_cc| Ok(Box::new(lopress_editor::LopressApp::new(workspace.clone())))),
-    )
-    .map_err(|e| anyhow::anyhow!("GUI error: {e}"))?;
+    ) {
+        let msg = format!("Failed to start GUI: {e}");
+        // In release builds on Windows the console is suppressed, so show a
+        // native dialog instead of writing to stderr.
+        #[cfg(all(target_os = "windows", not(debug_assertions)))]
+        rfd::MessageDialog::new()
+            .set_title("lopress — startup error")
+            .set_description(&msg)
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+        return Err(anyhow::anyhow!("{msg}"));
+    }
     Ok(ExitCode::SUCCESS)
 }
 

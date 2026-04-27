@@ -89,6 +89,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
+rfd = { workspace = true }
 lopress-build = { path = "crates/lopress-build" }
 lopress-serve = { path = "crates/lopress-serve" }
 lopress-editor = { path = "crates/lopress-editor" }
