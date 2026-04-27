@@ -1,3 +1,12 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::missing_panics_doc,
+    clippy::missing_errors_doc,
+)]
+
 use lopress_core::{parse, serialize};
 use lopress_editor::ops;
 use std::fs;
