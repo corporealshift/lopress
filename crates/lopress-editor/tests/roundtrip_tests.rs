@@ -4,7 +4,7 @@
     clippy::panic,
     clippy::indexing_slicing,
     clippy::missing_panics_doc,
-    clippy::missing_errors_doc,
+    clippy::missing_errors_doc
 )]
 
 use lopress_core::{parse, serialize};
