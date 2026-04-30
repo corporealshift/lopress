@@ -89,23 +89,29 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
             } else {
                 egui::TextStyle::Body
             };
-            let resp = ui.add(
-                egui::TextEdit::multiline(text)
-                    .font(font)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(1),
-            );
+            let te_id = egui::Id::new(("block_text", idx));
+            let te_output = egui::TextEdit::multiline(text)
+                .id(te_id)
+                .font(font)
+                .desired_width(f32::INFINITY)
+                .desired_rows(1)
+                .show(ui);
+            let resp = te_output.response;
 
             if resp.changed() {
                 became_dirty = true;
             }
 
             if resp.has_focus() {
+                let cursor_byte = te_output
+                    .cursor_range
+                    .map(|cr| char_to_byte(text, cr.primary.ccursor.index))
+                    .unwrap_or_else(|| text.len());
                 ui.input(|i| {
                     if i.key_pressed(egui::Key::Enter) && !i.modifiers.shift {
                         deferred = Some(BlockAction::Split {
                             idx,
-                            caret: text.len(),
+                            caret: cursor_byte,
                         });
                     }
                     if i.key_pressed(egui::Key::Backspace) && text.is_empty() {
@@ -202,4 +208,11 @@ enum BlockAction {
     Delete {
         idx: usize,
     },
+}
+
+fn char_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
 }
