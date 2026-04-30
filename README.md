@@ -4,7 +4,7 @@ A desktop blog-authoring tool with a Gutenberg-style block editor and a built-in
 
 Point lopress at a directory. Write posts in a block editor. Save. The directory now contains a static website — HTML, CSS, images, optional JavaScript — ready to deploy anywhere.
 
-**Status: CLI works with live-reload dev server; GUI in progress.** `lopress build`, `lopress new`, and `lopress serve` are implemented. The egui-based block editor and webview preview are planned for a later phase. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design and [`docs/superpowers/plans/`](docs/superpowers/plans/) for implementation plans.
+**Status: GUI editor MVP complete.** `lopress` (no args) opens the block editor. `lopress build`, `lopress new`, and `lopress serve` are also available as CLI subcommands. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design.
 
 ## What lopress is
 
@@ -79,13 +79,64 @@ Planned as phase-2 escape hatches (not v1): WASM renderers for blocks whose outp
 - Auto-generated: `feed.xml`, `sitemap.xml`, `robots.txt`, `404.html`, OpenGraph/Twitter card meta tags.
 - Image pipeline: source images in `src/images/` generate responsive WebP variants (default widths 400/800/1600 px), emitted as `<picture>` with `srcset`. Variants cached by source hash.
 
+## Building
+
+`cargo build --release` builds for the **current host only**. There is no single command that produces all platform binaries at once.
+
+**macOS / Linux (native)**
+```
+cargo build --release
+```
+
+**Windows (native)**
+
+Install [Rust](https://rustup.rs) on Windows, then:
+```
+cargo build --release
+```
+The resulting `target\release\lopress.exe` is self-contained.
+
+**Windows cross-compile from macOS/Linux**
+
+The easiest path is [`cross`](https://github.com/cross-rs/cross), which uses Docker containers:
+
+```
+cargo install cross
+cross build --release --target x86_64-pc-windows-gnu
+```
+
+Output: `target/x86_64-pc-windows-gnu/release/lopress.exe`.
+
+> Note: eframe/egui requires a GPU-capable window server. The resulting binary runs on Windows with a GPU. It will not run in a headless Windows Server environment without additional setup (e.g. a virtual display adapter).
+
+**CI (GitHub Actions)**
+
+The cleanest multi-platform approach is a matrix build:
+
+```yaml
+strategy:
+  matrix:
+    os: [ubuntu-latest, macos-latest, windows-latest]
+runs-on: ${{ matrix.os }}
+steps:
+  - uses: actions/checkout@v4
+  - run: cargo build --release
+```
+
 ## Usage
 
-Create a new workspace and build it:
+Create a new workspace and open the editor:
 
 ```
 cargo build --release
 ./target/release/lopress new my-site --title "My Blog" --base-url "https://myblog.example.com"
+./target/release/lopress my-site      # open GUI with the workspace pre-loaded
+./target/release/lopress              # open GUI welcome screen (pick workspace from file dialog)
+```
+
+CLI-only workflow (no GUI required):
+
+```
 ./target/release/lopress build my-site
 # Open my-site/www/index.html in a browser.
 ```

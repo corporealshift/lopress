@@ -16,13 +16,10 @@
     )
 )]
 
+pub mod document;
 pub mod error;
-pub mod http;
-pub mod inject;
-pub mod mime;
-pub mod router;
-pub mod server;
-pub mod sse;
+pub mod session;
 
-pub use error::ServeError;
-pub use server::{serve, serve_in_background, ServeOptions, ServerHandle};
+pub use document::LoadedDocument;
+pub use error::{LoadError, OpenError, SaveError};
+pub use session::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};
