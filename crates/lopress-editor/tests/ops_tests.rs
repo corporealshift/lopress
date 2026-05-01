@@ -185,8 +185,12 @@ fn heading_is_editable() {
 }
 
 #[test]
+fn code_block_is_editable() {
+    assert!(ops::is_editable("code_block"));
+}
+
+#[test]
 fn unknown_type_is_not_editable() {
-    assert!(!ops::is_editable("code_block"));
     assert!(!ops::is_editable("image"));
     assert!(!ops::is_editable(""));
 }

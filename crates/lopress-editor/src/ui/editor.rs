@@ -54,6 +54,48 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 continue;
             }
 
+            // --- Code block editor ---
+            if block.r#type == "code_block" {
+                let mut lang_buf = block
+                    .attrs
+                    .get("lang")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let mut lang_changed = false;
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Code").weak());
+                    ui.label("lang:");
+                    if ui.text_edit_singleline(&mut lang_buf).changed() {
+                        lang_changed = true;
+                    }
+                    if ui.small_button("×").clicked() {
+                        deferred = Some(BlockAction::Delete { idx });
+                    }
+                });
+                if lang_changed {
+                    if let Some(b) = doc.blocks.get_mut(idx) {
+                        b.attrs = serde_json::json!({ "lang": lang_buf });
+                        became_dirty = true;
+                    }
+                }
+                let Some(block) = doc.blocks.get_mut(idx) else {
+                    continue;
+                };
+                let text = block.text.get_or_insert_with(String::new);
+                let resp = ui.add(
+                    egui::TextEdit::multiline(text)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(3)
+                        .code_editor(),
+                );
+                if resp.changed() {
+                    became_dirty = true;
+                }
+                continue;
+            }
+
             let block_type = block.r#type.clone();
             let level = block
                 .attrs

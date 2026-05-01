@@ -3,7 +3,7 @@ use serde_json::Value;
 
 /// Which block types the editor can edit (not read-only placeholders).
 pub fn is_editable(block_type: &str) -> bool {
-    matches!(block_type, "paragraph" | "heading")
+    matches!(block_type, "paragraph" | "heading" | "code_block")
 }
 
 /// Split the block at `idx` at byte offset `caret`. The left half stays at
