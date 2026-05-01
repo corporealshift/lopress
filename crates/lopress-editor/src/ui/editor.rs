@@ -262,9 +262,36 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
             if resp.has_focus() {
                 let cursor_byte = te_output
                     .cursor_range
+                    .as_ref()
                     .map(|cr| char_to_byte(text, cr.primary.ccursor.index))
                     .unwrap_or_else(|| text.len());
-                ui.input(|i| {
+                let (min_c, max_c) = te_output
+                    .cursor_range
+                    .as_ref()
+                    .map(|cr| {
+                        let p = cr.primary.ccursor.index;
+                        let s = cr.secondary.ccursor.index;
+                        (p.min(s), p.max(s))
+                    })
+                    .unwrap_or((0, 0));
+
+                let mut fmt_changed = false;
+                ui.input_mut(|i| {
+                    if i.consume_key(egui::Modifiers::COMMAND, egui::Key::B) {
+                        fmt_changed |= wrap_selection_chars(text, min_c, max_c, "**", "**");
+                    }
+                    if i.consume_key(egui::Modifiers::COMMAND, egui::Key::I) {
+                        fmt_changed |= wrap_selection_chars(text, min_c, max_c, "_", "_");
+                    }
+                    if i.consume_key(egui::Modifiers::COMMAND, egui::Key::K) {
+                        fmt_changed |= insert_link_chars(text, min_c, max_c);
+                    }
+                    if i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter) {
+                        deferred = Some(BlockAction::Insert {
+                            idx: idx + 1,
+                            block_type: InsertBlockType::Paragraph,
+                        });
+                    }
                     if i.key_pressed(egui::Key::Enter) && !i.modifiers.shift {
                         deferred = Some(BlockAction::Split {
                             idx,
@@ -275,6 +302,34 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                         deferred = Some(BlockAction::MergeWithPrev { idx });
                     }
                 });
+                if fmt_changed {
+                    became_dirty = true;
+                }
+
+                if block_type == "paragraph" {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Bold").clicked()
+                            && wrap_selection_chars(text, min_c, max_c, "**", "**")
+                        {
+                            became_dirty = true;
+                        }
+                        if ui.small_button("Italic").clicked()
+                            && wrap_selection_chars(text, min_c, max_c, "_", "_")
+                        {
+                            became_dirty = true;
+                        }
+                        if ui.small_button("Link").clicked()
+                            && insert_link_chars(text, min_c, max_c)
+                        {
+                            became_dirty = true;
+                        }
+                        ui.label(
+                            egui::RichText::new("Ctrl+B / Ctrl+I / Ctrl+K")
+                                .weak()
+                                .size(10.0),
+                        );
+                    });
+                }
             }
             } // end 'block_render
             }); // end dnd_drop_zone
@@ -480,4 +535,46 @@ fn char_to_byte(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
+}
+
+/// Wrap the selection between char indices `min_char..max_char` in `text` with
+/// `prefix` and `suffix`. Returns true if text was modified.
+fn wrap_selection_chars(
+    text: &mut String,
+    min_char: usize,
+    max_char: usize,
+    prefix: &str,
+    suffix: &str,
+) -> bool {
+    if min_char == max_char {
+        return false;
+    }
+    let total = text.chars().count();
+    let max_char = max_char.min(total);
+    let min_char = min_char.min(max_char);
+    let min_byte = char_to_byte(text, min_char);
+    let max_byte = char_to_byte(text, max_char);
+    let selected = text.get(min_byte..max_byte).unwrap_or("").to_string();
+    let replacement = format!("{prefix}{selected}{suffix}");
+    text.replace_range(min_byte..max_byte, &replacement);
+    true
+}
+
+/// Insert a markdown link at the selection. With a selection, wraps it as
+/// `[selected](url)`. With no selection, inserts `[link text](url)`.
+fn insert_link_chars(text: &mut String, min_char: usize, max_char: usize) -> bool {
+    let total = text.chars().count();
+    let max_char = max_char.min(total);
+    let min_char = min_char.min(max_char);
+    let min_byte = char_to_byte(text, min_char);
+    let max_byte = char_to_byte(text, max_char);
+    let selected = text.get(min_byte..max_byte).unwrap_or("");
+    let link_text = if selected.is_empty() {
+        "link text"
+    } else {
+        selected
+    };
+    let replacement = format!("[{link_text}](url)");
+    text.replace_range(min_byte..max_byte, &replacement);
+    true
 }
