@@ -38,6 +38,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 continue;
             };
 
+            'block_render: {
             if !ops::is_editable(&block.r#type) {
                 let display = placeholder_text(block);
                 ui.group(|ui| {
@@ -51,7 +52,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                         deferred = Some(BlockAction::Delete { idx });
                     }
                 });
-                continue;
+                break 'block_render;
             }
 
             // --- Code block editor ---
@@ -80,7 +81,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                     }
                 }
                 let Some(block) = doc.blocks.get_mut(idx) else {
-                    continue;
+                    break 'block_render;
                 };
                 let text = block.text.get_or_insert_with(String::new);
                 let resp = ui.add(
@@ -93,7 +94,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 if resp.changed() {
                     became_dirty = true;
                 }
-                continue;
+                break 'block_render;
             }
 
             // --- List editor ---
@@ -170,7 +171,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 if ui.small_button("+ Add item").clicked() {
                     deferred = Some(BlockAction::AddListItem { list_idx: idx });
                 }
-                continue;
+                break 'block_render;
             }
 
             let block_type = block.r#type.clone();
@@ -186,7 +187,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 egui::ComboBox::from_id_salt(format!("type_{idx}"))
                     .selected_text(type_lbl)
                     .show_ui(ui, |ui| {
-                        for opt in ["¶", "H1", "H2", "H3", "H4", "H5", "H6"] {
+                        for opt in ["¶", "H1", "H2", "H3", "H4", "H5", "H6", "Code", "List"] {
                             if ui.selectable_label(type_lbl == opt, opt).clicked() {
                                 let (nt, lv) = parse_type_label(opt);
                                 deferred = Some(BlockAction::ChangeType {
@@ -238,6 +239,33 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                     }
                 });
             }
+            } // end 'block_render
+
+            // Insert-between button
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                ui.menu_button("+", |ui| {
+                    let after = idx + 1;
+                    let opts: [(&str, InsertBlockType); 7] = [
+                        ("Paragraph", InsertBlockType::Paragraph),
+                        ("Heading 1", InsertBlockType::Heading(1)),
+                        ("Heading 2", InsertBlockType::Heading(2)),
+                        ("Heading 3", InsertBlockType::Heading(3)),
+                        ("Code block", InsertBlockType::CodeBlock),
+                        ("Unordered list", InsertBlockType::UnorderedList),
+                        ("Ordered list", InsertBlockType::OrderedList),
+                    ];
+                    for (label, bt) in opts {
+                        if ui.button(label).clicked() {
+                            deferred = Some(BlockAction::Insert {
+                                idx: after,
+                                block_type: bt,
+                            });
+                            ui.close_menu();
+                        }
+                    }
+                });
+            });
         }
 
         ui.add_space(8.0);
@@ -272,6 +300,9 @@ fn apply_block_action(blocks: &mut Vec<Block>, action: BlockAction) {
         BlockAction::DeleteListItem { list_idx, item_idx } => {
             ops::delete_list_item(blocks, list_idx, item_idx);
         }
+        BlockAction::Insert { idx, block_type } => {
+            ops::insert_block_at(blocks, idx, build_insert_block(block_type));
+        }
     }
 }
 
@@ -285,6 +316,8 @@ fn type_label(block_type: &str, level: u8) -> &'static str {
             5 => "H5",
             _ => "H6",
         },
+        "code_block" => "Code",
+        "list" => "List",
         _ => "¶",
     }
 }
@@ -297,6 +330,8 @@ fn parse_type_label(label: &str) -> (&'static str, Option<u8>) {
         "H4" => ("heading", Some(4)),
         "H5" => ("heading", Some(5)),
         "H6" => ("heading", Some(6)),
+        "Code" => ("code_block", None),
+        "List" => ("list", None),
         _ => ("paragraph", None),
     }
 }
@@ -338,6 +373,55 @@ enum BlockAction {
         list_idx: usize,
         item_idx: usize,
     },
+    Insert {
+        idx: usize,
+        block_type: InsertBlockType,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum InsertBlockType {
+    Paragraph,
+    Heading(u8),
+    CodeBlock,
+    UnorderedList,
+    OrderedList,
+}
+
+fn build_insert_block(block_type: InsertBlockType) -> Block {
+    use serde_json::json;
+    match block_type {
+        InsertBlockType::Paragraph => Block::paragraph(""),
+        InsertBlockType::Heading(lvl) => Block::heading(lvl, ""),
+        InsertBlockType::CodeBlock => Block {
+            r#type: "code_block".into(),
+            attrs: json!({ "lang": "" }),
+            children: vec![],
+            text: Some(String::new()),
+        },
+        InsertBlockType::UnorderedList => Block {
+            r#type: "list".into(),
+            attrs: json!({ "ordered": false }),
+            children: vec![Block {
+                r#type: "list_item".into(),
+                attrs: json!({}),
+                children: vec![Block::paragraph("")],
+                text: None,
+            }],
+            text: None,
+        },
+        InsertBlockType::OrderedList => Block {
+            r#type: "list".into(),
+            attrs: json!({ "ordered": true }),
+            children: vec![Block {
+                r#type: "list_item".into(),
+                attrs: json!({}),
+                children: vec![Block::paragraph("")],
+                text: None,
+            }],
+            text: None,
+        },
+    }
 }
 
 fn char_to_byte(s: &str, char_idx: usize) -> usize {

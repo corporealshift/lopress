@@ -57,8 +57,8 @@ pub fn merge_with_previous(blocks: &mut Vec<Block>, idx: usize) {
     blocks.remove(idx);
 }
 
-/// Change the type of the block at `idx`. Only `"paragraph"` and `"heading"`
-/// (levels 1–6) are valid targets; other inputs are ignored.
+/// Change the type of the block at `idx`. Valid targets: `"paragraph"`,
+/// `"heading"` (levels 1–6), `"code_block"`, `"list"`.
 pub fn change_block_type(blocks: &mut [Block], idx: usize, new_type: &str, level: Option<u8>) {
     let Some(block) = blocks.get_mut(idx) else {
         return;
@@ -73,7 +73,32 @@ pub fn change_block_type(blocks: &mut [Block], idx: usize, new_type: &str, level
             block.r#type = "heading".into();
             block.attrs = serde_json::json!({ "level": lvl });
         }
+        "code_block" => {
+            block.r#type = "code_block".into();
+            block.attrs = serde_json::json!({ "lang": "" });
+        }
+        "list" => {
+            let text = block.text.take().unwrap_or_default();
+            block.r#type = "list".into();
+            block.attrs = serde_json::json!({ "ordered": false });
+            block.children = vec![Block {
+                r#type: "list_item".into(),
+                attrs: Value::Object(serde_json::Map::new()),
+                children: vec![Block::paragraph(text)],
+                text: None,
+            }];
+        }
         _ => {}
+    }
+}
+
+/// Insert `block` at position `idx`, shifting later blocks right.
+/// If `idx >= blocks.len()`, appends instead.
+pub fn insert_block_at(blocks: &mut Vec<Block>, idx: usize, block: Block) {
+    if idx >= blocks.len() {
+        blocks.push(block);
+    } else {
+        blocks.insert(idx, block);
     }
 }
 

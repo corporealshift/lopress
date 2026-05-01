@@ -116,8 +116,56 @@ fn change_heading_to_paragraph_clears_attrs() {
 #[test]
 fn change_to_unknown_type_is_noop() {
     let mut blocks = vec![para("text")];
-    ops::change_block_type(&mut blocks, 0, "code_block", None);
+    ops::change_block_type(&mut blocks, 0, "image", None);
     assert_eq!(blocks[0].r#type, "paragraph");
+}
+
+#[test]
+fn change_paragraph_to_code_block_preserves_text() {
+    let mut blocks = vec![para("println!(\"hi\");")];
+    ops::change_block_type(&mut blocks, 0, "code_block", None);
+    assert_eq!(blocks[0].r#type, "code_block");
+    assert_eq!(
+        blocks[0].attrs.get("lang").and_then(|v| v.as_str()),
+        Some("")
+    );
+}
+
+#[test]
+fn change_paragraph_to_list_creates_one_item() {
+    let mut blocks = vec![para("a")];
+    ops::change_block_type(&mut blocks, 0, "list", None);
+    assert_eq!(blocks[0].r#type, "list");
+    assert_eq!(
+        blocks[0].attrs.get("ordered").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(blocks[0].children.len(), 1);
+    let para = blocks[0].children.get(0).and_then(|i| i.children.get(0)).unwrap();
+    assert_eq!(para.text.as_deref(), Some("a"));
+}
+
+#[test]
+fn insert_block_at_middle() {
+    let mut blocks = vec![Block::paragraph("a"), Block::paragraph("b")];
+    ops::insert_block_at(&mut blocks, 1, Block::heading(2, "mid"));
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks.get(1).map(|b| b.r#type.as_str()), Some("heading"));
+    assert_eq!(
+        blocks.get(2).and_then(|b| b.text.as_deref()),
+        Some("b")
+    );
+}
+
+#[test]
+fn insert_block_at_end_appends() {
+    let mut blocks = vec![Block::paragraph("a")];
+    ops::insert_block_at(&mut blocks, 1, Block::paragraph("b"));
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(
+        blocks.get(1).and_then(|b| b.text.as_deref()),
+        Some("b")
+    );
 }
 
 #[test]
