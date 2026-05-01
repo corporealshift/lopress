@@ -1,5 +1,17 @@
 use crate::state::EditingState;
+use lopress_core::Block;
 use lopress_gui_host::{BuildStatus, ServeStatus};
+
+fn count_words_block(block: &Block) -> usize {
+    let own = block
+        .text
+        .as_deref()
+        .unwrap_or("")
+        .split_whitespace()
+        .count();
+    let children: usize = block.children.iter().map(count_words_block).sum();
+    own + children
+}
 
 pub fn show(ui: &mut egui::Ui, es: &EditingState) {
     ui.horizontal(|ui| {
@@ -43,6 +55,13 @@ pub fn show(ui: &mut egui::Ui, es: &EditingState) {
         }
 
         ui.separator();
+
+        // Word count
+        if let Some(doc) = &es.current_doc {
+            let word_count: usize = doc.blocks.iter().map(count_words_block).sum();
+            ui.label(egui::RichText::new(format!("{word_count} words")).weak());
+            ui.separator();
+        }
 
         // Serve URL (right)
         match es.session.serve_status() {
