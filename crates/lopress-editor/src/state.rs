@@ -70,7 +70,10 @@ impl EditingState {
             return;
         }
         match self.session.save(doc) {
-            Ok(()) => doc.mark_clean(),
+            Ok(()) => {
+                doc.mark_clean();
+                self.session.rebuild();
+            }
             Err(e) => doc.last_save_error = Some(e.to_string()),
         }
     }

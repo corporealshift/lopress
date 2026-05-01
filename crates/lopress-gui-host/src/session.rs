@@ -200,6 +200,36 @@ impl Session {
         Ok(())
     }
 
+    /// Trigger a rebuild and SSE broadcast on a background thread.
+    /// Safe to call even if a watcher-triggered rebuild is already in flight —
+    /// the worst case is two sequential builds.
+    pub fn rebuild(&self) {
+        let build_status = Arc::clone(&self.build_status);
+        let workspace_root = self.workspace.root.clone();
+        let server = self._server.clone();
+        std::thread::spawn(move || {
+            *lock(&build_status) = BuildStatus::Building;
+            let t0 = std::time::Instant::now();
+            match lopress_build::build(&workspace_root) {
+                Ok(r) => {
+                    *lock(&build_status) = BuildStatus::Ok {
+                        pages_rendered: r.pages_rendered,
+                        pages_skipped: r.pages_skipped,
+                        duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    };
+                    if let Some(srv) = server {
+                        srv.broadcast_reload();
+                    }
+                }
+                Err(e) => {
+                    *lock(&build_status) = BuildStatus::Failed {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        });
+    }
+
     /// Current build status.
     pub fn build_status(&self) -> BuildStatus {
         lock(&self.build_status).clone()
