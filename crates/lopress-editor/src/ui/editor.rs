@@ -32,6 +32,10 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
     let mut became_dirty = false;
 
     egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.vertical_centered(|ui| {
+            let avail = ui.available_width();
+            let content_w = avail.min(720.0);
+            ui.set_max_width(content_w);
         let block_count = doc.blocks.len();
         for idx in 0..block_count {
             let Some(block) = doc.blocks.get_mut(idx) else {
@@ -84,16 +88,22 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                     break 'block_render;
                 };
                 let text = block.text.get_or_insert_with(String::new);
-                let resp = ui.add(
-                    egui::TextEdit::multiline(text)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(3)
-                        .code_editor(),
-                );
-                if resp.changed() {
-                    became_dirty = true;
-                }
+                let frame_fill = ui.visuals().extreme_bg_color;
+                egui::Frame::new()
+                    .fill(frame_fill)
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        let resp = ui.add(
+                            egui::TextEdit::multiline(text)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(3)
+                                .code_editor(),
+                        );
+                        if resp.changed() {
+                            became_dirty = true;
+                        }
+                    });
                 break 'block_render;
             }
 
@@ -138,6 +148,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                     let text = para.text.get_or_insert_with(String::new);
 
                     ui.horizontal(|ui| {
+                        ui.add_space(16.0);
                         ui.label(&prefix);
                         let te_id = egui::Id::new(("list_item", idx, item_idx));
                         let te_output = egui::TextEdit::singleline(text)
@@ -205,9 +216,17 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
 
             let text = block.text.get_or_insert_with(String::new);
             let font = if block_type == "heading" {
-                egui::TextStyle::Heading
+                let size: f32 = match level {
+                    1 => 32.0,
+                    2 => 26.0,
+                    3 => 22.0,
+                    4 => 18.0,
+                    5 => 16.0,
+                    _ => 14.0,
+                };
+                egui::FontId::proportional(size)
             } else {
-                egui::TextStyle::Body
+                egui::FontId::proportional(15.0)
             };
             let te_id = egui::Id::new(("block_text", idx));
             let te_output = egui::TextEdit::multiline(text)
@@ -273,6 +292,7 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
             ops::add_paragraph_at_end(&mut doc.blocks);
             became_dirty = true;
         }
+        });
     });
 
     if became_dirty {
