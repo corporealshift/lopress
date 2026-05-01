@@ -38,8 +38,26 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
             ui.set_max_width(content_w);
         let block_count = doc.blocks.len();
         for idx in 0..block_count {
-            let Some(block) = doc.blocks.get_mut(idx) else {
+            if doc.blocks.get(idx).is_none() {
                 continue;
+            }
+
+            // Drag handle (top-left)
+            let _drag_resp = ui
+                .dnd_drag_source(
+                    egui::Id::new(("drag_handle", idx)),
+                    idx,
+                    |ui| {
+                        ui.label(egui::RichText::new("⠿ drag").weak().size(11.0));
+                    },
+                )
+                .response;
+
+            // Drop zone wrapping the block body
+            let (_drop_inner, dropped_payload) =
+                ui.dnd_drop_zone::<usize, _>(egui::Frame::new(), |ui| {
+            let Some(block) = doc.blocks.get_mut(idx) else {
+                return;
             };
 
             'block_render: {
@@ -259,6 +277,14 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 });
             }
             } // end 'block_render
+            }); // end dnd_drop_zone
+
+            if let Some(src) = dropped_payload {
+                let from = *src;
+                if from != idx {
+                    deferred = Some(BlockAction::Move { from, to: idx });
+                }
+            }
 
             // Insert-between button
             ui.horizontal(|ui| {
@@ -323,6 +349,7 @@ fn apply_block_action(blocks: &mut Vec<Block>, action: BlockAction) {
         BlockAction::Insert { idx, block_type } => {
             ops::insert_block_at(blocks, idx, build_insert_block(block_type));
         }
+        BlockAction::Move { from, to } => ops::move_block(blocks, from, to),
     }
 }
 
@@ -396,6 +423,10 @@ enum BlockAction {
     Insert {
         idx: usize,
         block_type: InsertBlockType,
+    },
+    Move {
+        from: usize,
+        to: usize,
     },
 }
 

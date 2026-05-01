@@ -158,6 +158,40 @@ fn insert_block_at_middle() {
 }
 
 #[test]
+fn move_block_forward() {
+    let mut blocks = vec![
+        Block::paragraph("a"),
+        Block::paragraph("b"),
+        Block::paragraph("c"),
+    ];
+    ops::move_block(&mut blocks, 0, 2);
+    assert_eq!(blocks.get(0).and_then(|b| b.text.as_deref()), Some("b"));
+    assert_eq!(blocks.get(1).and_then(|b| b.text.as_deref()), Some("a"));
+    assert_eq!(blocks.get(2).and_then(|b| b.text.as_deref()), Some("c"));
+}
+
+#[test]
+fn move_block_backward() {
+    let mut blocks = vec![
+        Block::paragraph("a"),
+        Block::paragraph("b"),
+        Block::paragraph("c"),
+    ];
+    ops::move_block(&mut blocks, 2, 0);
+    assert_eq!(blocks.get(0).and_then(|b| b.text.as_deref()), Some("c"));
+    assert_eq!(blocks.get(1).and_then(|b| b.text.as_deref()), Some("a"));
+    assert_eq!(blocks.get(2).and_then(|b| b.text.as_deref()), Some("b"));
+}
+
+#[test]
+fn move_block_same_index_is_noop() {
+    let mut blocks = vec![Block::paragraph("a"), Block::paragraph("b")];
+    ops::move_block(&mut blocks, 1, 1);
+    assert_eq!(blocks.get(0).and_then(|b| b.text.as_deref()), Some("a"));
+    assert_eq!(blocks.get(1).and_then(|b| b.text.as_deref()), Some("b"));
+}
+
+#[test]
 fn insert_block_at_end_appends() {
     let mut blocks = vec![Block::paragraph("a")];
     ops::insert_block_at(&mut blocks, 1, Block::paragraph("b"));

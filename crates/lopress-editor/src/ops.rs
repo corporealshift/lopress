@@ -102,6 +102,17 @@ pub fn insert_block_at(blocks: &mut Vec<Block>, idx: usize, block: Block) {
     }
 }
 
+/// Move the block at `from` to position `to`. Adjusts for the removal shift.
+/// No-op if `from == to` or either index is out of range.
+pub fn move_block(blocks: &mut Vec<Block>, from: usize, to: usize) {
+    if from == to || from >= blocks.len() || to >= blocks.len() {
+        return;
+    }
+    let block = blocks.remove(from);
+    let adjusted = if to > from { to - 1 } else { to };
+    blocks.insert(adjusted, block);
+}
+
 /// Append an empty paragraph at the end of `blocks`.
 pub fn add_paragraph_at_end(blocks: &mut Vec<Block>) {
     blocks.push(Block::paragraph(""));
