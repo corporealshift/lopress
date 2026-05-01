@@ -96,6 +96,83 @@ pub fn show(ui: &mut egui::Ui, es: &mut EditingState) {
                 continue;
             }
 
+            // --- List editor ---
+            if block.r#type == "list" {
+                let ordered = block
+                    .attrs
+                    .get("ordered")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(if ordered { "Ordered list" } else { "Unordered list" })
+                            .weak(),
+                    );
+                    if ui.small_button("×").clicked() {
+                        deferred = Some(BlockAction::Delete { idx });
+                    }
+                });
+
+                let item_count = block.children.len();
+                for item_idx in 0..item_count {
+                    let prefix = if ordered {
+                        format!("{}. ", item_idx + 1)
+                    } else {
+                        "• ".to_string()
+                    };
+
+                    let Some(list) = doc.blocks.get_mut(idx) else {
+                        break;
+                    };
+                    let Some(item) = list.children.get_mut(item_idx) else {
+                        break;
+                    };
+                    if item.children.is_empty() {
+                        item.children.push(Block::paragraph(""));
+                    }
+                    let Some(para) = item.children.get_mut(0) else {
+                        break;
+                    };
+                    let text = para.text.get_or_insert_with(String::new);
+
+                    ui.horizontal(|ui| {
+                        ui.label(&prefix);
+                        let te_id = egui::Id::new(("list_item", idx, item_idx));
+                        let te_output = egui::TextEdit::singleline(text)
+                            .id(te_id)
+                            .desired_width(f32::INFINITY)
+                            .show(ui);
+                        if te_output.response.changed() {
+                            became_dirty = true;
+                        }
+                        if te_output.response.has_focus() {
+                            ui.input(|i| {
+                                if i.key_pressed(egui::Key::Enter) {
+                                    deferred = Some(BlockAction::AddListItem { list_idx: idx });
+                                }
+                                if i.key_pressed(egui::Key::Backspace) && text.is_empty() {
+                                    deferred = Some(BlockAction::DeleteListItem {
+                                        list_idx: idx,
+                                        item_idx,
+                                    });
+                                }
+                            });
+                        }
+                        if ui.small_button("×").clicked() {
+                            deferred = Some(BlockAction::DeleteListItem {
+                                list_idx: idx,
+                                item_idx,
+                            });
+                        }
+                    });
+                }
+                if ui.small_button("+ Add item").clicked() {
+                    deferred = Some(BlockAction::AddListItem { list_idx: idx });
+                }
+                continue;
+            }
+
             let block_type = block.r#type.clone();
             let level = block
                 .attrs
@@ -191,6 +268,10 @@ fn apply_block_action(blocks: &mut Vec<Block>, action: BlockAction) {
             ops::change_block_type(blocks, idx, new_type, level);
         }
         BlockAction::Delete { idx } => ops::delete_block(blocks, idx),
+        BlockAction::AddListItem { list_idx } => ops::add_list_item(blocks, list_idx),
+        BlockAction::DeleteListItem { list_idx, item_idx } => {
+            ops::delete_list_item(blocks, list_idx, item_idx);
+        }
     }
 }
 
@@ -249,6 +330,13 @@ enum BlockAction {
     },
     Delete {
         idx: usize,
+    },
+    AddListItem {
+        list_idx: usize,
+    },
+    DeleteListItem {
+        list_idx: usize,
+        item_idx: usize,
     },
 }
 

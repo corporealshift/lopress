@@ -5,6 +5,7 @@
 )]
 use lopress_core::Block;
 use lopress_editor::ops;
+use serde_json::json;
 
 fn para(t: &str) -> Block {
     Block::paragraph(t)
@@ -190,7 +191,62 @@ fn code_block_is_editable() {
 }
 
 #[test]
+fn list_is_editable() {
+    assert!(ops::is_editable("list"));
+}
+
+#[test]
 fn unknown_type_is_not_editable() {
     assert!(!ops::is_editable("image"));
     assert!(!ops::is_editable(""));
+}
+
+// ── list ops ────────────────────────────────────────────────────────────────
+
+fn list_block(ordered: bool, items: &[&str]) -> Block {
+    Block {
+        r#type: "list".into(),
+        attrs: json!({ "ordered": ordered }),
+        children: items
+            .iter()
+            .map(|t| Block {
+                r#type: "list_item".into(),
+                attrs: json!({}),
+                children: vec![Block::paragraph(*t)],
+                text: None,
+            })
+            .collect(),
+        text: None,
+    }
+}
+
+#[test]
+fn add_list_item_appends_empty_item() {
+    let mut blocks = vec![list_block(false, &["first"])];
+    ops::add_list_item(&mut blocks, 0);
+    let list = blocks.get(0).unwrap();
+    assert_eq!(list.children.len(), 2);
+    let new_item = list.children.get(1).unwrap();
+    let para = new_item.children.get(0).unwrap();
+    assert_eq!(para.text.as_deref(), Some(""));
+}
+
+#[test]
+fn delete_list_item_removes_item() {
+    let mut blocks = vec![list_block(false, &["a", "b", "c"])];
+    ops::delete_list_item(&mut blocks, 0, 1);
+    let list = blocks.get(0).unwrap();
+    assert_eq!(list.children.len(), 2);
+    let remaining_para = list.children.get(0).and_then(|i| i.children.get(0)).unwrap();
+    assert_eq!(remaining_para.text.as_deref(), Some("a"));
+}
+
+#[test]
+fn delete_last_list_item_leaves_one_empty() {
+    let mut blocks = vec![list_block(false, &["only"])];
+    ops::delete_list_item(&mut blocks, 0, 0);
+    let list = blocks.get(0).unwrap();
+    assert_eq!(list.children.len(), 1);
+    let para = list.children.get(0).and_then(|i| i.children.get(0)).unwrap();
+    assert_eq!(para.text.as_deref(), Some(""));
 }

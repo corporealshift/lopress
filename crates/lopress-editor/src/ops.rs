@@ -3,7 +3,7 @@ use serde_json::Value;
 
 /// Which block types the editor can edit (not read-only placeholders).
 pub fn is_editable(block_type: &str) -> bool {
-    matches!(block_type, "paragraph" | "heading" | "code_block")
+    matches!(block_type, "paragraph" | "heading" | "code_block" | "list")
 }
 
 /// Split the block at `idx` at byte offset `caret`. The left half stays at
@@ -91,5 +91,48 @@ pub fn delete_block(blocks: &mut Vec<Block>, idx: usize) {
     blocks.remove(idx);
     if blocks.is_empty() {
         blocks.push(Block::paragraph(""));
+    }
+}
+
+/// Add an empty item to the list block at `list_idx`.
+/// No-op if the block is not a list.
+pub fn add_list_item(blocks: &mut [Block], list_idx: usize) {
+    let Some(list) = blocks.get_mut(list_idx) else {
+        return;
+    };
+    if list.r#type != "list" {
+        return;
+    }
+    let new_item = Block {
+        r#type: "list_item".into(),
+        attrs: Value::Object(serde_json::Map::new()),
+        children: vec![Block::paragraph("")],
+        text: None,
+    };
+    list.children.push(new_item);
+}
+
+/// Remove item at `item_idx` from the list block at `list_idx`.
+/// If removing the last item, replaces it with a single empty item so the
+/// list always has at least one item.
+pub fn delete_list_item(blocks: &mut [Block], list_idx: usize, item_idx: usize) {
+    let Some(list) = blocks.get_mut(list_idx) else {
+        return;
+    };
+    if list.r#type != "list" || list.children.is_empty() {
+        return;
+    }
+    if list.children.len() == 1 {
+        if let Some(item) = list.children.get_mut(0) {
+            if let Some(para) = item.children.get_mut(0) {
+                para.text = Some(String::new());
+            } else {
+                item.children.push(Block::paragraph(""));
+            }
+        }
+        return;
+    }
+    if item_idx < list.children.len() {
+        list.children.remove(item_idx);
     }
 }
