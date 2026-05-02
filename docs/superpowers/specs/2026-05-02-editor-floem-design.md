@@ -13,11 +13,10 @@
 - Block toolbar above the focused block: type changer, B/I/code/link buttons, delete.
 - Drag handles for block reorder, hover-revealed.
 - Multi-block keyboard selection: Shift+arrow extends across block boundaries; multi-block delete, copy/cut/paste, and inline-toggle operations all work.
-- Undo/redo with sensible action coalescing.
 - Plugin block types render with a built-in editor kind (declared by the plugin) plus an auto-generated form for the plugin's attrs. See section 12, "Plugin Block Rendering."
 - Same on-disk format as today (markdown via `lopress-core::serialize`). No changes to `lopress-core`, `lopress-build`, `lopress-serve`, `lopress-watch`, or `lopress-gui-host`.
 - Mac/Linux/Windows all ship from `main` continuously through the existing CI release matrix.
-- UI zoom (Cmd/Ctrl+=, Cmd/Ctrl+−, Cmd/Ctrl+0) and persisted last-window-size.
+- Persisted last-window-size and position.
 
 ### Non-Goals (deferred indefinitely, not v2)
 
@@ -26,6 +25,11 @@
 - Syntax highlighting as a built-in editor feature. Implemented as a plugin block type, not part of the core editor. The plugin declares `editor = "code"` to reuse the built-in code-block editor and provides its own HTML template for build-time syntax-highlighted output.
 - Collaborative editing, comment threads, edit history.
 - Automated GUI tests. Manual smoke checklist only.
+
+### Deferred to a follow-up phase (not v1, but planned)
+
+- **Undo/redo.** Action stack, coalescing rules, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z bindings, captured selection states. Architectural foundation is preserved in v1 (every mutation is a discrete `BlockAction` going through a single `apply` chokepoint), so the follow-up phase wires up the stack and shortcuts without rewriting mutation sites.
+- **UI zoom.** `Cmd/Ctrl+=` / `Cmd/Ctrl+−` / `Cmd/Ctrl+0` keyboard zoom and a persisted `ui_zoom` setting. Tiny but not zero — borderline trivial. Defer with the rest.
 
 ## 2. Architecture
 
@@ -204,7 +208,7 @@ Character input, Backspace, Delete, Enter, and slash-menu trigger flow to the fo
 
 When the selection is non-collapsed and spans more than one block:
 
-- *Delete / Backspace / character input replacing selection* — splits the leading and trailing blocks at the selection boundaries, deletes everything between, merges what's left into a single block whose kind is the leading block's kind. Single inverse action for undo.
+- *Delete / Backspace / character input replacing selection* — splits the leading and trailing blocks at the selection boundaries, deletes everything between, merges what's left into a single block whose kind is the leading block's kind. Implemented as a single `BlockAction` so it survives as one logical operation if undo is added later.
 - *Ctrl+B / Ctrl+I / Ctrl+E* — toggle the inline flag across every run in the selection. Toggle direction: if every touched character has the flag, clear it; otherwise set it.
 - *Ctrl+K (link)* — wrap selection in a link with an empty URL placeholder; focus the URL field for editing.
 - *Copy / Cut* — serialize the selection to a multi-block clipboard format. Two payloads written to the clipboard simultaneously: markdown (for external paste into other apps) and a serialized `Vec<EditorBlock>` slice (internal MIME type, for round-trip preservation when pasting back into the editor).
@@ -280,40 +284,21 @@ Every edit marks `doc.dirty`. A debouncer at the EditorPane level fires `Session
 
 The 500 ms debounce is new — the egui editor saves on every keystroke. With Floem we have a real event loop that makes debouncing trivial, and it'll significantly cut watcher/rebuild churn during typing without changing the user-visible "live preview updates as I type" feel.
 
-## 8. Undo / Redo
+## 8. Action Shape (Undo Foundation)
 
-Per-document undo stack, max 1000 entries. Every mutation goes through `apply(action) -> InverseAction`; the inverse is pushed onto the undo stack. Redo stack is cleared on any new action.
+Undo/redo itself is deferred to a follow-up phase. What ships in v1 is the architectural shape that lets undo be added cheaply later: every block-tree mutation goes through a single `apply(action: BlockAction)` chokepoint, where `BlockAction` is a discrete enum (Insert, Move, Delete, Split, Merge, ChangeType, ToggleInline, EditText, EditAttrs, etc.). No mutation happens in-place outside that path.
 
-### Action coalescing rules
+This costs nothing — the egui editor already does this — and the next phase's work becomes "wire up an undo stack that records actions and applies inverses," not "rewrite every mutation site to be invertible." Inverse construction itself is also deferred to that phase.
 
-- Consecutive single-character inserts within 500 ms in the same block coalesce.
-- Consecutive single-character deletes within 500 ms in the same block coalesce.
-- Selection toggles (Bold / Italic / Code / Link) never coalesce — each is its own undo step.
-- Block-structural actions (Insert, Move, Delete, SplitBlock, MergeBlock, ChangeType) never coalesce.
-
-### Keyboard
-
-- `Cmd/Ctrl+Z` — undo.
-- `Cmd/Ctrl+Y` and `Cmd/Ctrl+Shift+Z` — redo.
-
-### Selection in undo state
-
-Selection state is part of every action. Undo restores the selection that existed before the action; redo restores the selection that resulted from it.
+In v1, callers of `apply` discard the action after applying. The next phase changes that to push it onto a stack with its inverse.
 
 ## 9. Dimensions and Resolution Scaling
 
 All dimensions in this spec are **logical pixels**. Floem (via winit) is DPI-aware: a `220.0` width on a 2x display renders at 440 device pixels and looks the same physical size as on a 1x display. Per-monitor DPI is handled when the window moves between monitors. Same convention as CSS `px`, gpui's `Pixels`, egui's `f32` sizes.
 
-### UI zoom
+### UI zoom (deferred)
 
-A persisted `ui_zoom: f32` (default 1.0, range 0.5–3.0) lives in app settings.
-
-- Multiplied into Floem's root scale factor — every logical pixel in the app gets scaled by this in addition to the OS DPI scale. Single source of truth, no per-widget zoom math.
-- Keyboard handlers in the app shell:
-  - `Cmd/Ctrl+=` → `zoom *= 1.1`, clamped to 3.0.
-  - `Cmd/Ctrl+−` → `zoom /= 1.1`, clamped to 0.5.
-  - `Cmd/Ctrl+0` → `zoom = 1.0`.
-- Persists to the same settings file as `recents`.
+User-configurable UI zoom (`Cmd/Ctrl+=` / `Cmd/Ctrl+−` / `Cmd/Ctrl+0`) and a persisted `ui_zoom: f32` setting are deferred to a follow-up phase. Floem's existing per-monitor DPI handling means physical sizes already track the OS scale; the missing piece is a user override on top of that. When added later, it'll be a single multiplier into Floem's root scale factor plus three keyboard handlers and one settings-file field.
 
 ### Custom-painted UI
 
@@ -334,7 +319,6 @@ A single JSON file `settings.json` under the platform's standard config director
 ```json
 {
   "recents": [...],
-  "ui_zoom": 1.0,
   "window": {
     "width": 1200.0,
     "height": 800.0,
@@ -345,7 +329,7 @@ A single JSON file `settings.json` under the platform's standard config director
 }
 ```
 
-Loaded at app startup; written on relevant events (workspace opened, zoom changed, window resized/moved/closed).
+Loaded at app startup; written on relevant events (workspace opened, window resized/moved/closed). The `ui_zoom` field is reserved for a future phase; readers should ignore unknown fields and writers should not emit them in v1.
 
 **Migration from existing `recents.json`.** On first launch under the new editor, if `settings.json` does not exist but `recents.json` does, the recent-workspaces list is read from `recents.json`, written into the new `settings.json`, and `recents.json` is deleted. One-shot migration; no compatibility shim retained beyond first launch.
 
@@ -372,11 +356,9 @@ A short checklist file run before each release:
 5. Insert a heading via slash command.
 6. Drag a block to reorder.
 7. Select across blocks with Shift+Down, delete the selection.
-8. Undo, see selection restored.
-9. Redo.
-10. Save (via debounce), see preview update in browser.
-11. Close window, confirm dirty save flush.
-12. Re-open, confirm window position and zoom restored.
+8. Save (via debounce), see preview update in browser.
+9. Close window, confirm dirty save flush.
+10. Re-open, confirm window position restored.
 
 No automated GUI tests in v1 — Floem doesn't yet have a great story for them, and the cost isn't worth it for a personal tool.
 
@@ -455,18 +437,17 @@ After approval of this spec, the implementation plan will be written to `docs/su
 Expected high-level task ordering:
 
 1. Workspace plumbing — delete egui code, add Floem dep, scaffold empty `lopress-editor` and Floem `main.rs` that opens an empty window.
-2. App shell — Welcome → Editing view transition, settings file persistence, UI zoom, window size restore.
+2. App shell — Welcome → Editing view transition, settings file persistence, window size restore.
 3. Document model — `EditorDoc`, `EditorBlock`, `InlineRun`, `PluginMeta`, `from_core` / `to_core` converters, round-trip tests.
 4. Static block rendering (read-only) — render every built-in block kind with correct typography. No editing yet.
 5. Single-block inline-runs editor — caret, character input, basic keyboard, no styling yet.
 6. Inline toggles — Bold / Italic / Code / Link via Ctrl shortcuts and selection-flag math.
-7. Block structural actions — Split / Merge / Insert / Delete / Move / ChangeType, with `apply + inverse`.
+7. Block structural actions — Split / Merge / Insert / Delete / Move / ChangeType, all going through a single `apply(BlockAction)` chokepoint.
 8. Block toolbar.
 9. Slash command menu.
 10. Drag-and-drop reorder.
 11. Multi-block selection — DocSelection, keyboard routing, caret-x cache, multi-block delete/toggle/copy/paste.
-12. Undo / redo stack with coalescing.
-13. Plugin block rendering — `PluginRegistry` integration, attr form generation, plugin block round-trip.
-14. Sidebar, Inspector, Footer ports.
-15. Save debounce + rebuild integration.
-16. Manual smoke checklist run.
+12. Plugin block rendering — `PluginRegistry` integration, attr form generation, plugin block round-trip.
+13. Sidebar, Inspector, Footer ports.
+14. Save debounce + rebuild integration.
+15. Manual smoke checklist run.
