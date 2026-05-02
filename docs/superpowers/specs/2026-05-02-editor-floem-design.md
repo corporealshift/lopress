@@ -1,0 +1,391 @@
+# Editor Migration to Floem — Design Spec
+
+**Date:** 2026-05-02
+**Status:** draft, awaiting review
+**Replaces:** the egui editor in `crates/lopress-editor` and the `eframe` app shell in `src/main.rs`
+
+## 1. Goals and Non-Goals
+
+### Goals (single ship, no v1/v2 phasing)
+
+- Block-level WYSIWYG editor in pure Rust on Floem. Inline bold, italic, links, and inline-code render as styled text in place — no visible markdown chars in the edit surface.
+- Slash-command block insertion (`/heading`, `/code`, `/list`, etc.) from within any block.
+- Block toolbar above the focused block: type changer, B/I/code/link buttons, delete.
+- Drag handles for block reorder, hover-revealed.
+- Multi-block keyboard selection: Shift+arrow extends across block boundaries; multi-block delete, copy/cut/paste, and inline-toggle operations all work.
+- Undo/redo with sensible action coalescing.
+- Same on-disk format as today (markdown via `lopress-core::serialize`). No changes to `lopress-core`, `lopress-build`, `lopress-serve`, `lopress-watch`, or `lopress-gui-host`.
+- Mac/Linux/Windows all ship from `main` from day one, even if Windows is rough.
+- UI zoom (Cmd/Ctrl+=, Cmd/Ctrl+−, Cmd/Ctrl+0) and persisted last-window-size.
+
+### Non-Goals (deferred indefinitely, not v2)
+
+- WYSIWYG editing of tables, footnotes, raw HTML, or embeds. These round-trip losslessly through the file but render as opaque placeholder cards in the editor.
+- Syntax highlighting in code blocks. v1 shows monospace text and a language label, no color.
+- Collaborative editing, comment threads, edit history.
+- Automated GUI tests. Manual smoke checklist only.
+
+## 2. Architecture
+
+### Workspace and binary layout
+
+Single in-place replacement. No parallel binaries, no feature flag.
+
+```
+crates/
+  lopress-core/          unchanged — canonical Block tree, parse, serialize
+  lopress-build/         unchanged
+  lopress-serve/         unchanged
+  lopress-watch/         unchanged
+  lopress-gui-host/      unchanged — framework-independent Session layer
+  lopress-editor/        REWRITTEN — Floem-based block editor + inline runs model
+src/
+  main.rs                REWRITTEN — Floem app shell (replaces eframe shell)
+```
+
+The egui code is deleted at the start of the migration. Fallback if Floem turns out to be wrong: `git revert` to a recent egui commit. Not free but not catastrophic.
+
+During the build-out there is no working GUI editor on `main`. This is acceptable because the user can edit markdown files directly while the rewrite proceeds.
+
+### Floem dependency
+
+Pin Floem to a known-good crates.io version in the workspace `Cargo.toml`. The exact version is selected by the first task of the implementation plan — at that point we read the latest Floem release notes, pick a recent stable version that compiles cleanly, and pin it. Bumps thereafter are deliberate and reviewed.
+
+If a needed feature only exists on `main`, switch the single Floem entry to a git rev with a comment explaining why. Don't track Floem `main` by default.
+
+For inline-markdown parsing, use `pulldown-cmark` (already in the lopress dependency tree). Hand-roll the inline serializer; the supported subset is small enough that a focused implementation is simpler than wrestling a general-purpose markdown emitter.
+
+### Cross-platform stance
+
+Mac and Linux are first-class; Windows ships from day one but is allowed to have visible rough edges (input quirks, occasional crashes from upstream Floem/winit). The release artifact matrix from the existing CI continues to produce all three platforms.
+
+## 3. Document and Inline-Runs Model
+
+The editor crate gets its own working representation. `lopress-core::Block` stays the canonical on-disk shape; the editor's model is a working copy that converts in/out at load and save.
+
+```rust
+struct EditorDoc {
+    blocks: Vec<EditorBlock>,
+    front_matter: FrontMatter,        // passes through unchanged
+}
+
+struct EditorBlock {
+    id: BlockId,                      // stable ID for focus/DnD; not persisted
+    kind: BlockKind,
+    body: BlockBody,
+}
+
+enum BlockKind {
+    Paragraph,
+    Heading(u8),                      // 1..=6
+    Code { lang: String },
+    List { ordered: bool },
+    Opaque { type_name: String },
+}
+
+enum BlockBody {
+    Inline(Vec<InlineRun>),           // paragraph, heading
+    Code(String),                     // raw code, no inline runs
+    List(Vec<ListItem>),              // nested items
+    Opaque(serde_json::Value),        // raw lossless round-trip
+}
+
+struct ListItem {
+    id: BlockId,
+    runs: Vec<InlineRun>,
+}
+
+struct InlineRun {
+    text: String,
+    bold: bool,
+    italic: bool,
+    code: bool,                       // inline code, monospace span
+    link: Option<String>,             // url; None if not a link
+}
+```
+
+### Loading
+
+`lopress-gui-host::load_document` returns a `lopress_core::Block` tree. The editor crate has a `from_core` converter:
+
+- `paragraph` / `heading` → parse `block.text` via `pulldown-cmark` inline-only mode → `Vec<InlineRun>`. Adjacent runs with identical flags are coalesced.
+- `code_block` → `BlockBody::Code(text)`, language preserved on `BlockKind::Code { lang }`.
+- `list` whose `list_item` children each contain only a single paragraph → `BlockBody::List(items)`, each item's paragraph text parsed into runs.
+- `list` with at least one `list_item` containing anything more complex (nested lists, multiple children, code blocks, etc.) → the entire list becomes `BlockBody::Opaque` to preserve structure losslessly. The editor will render it as an opaque card; full editing requires editing the markdown directly.
+- Any other block type → `BlockBody::Opaque` storing the original block's serialized JSON, with `BlockKind::Opaque { type_name }`.
+
+### Saving
+
+A `to_core` converter does the reverse:
+
+- `Vec<InlineRun>` → markdown string by emitting `**text**`, `_text_`, `` `text` ``, `[text](url)` for runs whose flags are set. Adjacent runs with identical flags coalesced. Nested formatting (e.g. bold inside link) preserved.
+- `Opaque` blocks reconstructed verbatim from their stored JSON.
+- Resulting `lopress_core::Block` tree feeds `lopress-gui-host::save`.
+
+### Round-trip discipline
+
+The inline subset modeled is exactly: bold, italic, inline-code, link. Anything else (footnote refs, raw HTML, strikethrough, etc.) is preserved by passthrough — text outside the supported markers is stored verbatim in run text. Property-based tests assert round-trip equality on a fixture corpus that includes:
+
+- Pure prose paragraphs.
+- Mixed bold/italic/code/link runs in various combinations.
+- Edge cases: `**` adjacent to whitespace, links with parentheses in URLs, escaped `\*`, code spans containing backticks.
+- Nested structures (lists inside lists, formatted text inside list items).
+- Documents with at least one opaque block to ensure passthrough integrity.
+
+## 4. Editor Pane Structure
+
+```
+EditorPane (Floem view)
+  reads &EditorDoc
+  owns DocSelection
+  routes keyboard input
+  renders a vertically scrollable list of BlockView
+  emits BlockAction up to the doc owner
+
+BlockView (per-block Floem view, polymorphic on BlockKind)
+  ParagraphView   custom inline-runs editor
+  HeadingView     custom inline-runs editor + level-styled font
+  CodeView        Floem text editor (plain) + lang dropdown
+  ListView        nested column of list-item views
+  OpaqueView      placeholder card showing block.type_name and a "raw view" toggle
+```
+
+The custom inline-runs editor is the central widget. It owns one `Vec<InlineRun>` for one block, renders the runs as styled text, and handles:
+
+- Caret positioning (run-index + char-offset-within-run).
+- Local selection rendering (when the doc selection overlaps this block).
+- Character input (insert at caret, splitting the run if mid-run).
+- Toggle commands (Bold / Italic / Code / Link via Ctrl+B/I/E/K, block toolbar buttons, or slash menu) — toggle the relevant flag on the runs touching the selection, splitting and merging adjacent runs as needed.
+- Backspace, Delete, Enter (split block), Backspace-at-start (merge with previous block).
+- IME via Floem's input handling.
+
+### Selection model — document-level
+
+```rust
+struct DocPosition {
+    block: BlockId,
+    run_index: usize,
+    char_offset: usize,
+}
+
+struct DocSelection {
+    anchor: DocPosition,
+    head: DocPosition,
+}
+// Collapsed iff anchor == head; "caret" is just collapsed selection.
+```
+
+`EditorPane` owns the `DocSelection`. Each `BlockView` reads the slice of the selection that overlaps its block (none / partial-leading / full / partial-trailing) and renders the highlight + caret accordingly. Only the block holding `head` paints a blinking caret.
+
+### Keyboard routing
+
+`EditorPane` intercepts navigation and selection keys before block views see them:
+
+- `←` `→` `↑` `↓` `Home` `End` `PgUp` `PgDn` move `head` and collapse selection to it.
+- `Shift+` modifier on any of those extends `head` while leaving `anchor` fixed.
+- `Cmd/Ctrl+A` selects the whole document.
+
+Vertical arrows cross block boundaries by computing the target block + nearest-x-position from a per-block geometry cache populated during the previous frame's render (see "Caret-x cache" below).
+
+Character input, Backspace, Delete, Enter, and slash-menu trigger flow to the focused block's view (the one holding `head`) when the selection is collapsed.
+
+### Multi-block operations
+
+When the selection is non-collapsed and spans more than one block:
+
+- *Delete / Backspace / character input replacing selection* — splits the leading and trailing blocks at the selection boundaries, deletes everything between, merges what's left into a single block whose kind is the leading block's kind. Single inverse action for undo.
+- *Ctrl+B / Ctrl+I / Ctrl+E* — toggle the inline flag across every run in the selection. Toggle direction: if every touched character has the flag, clear it; otherwise set it.
+- *Ctrl+K (link)* — wrap selection in a link with an empty URL placeholder; focus the URL field for editing.
+- *Copy / Cut* — serialize the selection to a multi-block clipboard format. Two payloads written to the clipboard simultaneously: markdown (for external paste into other apps) and a serialized `Vec<EditorBlock>` slice (internal MIME type, for round-trip preservation when pasting back into the editor).
+- *Paste* — if the internal payload is present, splice it in. Otherwise parse pasted text as markdown into blocks and splice. Either way replaces the selection.
+
+### Caret-x cache
+
+Vertical arrow navigation across blocks needs to land at the visually-correct x-position in the target block, not at the same character index. Each `BlockView`'s render writes its run geometry (per-character logical-x positions for the current frame) into a per-block cache keyed by `BlockId`. When the user presses `↑`/`↓` and the target is a different block, `EditorPane` reads the source block's cached x for the current `head`, then walks the target block's cache to find the closest character position.
+
+Cache is invalidated when the block's content or width changes; on a clean miss, navigation falls back to "char index N of target block" and the cache populates next frame.
+
+### Drag handles
+
+Each block has a hover-revealed `⋮⋮` handle on the left, opacity 0 by default and 1 on block hover. Dragging starts on mousedown over the handle and emits a "move from→to" action on drop. The drop indicator is a horizontal line at the gap between blocks, which thickens when a valid drop target is hovered.
+
+### Block toolbar
+
+Anchored above the **focused** block (the one holding `head`). Visible whenever a block is focused, regardless of mouse hover. Despite the "hover toolbar" shorthand we've used informally, the trigger is keyboard/mouse focus, not pointer hover. Contents:
+
+- Type combobox: `P / H1 / H2 / H3 / Code / UL / OL`. Change type via `BlockAction::ChangeType`.
+- Bold / Italic / Code / Link toggle buttons. Reflect the current selection state (filled if every char in selection has the flag).
+- Delete button.
+
+Toolbar position recomputes on every frame to track the focused block as the layout shifts.
+
+### Slash command menu
+
+When the user types `/` at the start of an empty paragraph block, a popup opens with selectable items: Paragraph, Heading 1, Heading 2, Heading 3, Code block, Unordered list, Ordered list. Up/Down arrows navigate, Enter confirms, Escape closes. Selecting an item transforms the current block via `BlockAction::ChangeType`.
+
+When `/` is typed mid-text or in a non-empty block, it's treated as a literal character — no popup.
+
+## 5. Block Types in v1
+
+| Type | Body | Editor view | Notes |
+|------|------|-------------|-------|
+| Paragraph | `Inline` | inline-runs editor | proportional 15 logical px |
+| Heading 1..=6 | `Inline` | inline-runs editor | sizes 32/26/22/18/16/14 logical px |
+| Code (with lang) | `Code` | plain monospace text editor + lang dropdown | no syntax highlighting in v1 |
+| Unordered list | `List` | column of inline-runs editors with bullet prefix | one nesting level |
+| Ordered list | `List` | column of inline-runs editors with number prefix | one nesting level |
+| Opaque (any other type) | `Opaque` | placeholder card showing `[type_name]` and a raw-JSON toggle | round-trips losslessly |
+
+List items can themselves have inline formatting. Nested lists (lists inside list items) are not editable in v1 — they round-trip as part of the opaque payload if encountered.
+
+## 6. Other Panes
+
+These are mechanical ports. Each becomes a Floem view; behavior matches the existing egui counterparts unless explicitly noted.
+
+### Welcome
+
+Single centered column. "Open workspace" button (uses `rfd` for the native dir picker, same as today), recent workspaces list (loaded from the existing `recents.rs` JSON in the same path — file format unchanged), error banner shown when the previous open failed. Clicking a recent calls `Session::open` and transitions to the editing view.
+
+### Sidebar
+
+Vertical list grouped by Posts / Pages. Each entry shows title, draft pill, parse-error pill. Active row highlighted. Click → `EditingState::open_document`. Sticky "+ New post" / "+ New page" buttons at the bottom (write a stub markdown file under the appropriate dir then open it).
+
+### Inspector
+
+Right-pinned panel, 280 logical px wide. Form for front-matter fields: title (text), slug (text, derived placeholder when empty), date (text, ISO format — no calendar widget in v1), tags (comma-separated text), draft (bool). Edits set `doc.dirty`.
+
+### Footer
+
+Single horizontal strip at the bottom. Build status indicator (idle/building/ok/failed with message), save state (saved / unsaved / save error), word count, server URL (click-to-copy). All values pulled from `Session::build_status()`, `Session::serve_status()`, and `EditorDoc` — same data sources as the egui version.
+
+### App shell layout
+
+`Welcome` is its own top-level view. Once a workspace opens, the layout is a 3-column split — Sidebar (220 logical px) | EditorPane (flex) | Inspector (280 logical px) — with the Footer pinned below the whole row.
+
+## 7. Save Behavior
+
+Every edit marks `doc.dirty`. A debouncer at the EditorPane level fires `Session::save` followed by `Session::rebuild` 500 ms after the last keystroke. On window close, force-save synchronously if dirty. Error from save shown in the footer; doesn't block the editor.
+
+The 500 ms debounce is new — the egui editor saves on every keystroke. With Floem we have a real event loop that makes debouncing trivial, and it'll significantly cut watcher/rebuild churn during typing without changing the user-visible "live preview updates as I type" feel.
+
+## 8. Undo / Redo
+
+Per-document undo stack, max 1000 entries. Every mutation goes through `apply(action) -> InverseAction`; the inverse is pushed onto the undo stack. Redo stack is cleared on any new action.
+
+### Action coalescing rules
+
+- Consecutive single-character inserts within 500 ms in the same block coalesce.
+- Consecutive single-character deletes within 500 ms in the same block coalesce.
+- Selection toggles (Bold / Italic / Code / Link) never coalesce — each is its own undo step.
+- Block-structural actions (Insert, Move, Delete, SplitBlock, MergeBlock, ChangeType) never coalesce.
+
+### Keyboard
+
+- `Cmd/Ctrl+Z` — undo.
+- `Cmd/Ctrl+Y` and `Cmd/Ctrl+Shift+Z` — redo.
+
+### Selection in undo state
+
+Selection state is part of every action. Undo restores the selection that existed before the action; redo restores the selection that resulted from it.
+
+## 9. Dimensions and Resolution Scaling
+
+All dimensions in this spec are **logical pixels**. Floem (via winit) is DPI-aware: a `220.0` width on a 2x display renders at 440 device pixels and looks the same physical size as on a 1x display. Per-monitor DPI is handled when the window moves between monitors. Same convention as CSS `px`, gpui's `Pixels`, egui's `f32` sizes.
+
+### UI zoom
+
+A persisted `ui_zoom: f32` (default 1.0, range 0.5–3.0) lives in app settings.
+
+- Multiplied into Floem's root scale factor — every logical pixel in the app gets scaled by this in addition to the OS DPI scale. Single source of truth, no per-widget zoom math.
+- Keyboard handlers in the app shell:
+  - `Cmd/Ctrl+=` → `zoom *= 1.1`, clamped to 3.0.
+  - `Cmd/Ctrl+−` → `zoom /= 1.1`, clamped to 0.5.
+  - `Cmd/Ctrl+0` → `zoom = 1.0`.
+- Persists to the same settings file as `recents`.
+
+### Custom-painted UI
+
+The inline-runs editor's caret line, selection highlights, drag-handle hit areas, and block-toolbar offsets must use logical-pixel coordinates. Floem's painting API operates in logical pixels by default, so this is the path of least resistance, but it's worth calling out as a discipline because mixing in raw device pixels would silently break on retina displays.
+
+### Asset handling
+
+v1 uses Unicode glyphs (`⠿`, `×`, `⋮⋮`, `•`) and SVG/path-rendered shapes for icons. Both scale cleanly. No bitmap assets in v1.
+
+### Window startup size
+
+Default `1200 × 800` logical px. Last window size and position persist to the settings file and are restored on launch, clamped to the available monitor.
+
+## 10. Settings File
+
+A single JSON file `settings.json` under the platform's standard config directory (resolved via the `directories` crate, same way `recents.rs` does today). Contents:
+
+```json
+{
+  "recents": [...],
+  "ui_zoom": 1.0,
+  "window": {
+    "width": 1200.0,
+    "height": 800.0,
+    "x": 100.0,
+    "y": 100.0,
+    "maximized": false
+  }
+}
+```
+
+Loaded at app startup; written on relevant events (workspace opened, zoom changed, window resized/moved/closed).
+
+**Migration from existing `recents.json`.** On first launch under the new editor, if `settings.json` does not exist but `recents.json` does, the recent-workspaces list is read from `recents.json`, written into the new `settings.json`, and `recents.json` is deleted. One-shot migration; no compatibility shim retained beyond first launch.
+
+## 11. Testing Strategy
+
+### Unit tests
+
+- **Inline-runs round-trip**: parse markdown → runs → serialize → markdown on a corpus of fixtures covering paragraphs with mixed bold/italic/code/link, edge cases (`**` adjacent to whitespace, links with parens in URLs, escaped `\*`, code spans with backticks).
+- **`BlockAction::apply` and inverses**: every action has a `roundtrip(action, doc)` test that asserts applying the inverse to the post-state restores the pre-state.
+- **Selection logic**: given a `Vec<EditorBlock>` and a `DocSelection`, assert what `delete_selection`, `toggle_bold`, `paste_blocks`, etc. produce. No Floem in these tests.
+
+### Integration tests
+
+- **Full document round-trip**: load a fixture markdown file via `lopress-gui-host`, convert to `EditorDoc`, convert back, save, diff against original. Must be byte-identical for the supported inline subset and lossless for opaque blocks.
+
+### Manual smoke checklist
+
+A short checklist file run before each release:
+
+1. Launch the app, see Welcome screen.
+2. Open a workspace, see Sidebar populated.
+3. Open a post, see blocks rendered.
+4. Type a paragraph with bold (Ctrl+B), italic (Ctrl+I), code (Ctrl+E), link (Ctrl+K).
+5. Insert a heading via slash command.
+6. Drag a block to reorder.
+7. Select across blocks with Shift+Down, delete the selection.
+8. Undo, see selection restored.
+9. Redo.
+10. Save (via debounce), see preview update in browser.
+11. Close window, confirm dirty save flush.
+12. Re-open, confirm window position and zoom restored.
+
+No automated GUI tests in v1 — Floem doesn't yet have a great story for them, and the cost isn't worth it for a personal tool.
+
+## 12. Implementation Plan
+
+After approval of this spec, the implementation plan will be written to `docs/superpowers/plans/2026-05-02-editor-floem.md` via the `writing-plans` skill. The plan will decompose the work into ordered tasks with explicit verifications, suitable for execution in subsequent sessions.
+
+Expected high-level task ordering:
+
+1. Workspace plumbing — delete egui code, add Floem dep, scaffold empty `lopress-editor` and Floem `main.rs` that opens an empty window.
+2. App shell — Welcome → Editing view transition, settings file persistence, UI zoom, window size restore.
+3. Document model — `EditorDoc`, `EditorBlock`, `InlineRun`, `from_core` / `to_core` converters, round-trip tests.
+4. Static block rendering (read-only) — render every block kind with correct typography. No editing yet.
+5. Single-block inline-runs editor — caret, character input, basic keyboard, no styling yet.
+6. Inline toggles — Bold / Italic / Code / Link via Ctrl shortcuts and selection-flag math.
+7. Block structural actions — Split / Merge / Insert / Delete / Move / ChangeType, with `apply + inverse`.
+8. Block toolbar.
+9. Slash command menu.
+10. Drag-and-drop reorder.
+11. Multi-block selection — DocSelection, keyboard routing, caret-x cache, multi-block delete/toggle/copy/paste.
+12. Undo / redo stack with coalescing.
+13. Sidebar, Inspector, Footer ports.
+14. Save debounce + rebuild integration.
+15. Manual smoke checklist run.
