@@ -16,7 +16,7 @@
 - Undo/redo with sensible action coalescing.
 - Plugin block types render with a built-in editor kind (declared by the plugin) plus an auto-generated form for the plugin's attrs. See section 12, "Plugin Block Rendering."
 - Same on-disk format as today (markdown via `lopress-core::serialize`). No changes to `lopress-core`, `lopress-build`, `lopress-serve`, `lopress-watch`, or `lopress-gui-host`.
-- Mac/Linux/Windows all ship from `main` from day one, even if Windows is rough.
+- Mac/Linux/Windows all ship from `main` continuously through the existing CI release matrix.
 - UI zoom (Cmd/Ctrl+=, Cmd/Ctrl+−, Cmd/Ctrl+0) and persisted last-window-size.
 
 ### Non-Goals (deferred indefinitely, not v2)
@@ -59,7 +59,7 @@ For inline-markdown parsing, use `pulldown-cmark` (already in the lopress depend
 
 ### Cross-platform stance
 
-Mac and Linux are first-class; Windows ships from day one but is allowed to have visible rough edges (input quirks, occasional crashes from upstream Floem/winit). The release artifact matrix from the existing CI continues to produce all three platforms.
+Mac, Linux, and Windows are all first-class. Floem is winit-based and Lapce ships production Windows binaries on the same stack, so no special Windows accommodation is expected. The existing CI release artifact matrix continues to produce all three platforms.
 
 ## 3. Document and Inline-Runs Model
 
