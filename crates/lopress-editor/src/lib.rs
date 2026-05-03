@@ -1,25 +1,17 @@
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::indexing_slicing,
-        clippy::string_slice,
-        clippy::integer_division,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_possible_wrap,
-        clippy::cast_precision_loss,
-        clippy::missing_panics_doc,
-        clippy::missing_errors_doc,
-    )
-)]
-
-pub mod app;
-pub mod ops;
-pub mod recents;
 pub mod state;
 pub mod ui;
 
-pub use app::LopressApp;
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("Floem launch failed: {0}")]
+    Launch(String),
+}
+
+/// Run the editor app. Returns when the window closes.
+///
+/// # Errors
+/// Returns `AppError::Launch` if the Floem runtime fails to start.
+pub fn run() -> Result<(), AppError> {
+    floem::launch(ui::root_view);
+    Ok(())
+}

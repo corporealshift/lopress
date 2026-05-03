@@ -69,8 +69,7 @@ thiserror = "1"
 toml = "0.8"
 walkdir = "2"
 webp = "0.3"
-eframe = "0.31"
-egui = "0.31"
+floem = "0.2"
 rfd = "0.15"
 open = "5"
 directories = "6"
@@ -87,9 +86,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-eframe = { workspace = true }
-egui = { workspace = true }
-rfd = { workspace = true }
 lopress-build = { path = "crates/lopress-build" }
 lopress-serve = { path = "crates/lopress-serve" }
 lopress-editor = { path = "crates/lopress-editor" }
