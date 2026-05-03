@@ -81,10 +81,15 @@ impl Settings {
             return Self::load_from(settings_path);
         }
         if legacy_recents_path.exists() {
+            #[derive(Deserialize, Default)]
+            struct LegacyRecentsFile {
+                #[serde(default)]
+                paths: Vec<PathBuf>,
+            }
             let raw = std::fs::read_to_string(legacy_recents_path)?;
-            let recents: Vec<PathBuf> = serde_json::from_str(&raw).unwrap_or_default();
+            let legacy: LegacyRecentsFile = serde_json::from_str(&raw).unwrap_or_default();
             let s = Self {
-                recents,
+                recents: legacy.paths,
                 ..Self::default()
             };
             s.save_to(settings_path)?;
@@ -97,12 +102,12 @@ impl Settings {
 
 /// Resolve the platform-standard settings file path under the lopress config dir.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("dev", "lopress", "lopress")
+    directories::ProjectDirs::from("", "", "lopress")
         .map(|d| d.config_dir().join("settings.json"))
 }
 
 /// Resolve the legacy `recents.json` path for migration purposes.
 pub fn legacy_recents_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("dev", "lopress", "lopress")
+    directories::ProjectDirs::from("", "", "lopress")
         .map(|d| d.config_dir().join("recents.json"))
 }

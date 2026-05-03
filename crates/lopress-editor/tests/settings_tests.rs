@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
-use lopress_editor::settings::{Settings, WindowSettings};
+use lopress_editor::settings::Settings;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -50,10 +50,23 @@ fn migrates_recents_json() {
     let d = dir();
     let recents_path = d.path().join("recents.json");
     let settings_path = d.path().join("settings.json");
-    std::fs::write(&recents_path, r#"["/old/workspace"]"#).unwrap();
+    std::fs::write(&recents_path, r#"{"paths":["/old/workspace"]}"#).unwrap();
 
     let s = Settings::load_or_migrate(&settings_path, &recents_path).unwrap();
     assert_eq!(s.recents, vec![PathBuf::from("/old/workspace")]);
     assert!(!recents_path.exists(), "old recents.json should be deleted");
+    assert!(settings_path.exists());
+}
+
+#[test]
+fn malformed_legacy_recents_treated_as_empty() {
+    let d = dir();
+    let recents_path = d.path().join("recents.json");
+    let settings_path = d.path().join("settings.json");
+    std::fs::write(&recents_path, r#"this is not json"#).unwrap();
+
+    let s = Settings::load_or_migrate(&settings_path, &recents_path).unwrap();
+    assert!(s.recents.is_empty());
+    assert!(!recents_path.exists());
     assert!(settings_path.exists());
 }
