@@ -186,6 +186,92 @@ fn same_style(a: &InlineRun, b: &InlineRun) -> bool {
     a.bold == b.bold && a.italic == b.italic && a.code == b.code && a.link == b.link
 }
 
+// ── Selection ────────────────────────────────────────────────────────────────
+
+/// Single-block selection. A collapsed selection (`anchor == head`) is the
+/// caret. The `head` is what moves when the user extends with Shift+arrow;
+/// `anchor` stays put until the next non-extending motion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalSelection {
+    pub anchor: Caret,
+    pub head: Caret,
+}
+
+impl LocalSelection {
+    pub const START: Self = LocalSelection {
+        anchor: Caret::START,
+        head: Caret::START,
+    };
+
+    pub fn caret(c: Caret) -> Self {
+        Self { anchor: c, head: c }
+    }
+
+    pub fn is_collapsed(&self) -> bool {
+        self.anchor == self.head
+    }
+
+    /// `(min, max)` in document order.
+    pub fn ordered(&self) -> (Caret, Caret) {
+        if compare(self.anchor, self.head).is_le() {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
+    }
+}
+
+/// Lexicographic order on `(run, offset)`.
+pub fn compare(a: Caret, b: Caret) -> std::cmp::Ordering {
+    a.run.cmp(&b.run).then(a.offset.cmp(&b.offset))
+}
+
+/// Delete the range covered by `sel`, returning a collapsed selection at the
+/// start of the deleted range. Coalesces neighbour runs when their styles
+/// match.
+pub fn delete_selection(runs: &mut Vec<InlineRun>, sel: LocalSelection) -> LocalSelection {
+    if sel.is_collapsed() {
+        return sel;
+    }
+    let (start, end) = sel.ordered();
+    if start.run == end.run {
+        if let Some(run) = runs.get_mut(start.run) {
+            let byte_start = char_to_byte(&run.text, start.offset);
+            let byte_end = char_to_byte(&run.text, end.offset);
+            run.text.replace_range(byte_start..byte_end, "");
+        }
+    } else {
+        // Tail of the start run.
+        if let Some(run) = runs.get_mut(start.run) {
+            let byte = char_to_byte(&run.text, start.offset);
+            run.text.truncate(byte);
+        }
+        // Head of the end run.
+        if let Some(run) = runs.get_mut(end.run) {
+            let byte = char_to_byte(&run.text, end.offset);
+            run.text.replace_range(0..byte, "");
+        }
+        // Drain runs strictly between them.
+        if end.run > start.run + 1 {
+            runs.drain(start.run + 1..end.run);
+        }
+    }
+
+    // Drop empty runs that the deletion left behind, but keep at least one
+    // run (so subsequent edits have somewhere to go).
+    let mut i = 0;
+    while i < runs.len() {
+        if runs[i].text.is_empty() && runs.len() > 1 {
+            runs.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    coalesce_around(runs, start.run.min(runs.len().saturating_sub(1)));
+
+    LocalSelection::caret(start)
+}
+
 // ── Floem widget ─────────────────────────────────────────────────────────────
 //
 // This first-pass widget (Task 8 / Option A in the design discussion) does
@@ -205,35 +291,37 @@ use floem::views::{empty, h_stack_from_iter, text, Decorators};
 use floem::{AnyView, IntoView};
 
 const CARET_COLOR: Color = Color::rgb8(40, 40, 40);
+const SELECTION_BG: Color = Color::rgb8(180, 210, 255);
 
 /// Build the editable inline-runs widget.
 ///
-/// `runs` is the run vector (mutated in place by edits). `caret` tracks the
-/// edit position. `font_size` and `force_bold` allow the same widget to be
-/// reused for paragraphs and headings.
+/// `runs` is the run vector (mutated in place by edits). `selection` tracks
+/// both the caret position (collapsed selection) and any active selection.
+/// `font_size` and `force_bold` allow the same widget to be reused for
+/// paragraphs and headings.
 pub fn editable_inline(
     runs: RwSignal<Vec<InlineRun>>,
-    caret: RwSignal<Caret>,
+    selection: RwSignal<LocalSelection>,
     font_size: f32,
     force_bold: bool,
 ) -> impl IntoView {
     let focused: RwSignal<bool> = RwSignal::new(false);
 
-    // Re-render whenever runs / caret / focus change.
+    // Re-render whenever runs / selection / focus change.
     let body = floem::views::dyn_container(
-        move || (runs.get(), caret.get(), focused.get()),
-        move |(runs_v, caret_v, foc)| {
-            render_with_caret(&runs_v, caret_v, foc, font_size, force_bold)
+        move || (runs.get(), selection.get(), focused.get()),
+        move |(runs_v, sel_v, foc)| {
+            render_with_selection(&runs_v, sel_v, foc, font_size, force_bold)
         },
     )
     .style(|s| s.width_full());
 
     body.keyboard_navigable()
         .on_click_stop(move |_| {
-            // Click anywhere → snap caret to end-of-block. Real per-character
-            // hit-testing arrives in a follow-up; see module-level note.
+            // Click anywhere → collapse selection at end-of-block. Real
+            // per-character hit-testing arrives in a follow-up.
             let end = runs.with_untracked(|r| Caret::end(r));
-            caret.set(end);
+            selection.set(LocalSelection::caret(end));
         })
         .on_event(EventListener::FocusGained, move |_| {
             focused.set(true);
@@ -245,7 +333,7 @@ pub fn editable_inline(
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if handle_key_down(ke, runs, caret) {
+                if handle_key_down(ke, runs, selection) {
                     return EventPropagation::Stop;
                 }
             }
@@ -261,61 +349,74 @@ pub fn editable_inline(
         })
 }
 
-/// Decide what to do for a single `KeyEvent`. Returns `true` when handled
-/// (so the caller can stop propagation).
+/// Decide what to do for a single `KeyEvent`. Returns `true` when handled.
 fn handle_key_down(
     ke: &floem::keyboard::KeyEvent,
     runs: RwSignal<Vec<InlineRun>>,
-    caret: RwSignal<Caret>,
+    selection: RwSignal<LocalSelection>,
 ) -> bool {
+    let extending = ke.modifiers.shift();
+
     match ke.key.logical_key.clone() {
         Key::Named(NamedKey::ArrowLeft) => {
-            let new_caret = runs.with_untracked(|r| move_left(r, caret.get_untracked()));
-            caret.set(new_caret);
+            move_head(runs, selection, extending, |r, c| move_left(r, c));
             true
         }
         Key::Named(NamedKey::ArrowRight) => {
-            let new_caret = runs.with_untracked(|r| move_right(r, caret.get_untracked()));
-            caret.set(new_caret);
+            move_head(runs, selection, extending, |r, c| move_right(r, c));
             true
         }
         Key::Named(NamedKey::Home) => {
-            caret.set(Caret::START);
+            move_head(runs, selection, extending, |_r, _c| Caret::START);
             true
         }
         Key::Named(NamedKey::End) => {
-            let new_caret = runs.with_untracked(|r| Caret::end(r));
-            caret.set(new_caret);
+            move_head(runs, selection, extending, |r, _c| Caret::end(r));
             true
         }
         Key::Named(NamedKey::Backspace) => {
-            let mut new_caret = caret.get_untracked();
-            runs.update(|r| {
-                new_caret = backspace(r, new_caret);
-            });
-            caret.set(new_caret);
+            let sel = selection.get_untracked();
+            if sel.is_collapsed() {
+                let mut new_caret = sel.head;
+                runs.update(|r| {
+                    new_caret = backspace(r, new_caret);
+                });
+                selection.set(LocalSelection::caret(new_caret));
+            } else {
+                let mut new_sel = sel;
+                runs.update(|r| {
+                    new_sel = delete_selection(r, sel);
+                });
+                selection.set(new_sel);
+            }
             true
         }
         Key::Named(NamedKey::Delete) => {
-            let mut new_caret = caret.get_untracked();
-            runs.update(|r| {
-                new_caret = delete(r, new_caret);
-            });
-            caret.set(new_caret);
+            let sel = selection.get_untracked();
+            if sel.is_collapsed() {
+                let mut new_caret = sel.head;
+                runs.update(|r| {
+                    new_caret = delete(r, new_caret);
+                });
+                selection.set(LocalSelection::caret(new_caret));
+            } else {
+                let mut new_sel = sel;
+                runs.update(|r| {
+                    new_sel = delete_selection(r, sel);
+                });
+                selection.set(new_sel);
+            }
             true
         }
         Key::Named(NamedKey::Space) => {
-            insert_at_caret(runs, caret, ' ');
+            insert_at_selection(runs, selection, ' ');
             true
         }
         Key::Named(NamedKey::Enter) => {
-            // Reserved for block-split (Task 11). Swallow the keystroke so the
-            // user doesn't see a stray system beep on platforms that beep.
+            // Reserved for block-split (Task 11). Swallow the keystroke.
             true
         }
         _ => {
-            // Printable text: rely on KeyEvent.key.text. Skip when modifiers
-            // suggest a shortcut (Ctrl/Meta combos are handled elsewhere).
             if ke.modifiers.control() || ke.modifiers.meta() {
                 return false;
             }
@@ -326,33 +427,85 @@ fn handle_key_down(
                 if ch.is_control() {
                     continue;
                 }
-                insert_at_caret(runs, caret, ch);
+                insert_at_selection(runs, selection, ch);
             }
             true
         }
     }
 }
 
-fn insert_at_caret(runs: RwSignal<Vec<InlineRun>>, caret: RwSignal<Caret>, ch: char) {
-    let mut new_caret = caret.get_untracked();
-    runs.update(|r| {
-        new_caret = insert_char(r, new_caret, ch);
-    });
-    caret.set(new_caret);
+/// Move the selection's `head` using `motion`. When `extending` (Shift held)
+/// `anchor` stays put. Otherwise the selection collapses around the new head;
+/// if the selection was non-collapsed and the user pressed an arrow without
+/// shift, the caret jumps to the appropriate end of the prior selection
+/// rather than to head ± 1.
+fn move_head<F>(
+    runs: RwSignal<Vec<InlineRun>>,
+    selection: RwSignal<LocalSelection>,
+    extending: bool,
+    motion: F,
+) where
+    F: FnOnce(&[InlineRun], Caret) -> Caret,
+{
+    let sel = selection.get_untracked();
+    let pivot = if extending || sel.is_collapsed() {
+        sel.head
+    } else {
+        let (start, end) = sel.ordered();
+        if compare(sel.head, sel.anchor).is_le() {
+            start
+        } else {
+            end
+        }
+    };
+    // For non-extending arrow on a non-collapsed selection, pressing arrow
+    // collapses to the corresponding end without further motion.
+    let new_head = if !extending && !sel.is_collapsed() {
+        pivot
+    } else {
+        runs.with_untracked(|r| motion(r, pivot))
+    };
+    let new_sel = if extending {
+        LocalSelection {
+            anchor: sel.anchor,
+            head: new_head,
+        }
+    } else {
+        LocalSelection::caret(new_head)
+    };
+    selection.set(new_sel);
 }
 
-/// Render the runs as a wrapping flow of styled spans. When focused, splits
-/// the run that contains the caret in two and inserts a thin caret indicator
-/// between the halves.
-fn render_with_caret(
+fn insert_at_selection(
+    runs: RwSignal<Vec<InlineRun>>,
+    selection: RwSignal<LocalSelection>,
+    ch: char,
+) {
+    let sel = selection.get_untracked();
+    let mut new_caret = sel.head;
+    runs.update(|r| {
+        // Replace any non-collapsed selection first.
+        let collapsed = if sel.is_collapsed() {
+            sel
+        } else {
+            delete_selection(r, sel)
+        };
+        new_caret = insert_char(r, collapsed.head, ch);
+    });
+    selection.set(LocalSelection::caret(new_caret));
+}
+
+/// Render the runs as a wrapping flow of styled spans. When focused with a
+/// collapsed selection, inserts a caret bar at the head position. With a
+/// non-collapsed selection, the selected character range is rendered with a
+/// highlight background.
+fn render_with_selection(
     runs: &[InlineRun],
-    caret: Caret,
+    sel: LocalSelection,
     focused: bool,
     font_size: f32,
     force_bold: bool,
 ) -> AnyView {
-    // Empty runs vector — render only the caret (when focused) so the user
-    // has somewhere to type into. Otherwise an empty view.
     if runs.is_empty() {
         return if focused {
             caret_span(font_size).into_any()
@@ -361,25 +514,17 @@ fn render_with_caret(
         };
     }
 
-    let caret_run = caret.run.min(runs.len().saturating_sub(1));
-    let mut elements: Vec<AnyView> = Vec::with_capacity(runs.len() + 2);
-
+    let mut elements: Vec<AnyView> = Vec::with_capacity(runs.len() + 4);
     for (i, run) in runs.iter().enumerate() {
-        if focused && i == caret_run {
-            let chars: Vec<char> = run.text.chars().collect();
-            let off = caret.offset.min(chars.len());
-            let before: String = chars[..off].iter().collect();
-            let after: String = chars[off..].iter().collect();
-            if !before.is_empty() {
-                elements.push(run_span(run, before, font_size, force_bold));
-            }
-            elements.push(caret_span(font_size).into_any());
-            if !after.is_empty() {
-                elements.push(run_span(run, after, font_size, force_bold));
-            }
-        } else {
-            elements.push(run_span(run, run.text.clone(), font_size, force_bold));
-        }
+        emit_run_segments(
+            run,
+            i,
+            sel,
+            focused,
+            font_size,
+            force_bold,
+            &mut elements,
+        );
     }
 
     h_stack_from_iter(elements)
@@ -387,7 +532,89 @@ fn render_with_caret(
         .into_any()
 }
 
-fn run_span(run: &InlineRun, txt: String, font_size: f32, force_bold: bool) -> AnyView {
+/// Slice one run into segments at selection boundaries (and at the caret
+/// position when the selection is collapsed) and append the corresponding
+/// styled spans to `out`.
+fn emit_run_segments(
+    run: &InlineRun,
+    run_idx: usize,
+    sel: LocalSelection,
+    focused: bool,
+    font_size: f32,
+    force_bold: bool,
+    out: &mut Vec<AnyView>,
+) {
+    let chars: Vec<char> = run.text.chars().collect();
+    let len = chars.len();
+
+    // Selection extent in this run, in chars (exclusive upper bound).
+    let (start, end) = sel.ordered();
+    let sel_lo: Option<usize> = if start.run < run_idx {
+        Some(0)
+    } else if start.run == run_idx {
+        Some(start.offset.min(len))
+    } else {
+        None
+    };
+    let sel_hi: Option<usize> = if end.run > run_idx {
+        Some(len)
+    } else if end.run == run_idx {
+        Some(end.offset.min(len))
+    } else {
+        None
+    };
+    let sel_range: Option<(usize, usize)> = match (sel_lo, sel_hi) {
+        (Some(a), Some(b)) if a < b => Some((a, b)),
+        _ => None,
+    };
+
+    // Caret position in this run (only when collapsed and head is here).
+    let caret_off: Option<usize> = if focused && sel.is_collapsed() && sel.head.run == run_idx {
+        Some(sel.head.offset.min(len))
+    } else {
+        None
+    };
+
+    // Build sorted, deduped split points.
+    let mut splits: Vec<usize> = vec![0, len];
+    if let Some((a, b)) = sel_range {
+        splits.push(a);
+        splits.push(b);
+    }
+    if let Some(c) = caret_off {
+        splits.push(c);
+    }
+    splits.sort_unstable();
+    splits.dedup();
+
+    // Caret at the very start of the run is special-cased: nothing precedes
+    // it in this run, so the windowed loop wouldn't insert it.
+    if caret_off == Some(0) {
+        out.push(caret_span(font_size).into_any());
+    }
+
+    for w in splits.windows(2) {
+        let (lo, hi) = (w[0], w[1]);
+        if lo < hi {
+            let segment_text: String = chars[lo..hi].iter().collect();
+            let in_sel = sel_range
+                .map(|(a, b)| lo >= a && hi <= b)
+                .unwrap_or(false);
+            out.push(run_span(run, segment_text, font_size, force_bold, in_sel));
+        }
+        if Some(hi) == caret_off && hi != 0 {
+            out.push(caret_span(font_size).into_any());
+        }
+    }
+}
+
+fn run_span(
+    run: &InlineRun,
+    txt: String,
+    font_size: f32,
+    force_bold: bool,
+    in_selection: bool,
+) -> AnyView {
     let bold = run.bold || force_bold;
     let italic = run.italic;
     let code = run.code;
@@ -410,6 +637,9 @@ fn run_span(run: &InlineRun, txt: String, font_size: f32, force_bold: bool) -> A
             }
             if is_link {
                 s = s.color(LINK_COLOR);
+            }
+            if in_selection {
+                s = s.background(SELECTION_BG);
             }
             s
         })

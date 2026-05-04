@@ -4,7 +4,7 @@
 //! callers that don't yet need editing.
 
 use crate::model::types::InlineRun;
-use crate::ui::blocks::inline_editor::{editable_inline, Caret};
+use crate::ui::blocks::inline_editor::{editable_inline, LocalSelection};
 use crate::ui::blocks::paragraph::render_runs_with_size;
 use floem::reactive::RwSignal;
 use floem::views::Decorators;
@@ -25,9 +25,9 @@ fn font_size_for(level: u8) -> f32 {
 pub fn render_heading_editable(
     level: u8,
     runs: RwSignal<Vec<InlineRun>>,
-    caret: RwSignal<Caret>,
+    selection: RwSignal<LocalSelection>,
 ) -> impl IntoView {
-    editable_inline(runs, caret, font_size_for(level), true)
+    editable_inline(runs, selection, font_size_for(level), true)
         .style(|s| s.padding_top(16.).padding_bottom(8.))
 }
 

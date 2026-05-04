@@ -2,7 +2,8 @@
 
 use lopress_editor::model::types::InlineRun;
 use lopress_editor::ui::blocks::inline_editor::{
-    backspace, delete, insert_char, move_left, move_right, Caret,
+    backspace, compare, delete, delete_selection, insert_char, move_left, move_right, Caret,
+    LocalSelection,
 };
 
 fn plain(t: &str) -> InlineRun {
@@ -165,4 +166,95 @@ fn caret_end_of_empty_runs_is_start() {
 fn caret_end_of_runs() {
     let runs = vec![plain("ab"), bold("cdé")];
     assert_eq!(Caret::end(&runs), Caret { run: 1, offset: 3 });
+}
+
+#[test]
+fn compare_orders_by_run_then_offset() {
+    use std::cmp::Ordering;
+    assert_eq!(
+        compare(Caret { run: 0, offset: 1 }, Caret { run: 0, offset: 2 }),
+        Ordering::Less
+    );
+    assert_eq!(
+        compare(Caret { run: 1, offset: 0 }, Caret { run: 0, offset: 9 }),
+        Ordering::Greater
+    );
+    assert_eq!(
+        compare(Caret { run: 0, offset: 3 }, Caret { run: 0, offset: 3 }),
+        Ordering::Equal
+    );
+}
+
+#[test]
+fn local_selection_ordered_swaps_when_head_before_anchor() {
+    let sel = LocalSelection {
+        anchor: Caret { run: 1, offset: 2 },
+        head: Caret { run: 0, offset: 1 },
+    };
+    let (start, end) = sel.ordered();
+    assert_eq!(start, Caret { run: 0, offset: 1 });
+    assert_eq!(end, Caret { run: 1, offset: 2 });
+}
+
+#[test]
+fn delete_selection_collapsed_is_noop() {
+    let mut runs = vec![plain("hello")];
+    let sel = LocalSelection::caret(Caret { run: 0, offset: 2 });
+    let new = delete_selection(&mut runs, sel);
+    assert_eq!(runs[0].text, "hello");
+    assert_eq!(new, sel);
+}
+
+#[test]
+fn delete_selection_within_run() {
+    let mut runs = vec![plain("hello world")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 5 },
+        head: Caret { run: 0, offset: 11 },
+    };
+    let new = delete_selection(&mut runs, sel);
+    assert_eq!(runs[0].text, "hello");
+    assert_eq!(new, LocalSelection::caret(Caret { run: 0, offset: 5 }));
+}
+
+#[test]
+fn delete_selection_handles_reversed_anchor_head() {
+    let mut runs = vec![plain("abcdef")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 5 },
+        head: Caret { run: 0, offset: 1 },
+    };
+    let new = delete_selection(&mut runs, sel);
+    assert_eq!(runs[0].text, "af");
+    assert_eq!(new, LocalSelection::caret(Caret { run: 0, offset: 1 }));
+}
+
+#[test]
+fn delete_selection_across_runs_preserves_remaining_styles() {
+    let mut runs = vec![plain("hello "), bold("world")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 3 },
+        head: Caret { run: 1, offset: 3 },
+    };
+    let _ = delete_selection(&mut runs, sel);
+    // "hel" (plain) + "ld" (bold) — different styles, should not coalesce.
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].text, "hel");
+    assert!(!runs[0].bold);
+    assert_eq!(runs[1].text, "ld");
+    assert!(runs[1].bold);
+}
+
+#[test]
+fn delete_selection_drops_runs_fully_inside_range() {
+    let mut runs = vec![plain("a"), bold("BBB"), plain("c")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 1 },
+        head: Caret { run: 2, offset: 0 },
+    };
+    let new = delete_selection(&mut runs, sel);
+    // Runs 0 & 2 untouched at their boundaries; run 1 deleted entirely.
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].text, "ac");
+    assert_eq!(new, LocalSelection::caret(Caret { run: 0, offset: 1 }));
 }

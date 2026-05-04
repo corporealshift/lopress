@@ -13,7 +13,7 @@ pub mod opaque;
 pub mod paragraph;
 
 use crate::model::types::{BlockBody, BlockKind, EditorBlock};
-use crate::ui::blocks::inline_editor::Caret;
+use crate::ui::blocks::inline_editor::LocalSelection;
 use floem::reactive::RwSignal;
 use floem::views::{empty, Decorators};
 use floem::{AnyView, IntoView};
@@ -25,15 +25,15 @@ pub fn block_view(block: &EditorBlock) -> AnyView {
     match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());
-            let caret_sig = RwSignal::new(Caret::START);
-            paragraph::render_paragraph_editable(runs_sig, caret_sig)
+            let selection_sig = RwSignal::new(LocalSelection::START);
+            paragraph::render_paragraph_editable(runs_sig, selection_sig)
                 .style(|s| s.padding_vert(6.))
                 .into_any()
         }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());
-            let caret_sig = RwSignal::new(Caret::START);
-            heading::render_heading_editable(*level, runs_sig, caret_sig).into_any()
+            let selection_sig = RwSignal::new(LocalSelection::START);
+            heading::render_heading_editable(*level, runs_sig, selection_sig).into_any()
         }
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
