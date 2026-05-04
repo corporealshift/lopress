@@ -1,7 +1,9 @@
-//! App state. The full document model (EditorDoc, etc.) arrives in Task 4.
-//! Task 3 adds AppState, WelcomeState, EditingState and AppContext.
+//! App state. Adds the live `EditorDoc` slot to `EditingState` (Task 7).
 
+use crate::model::from_core::doc_from_core;
+use crate::model::types::EditorDoc;
 use crate::settings::Settings;
+use lopress_core::Document;
 use lopress_gui_host::{DocumentRef, Session};
 
 /// Top-level application state, discriminated by which screen is active.
@@ -17,10 +19,11 @@ pub struct WelcomeState {
     pub error: Option<String>,
 }
 
-/// State for the Editing screen. The full document model is added in Task 4.
+/// State for the Editing screen.
 pub struct EditingState {
     pub session: Session,
     /// The currently active document, if one has been opened.
+    pub current_doc: Option<EditorDoc>,
     pub current_ref: Option<DocumentRef>,
     /// Last error encountered while editing.
     pub last_error: Option<String>,
@@ -31,8 +34,30 @@ impl EditingState {
     pub fn new(session: Session) -> Self {
         Self {
             session,
+            current_doc: None,
             current_ref: None,
             last_error: None,
+        }
+    }
+
+    /// Load and parse the document at `doc_ref.path`, replacing `current_doc`.
+    /// On failure, clears `current_doc` and stores the error message.
+    pub fn open_document(&mut self, doc_ref: &DocumentRef) {
+        match self.session.load_document(&doc_ref.path) {
+            Ok(loaded) => {
+                let core_doc = Document {
+                    front_matter: loaded.front_matter,
+                    blocks: loaded.blocks,
+                };
+                self.current_doc = Some(doc_from_core(&core_doc));
+                self.current_ref = Some(doc_ref.clone());
+                self.last_error = None;
+            }
+            Err(e) => {
+                self.current_doc = None;
+                self.current_ref = Some(doc_ref.clone());
+                self.last_error = Some(e.to_string());
+            }
         }
     }
 }
