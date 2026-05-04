@@ -5,6 +5,7 @@
 
 pub mod code;
 pub mod heading;
+pub mod inline_editor;
 pub mod list;
 pub mod opaque;
 pub mod paragraph;
