@@ -272,6 +272,144 @@ pub fn delete_selection(runs: &mut Vec<InlineRun>, sel: LocalSelection) -> Local
     LocalSelection::caret(start)
 }
 
+/// Inline-style flags toggled by the Bold/Italic/Code/Link shortcuts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineFlag {
+    Bold,
+    Italic,
+    Code,
+    Link,
+}
+
+/// Toggle the given inline flag across the selection. Toggle direction:
+/// clear if every run inside the selection has the flag set, otherwise set.
+/// Collapsed selections are a no-op (cursor-style toggling is a follow-up).
+pub fn toggle_inline(
+    runs: &mut Vec<InlineRun>,
+    sel: LocalSelection,
+    flag: InlineFlag,
+) -> LocalSelection {
+    if sel.is_collapsed() {
+        return sel;
+    }
+    // Translate the selection bounds to absolute character offsets from the
+    // start of the block. Run indices are about to shift as we split, so we
+    // can't keep using the original `Caret`s.
+    let (start, end) = sel.ordered();
+    let abs_start = abs_offset(runs, start);
+    let abs_end = abs_offset(runs, end);
+
+    // Split the higher position first; the second split doesn't disturb the
+    // first's absolute offset (it only inserts a run elsewhere).
+    split_at_abs(runs, abs_end);
+    split_at_abs(runs, abs_start);
+
+    let start_idx = locate_abs(runs, abs_start);
+    let end_idx = locate_abs(runs, abs_end);
+
+    let all_set = (start_idx..end_idx).all(|i| {
+        runs.get(i)
+            .map(|r| match flag {
+                InlineFlag::Bold => r.bold,
+                InlineFlag::Italic => r.italic,
+                InlineFlag::Code => r.code,
+                InlineFlag::Link => r.link.is_some(),
+            })
+            .unwrap_or(false)
+    });
+    let new_value = !all_set;
+
+    for i in start_idx..end_idx {
+        if let Some(r) = runs.get_mut(i) {
+            match flag {
+                InlineFlag::Bold => r.bold = new_value,
+                InlineFlag::Italic => r.italic = new_value,
+                InlineFlag::Code => r.code = new_value,
+                InlineFlag::Link => {
+                    r.link = if new_value { Some(String::new()) } else { None };
+                }
+            }
+        }
+    }
+
+    let lo = start_idx.saturating_sub(1);
+    let hi = end_idx.min(runs.len());
+    coalesce_range(runs, lo, hi);
+
+    sel
+}
+
+/// Sum of `chars().count()` over runs `[0..c.run]`, plus `c.offset`.
+fn abs_offset(runs: &[InlineRun], c: Caret) -> usize {
+    let mut acc = 0;
+    for (i, r) in runs.iter().enumerate() {
+        if i == c.run {
+            return acc + c.offset;
+        }
+        acc += r.text.chars().count();
+    }
+    acc
+}
+
+/// Split whichever run contains absolute character offset `abs`. No-op if
+/// `abs` lands on a run boundary or past end-of-block.
+fn split_at_abs(runs: &mut Vec<InlineRun>, abs: usize) {
+    let mut acc = 0;
+    let mut i = 0;
+    while i < runs.len() {
+        let len = runs[i].text.chars().count();
+        if abs > acc && abs < acc + len {
+            let local_off = abs - acc;
+            let byte = char_to_byte(&runs[i].text, local_off);
+            let (left, right) = runs[i].text.split_at(byte);
+            let left = left.to_string();
+            let right = right.to_string();
+            let mut left_run = runs[i].clone();
+            left_run.text = left;
+            let mut right_run = runs[i].clone();
+            right_run.text = right;
+            runs[i] = left_run;
+            runs.insert(i + 1, right_run);
+            return;
+        }
+        acc += len;
+        i += 1;
+    }
+}
+
+/// After splits, `abs` aligns with the start of some run; return that run's
+/// index. Returns `runs.len()` for end-of-block.
+fn locate_abs(runs: &[InlineRun], abs: usize) -> usize {
+    let mut acc = 0;
+    for (i, r) in runs.iter().enumerate() {
+        if acc == abs {
+            return i;
+        }
+        acc += r.text.chars().count();
+    }
+    runs.len()
+}
+
+/// Coalesce neighbour runs with matching styles in the inclusive range
+/// `[lo, hi]` (clamped to the runs vector).
+fn coalesce_range(runs: &mut Vec<InlineRun>, lo: usize, hi: usize) {
+    let mut i = lo;
+    while i + 1 < runs.len() && i <= hi {
+        let merge = match (runs.get(i), runs.get(i + 1)) {
+            (Some(a), Some(b)) => same_style(a, b),
+            _ => false,
+        };
+        if merge {
+            let next = runs.remove(i + 1);
+            if let Some(cur) = runs.get_mut(i) {
+                cur.text.push_str(&next.text);
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
 // ── Floem widget ─────────────────────────────────────────────────────────────
 //
 // This first-pass widget (Task 8 / Option A in the design discussion) does
@@ -418,6 +556,10 @@ fn handle_key_down(
         }
         _ => {
             if ke.modifiers.control() || ke.modifiers.meta() {
+                if let Some(flag) = inline_flag_for_shortcut(ke) {
+                    apply_toggle(runs, selection, flag);
+                    return true;
+                }
                 return false;
             }
             let Some(text) = ke.key.text.as_ref() else {
@@ -473,6 +615,40 @@ fn move_head<F>(
     } else {
         LocalSelection::caret(new_head)
     };
+    selection.set(new_sel);
+}
+
+/// Map a Ctrl/Cmd-modified key event to the inline flag it toggles, or
+/// `None` when the shortcut isn't one we handle. Both Ctrl and Meta are
+/// accepted on every platform — small loss in pure-Mac purity, big gain in
+/// "just works on whatever the user reaches for."
+fn inline_flag_for_shortcut(ke: &floem::keyboard::KeyEvent) -> Option<InlineFlag> {
+    if !(ke.modifiers.control() || ke.modifiers.meta()) {
+        return None;
+    }
+    if let Key::Character(s) = &ke.key.logical_key {
+        match s.as_str() {
+            "b" | "B" => Some(InlineFlag::Bold),
+            "i" | "I" => Some(InlineFlag::Italic),
+            "e" | "E" => Some(InlineFlag::Code),
+            "k" | "K" => Some(InlineFlag::Link),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+fn apply_toggle(
+    runs: RwSignal<Vec<InlineRun>>,
+    selection: RwSignal<LocalSelection>,
+    flag: InlineFlag,
+) {
+    let sel = selection.get_untracked();
+    let mut new_sel = sel;
+    runs.update(|r| {
+        new_sel = toggle_inline(r, sel, flag);
+    });
     selection.set(new_sel);
 }
 

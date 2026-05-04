@@ -2,8 +2,8 @@
 
 use lopress_editor::model::types::InlineRun;
 use lopress_editor::ui::blocks::inline_editor::{
-    backspace, compare, delete, delete_selection, insert_char, move_left, move_right, Caret,
-    LocalSelection,
+    backspace, compare, delete, delete_selection, insert_char, move_left, move_right,
+    toggle_inline, Caret, InlineFlag, LocalSelection,
 };
 
 fn plain(t: &str) -> InlineRun {
@@ -243,6 +243,99 @@ fn delete_selection_across_runs_preserves_remaining_styles() {
     assert!(!runs[0].bold);
     assert_eq!(runs[1].text, "ld");
     assert!(runs[1].bold);
+}
+
+#[test]
+fn toggle_bold_on_partial_selection_splits_run() {
+    let mut runs = vec![plain("hello world")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 6 },
+        head: Caret { run: 0, offset: 11 },
+    };
+    toggle_inline(&mut runs, sel, InlineFlag::Bold);
+    let bold_part: String = runs
+        .iter()
+        .filter(|r| r.bold)
+        .map(|r| r.text.clone())
+        .collect();
+    assert_eq!(bold_part, "world");
+    let plain_part: String = runs
+        .iter()
+        .filter(|r| !r.bold)
+        .map(|r| r.text.clone())
+        .collect();
+    assert_eq!(plain_part, "hello ");
+}
+
+#[test]
+fn toggle_off_when_all_selection_already_bold() {
+    let mut runs = vec![bold("all bold")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 0 },
+        head: Caret { run: 0, offset: 8 },
+    };
+    toggle_inline(&mut runs, sel, InlineFlag::Bold);
+    assert!(runs.iter().all(|r| !r.bold));
+    // Coalesces back to a single run.
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].text, "all bold");
+}
+
+#[test]
+fn toggle_partial_bold_selection_sets_remainder_bold() {
+    // Selection covers a mix of bold + plain. Direction = set (since not all
+    // chars are bold) → all become bold and the runs coalesce.
+    let mut runs = vec![bold("hel"), plain("lo")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 0 },
+        head: Caret { run: 1, offset: 2 },
+    };
+    toggle_inline(&mut runs, sel, InlineFlag::Bold);
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0].bold);
+    assert_eq!(runs[0].text, "hello");
+}
+
+#[test]
+fn toggle_link_assigns_empty_url() {
+    let mut runs = vec![plain("click here")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 0 },
+        head: Caret { run: 0, offset: 5 },
+    };
+    toggle_inline(&mut runs, sel, InlineFlag::Link);
+    let linked: Vec<_> = runs.iter().filter(|r| r.link.is_some()).collect();
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0].text, "click");
+    assert_eq!(linked[0].link.as_deref(), Some(""));
+}
+
+#[test]
+fn toggle_collapsed_selection_is_noop() {
+    let mut runs = vec![plain("abc")];
+    let sel = LocalSelection::caret(Caret { run: 0, offset: 1 });
+    toggle_inline(&mut runs, sel, InlineFlag::Bold);
+    assert_eq!(runs.len(), 1);
+    assert!(!runs[0].bold);
+    assert_eq!(runs[0].text, "abc");
+}
+
+#[test]
+fn toggle_italic_on_subrange_preserves_other_styles() {
+    let mut runs = vec![bold("hello world")];
+    let sel = LocalSelection {
+        anchor: Caret { run: 0, offset: 6 },
+        head: Caret { run: 0, offset: 11 },
+    };
+    toggle_inline(&mut runs, sel, InlineFlag::Italic);
+    // All runs remain bold; only "world" is italic now.
+    assert!(runs.iter().all(|r| r.bold));
+    let italic_part: String = runs
+        .iter()
+        .filter(|r| r.italic)
+        .map(|r| r.text.clone())
+        .collect();
+    assert_eq!(italic_part, "world");
 }
 
 #[test]
