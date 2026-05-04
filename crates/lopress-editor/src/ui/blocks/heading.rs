@@ -1,19 +1,38 @@
-//! Read-only heading rendering. Levels 1..=6 map to 32 / 26 / 22 / 18 / 16 / 14
-//! logical pixels, all rendered semibold.
+//! Heading rendering. Levels 1..=6 map to 32 / 26 / 22 / 18 / 16 / 14 logical
+//! pixels and render semibold. The editable path wraps the inline-runs
+//! editor at the appropriate font size; the read-only path is preserved for
+//! callers that don't yet need editing.
 
 use crate::model::types::InlineRun;
+use crate::ui::blocks::inline_editor::{editable_inline, Caret};
 use crate::ui::blocks::paragraph::render_runs_with_size;
+use floem::reactive::RwSignal;
 use floem::views::Decorators;
 use floem::IntoView;
 
-pub fn render_heading(level: u8, runs: &[InlineRun]) -> impl IntoView {
-    let size = match level {
-        1 => 32.0_f32,
+fn font_size_for(level: u8) -> f32 {
+    match level {
+        1 => 32.0,
         2 => 26.0,
         3 => 22.0,
         4 => 18.0,
         5 => 16.0,
         _ => 14.0,
-    };
-    render_runs_with_size(runs, size, true).style(|s| s.padding_top(16.).padding_bottom(8.))
+    }
+}
+
+/// Editable heading: inline-runs editor at the level's font size, semibold.
+pub fn render_heading_editable(
+    level: u8,
+    runs: RwSignal<Vec<InlineRun>>,
+    caret: RwSignal<Caret>,
+) -> impl IntoView {
+    editable_inline(runs, caret, font_size_for(level), true)
+        .style(|s| s.padding_top(16.).padding_bottom(8.))
+}
+
+/// Read-only heading rendering, kept for any non-editable surfaces.
+pub fn render_heading(level: u8, runs: &[InlineRun]) -> impl IntoView {
+    render_runs_with_size(runs, font_size_for(level), true)
+        .style(|s| s.padding_top(16.).padding_bottom(8.))
 }

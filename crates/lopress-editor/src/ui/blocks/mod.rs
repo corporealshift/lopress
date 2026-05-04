@@ -1,7 +1,9 @@
-//! Read-only block rendering for the editor pane (Task 7).
+//! Per-block rendering for the editor pane.
 //!
-//! Each `block_view` dispatches an `EditorBlock` to one of the per-kind
-//! renderers below. Editing comes in Tasks 8–10.
+//! Paragraph and Heading blocks are dispatched to the editable inline-runs
+//! widget, which owns its own `RwSignal<Vec<InlineRun>>` and a caret signal.
+//! The signals are created here from the block's initial runs; later tasks
+//! will fold edits back into the document model.
 
 pub mod code;
 pub mod heading;
@@ -11,17 +13,27 @@ pub mod opaque;
 pub mod paragraph;
 
 use crate::model::types::{BlockBody, BlockKind, EditorBlock};
+use crate::ui::blocks::inline_editor::Caret;
+use floem::reactive::RwSignal;
 use floem::views::{empty, Decorators};
 use floem::{AnyView, IntoView};
 
-/// Dispatch a read-only block render to the appropriate view.
+/// Dispatch one editor block to its renderer. Inline-bodied blocks
+/// (paragraph, heading) become editable widgets backed by reactive signals;
+/// other kinds remain read-only for now.
 pub fn block_view(block: &EditorBlock) -> AnyView {
     match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph(runs)
-            .style(|s| s.padding_vert(6.))
-            .into_any(),
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
+            let runs_sig = RwSignal::new(runs.clone());
+            let caret_sig = RwSignal::new(Caret::START);
+            paragraph::render_paragraph_editable(runs_sig, caret_sig)
+                .style(|s| s.padding_vert(6.))
+                .into_any()
+        }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading(*level, runs).into_any()
+            let runs_sig = RwSignal::new(runs.clone());
+            let caret_sig = RwSignal::new(Caret::START);
+            heading::render_heading_editable(*level, runs_sig, caret_sig).into_any()
         }
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()

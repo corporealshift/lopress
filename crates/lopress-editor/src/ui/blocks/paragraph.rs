@@ -1,8 +1,11 @@
-//! Read-only paragraph rendering. One styled `text` element per inline run,
-//! laid out in a wrapping flex row so spans flow visually like a paragraph.
+//! Paragraph rendering. The editable path (used for `Paragraph` blocks) wraps
+//! the inline-runs editor widget. The read-only path (used for list items)
+//! lays out one styled `text` element per inline run in a wrapping flex row.
 
 use crate::model::types::InlineRun;
+use crate::ui::blocks::inline_editor::{editable_inline, Caret};
 use floem::peniko::Color;
+use floem::reactive::RwSignal;
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{h_stack_from_iter, text, Decorators};
@@ -17,7 +20,17 @@ pub const MONO_FAMILY: &str = "monospace";
 /// Theme link color (read-only — no link interaction yet).
 pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 
-/// Render a slice of `InlineRun`s as a wrapping row of styled spans.
+/// Editable paragraph: backed by the inline-runs editor widget so the user
+/// can click in and type. Used by the block dispatcher in `blocks::mod`.
+pub fn render_paragraph_editable(
+    runs: RwSignal<Vec<InlineRun>>,
+    caret: RwSignal<Caret>,
+) -> impl IntoView {
+    editable_inline(runs, caret, BODY_FONT_SIZE, false)
+}
+
+/// Read-only render of a slice of inline runs as a wrapping flex row.
+/// Used inside list items (and other contexts that don't need editing yet).
 pub fn render_paragraph(runs: &[InlineRun]) -> impl IntoView {
     render_runs_with_size(runs, BODY_FONT_SIZE, false)
 }
