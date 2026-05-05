@@ -3,8 +3,8 @@
 //! editor at the appropriate font size; the read-only path is preserved for
 //! callers that don't yet need editing.
 
-use crate::model::types::InlineRun;
-use crate::ui::blocks::inline_editor::{editable_inline, LocalSelection};
+use crate::model::types::{BlockId, InlineRun};
+use crate::ui::blocks::inline_editor::{editable_inline, ActionSink, LocalSelection};
 use crate::ui::blocks::paragraph::render_runs_with_size;
 use floem::reactive::RwSignal;
 use floem::views::Decorators;
@@ -26,9 +26,20 @@ pub fn render_heading_editable(
     level: u8,
     runs: RwSignal<Vec<InlineRun>>,
     selection: RwSignal<LocalSelection>,
+    block_id: BlockId,
+    on_action: ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
 ) -> impl IntoView {
-    editable_inline(runs, selection, font_size_for(level), true)
-        .style(|s| s.padding_top(16.).padding_bottom(8.))
+    editable_inline(
+        runs,
+        selection,
+        font_size_for(level),
+        true,
+        block_id,
+        on_action,
+        focus_target,
+    )
+    .style(|s| s.padding_top(16.).padding_bottom(8.))
 }
 
 /// Read-only heading rendering, kept for any non-editable surfaces.

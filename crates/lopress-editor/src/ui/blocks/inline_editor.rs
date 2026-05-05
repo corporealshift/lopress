@@ -5,7 +5,13 @@
 //! helpers so they can be unit-tested independent of any UI framework. The
 //! Floem widget itself lives below the helpers.
 
-use crate::model::types::InlineRun;
+use crate::actions::BlockAction;
+use crate::model::types::{BlockId, InlineRun};
+use std::rc::Rc;
+
+/// Callback used by editable widgets to push every block-tree mutation
+/// through the `actions::apply` chokepoint owned by the editor pane.
+pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
 /// Position within a `Vec<InlineRun>`. Offsets are *character* counts within
 /// `run.text`, not byte indices.
@@ -422,26 +428,31 @@ use crate::ui::blocks::paragraph::{LINK_COLOR, MONO_FAMILY};
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{empty, h_stack_from_iter, text, Decorators};
-use floem::{AnyView, IntoView};
+use floem::{AnyView, IntoView, View};
 
 const CARET_COLOR: Color = Color::rgb8(40, 40, 40);
 const SELECTION_BG: Color = Color::rgb8(180, 210, 255);
 
 /// Build the editable inline-runs widget.
 ///
-/// `runs` is the run vector (mutated in place by edits). `selection` tracks
-/// both the caret position (collapsed selection) and any active selection.
-/// `font_size` and `force_bold` allow the same widget to be reused for
-/// paragraphs and headings.
+/// `block_id` identifies the owning block in the document — needed so
+/// keyboard handlers can emit `BlockAction`s that target the correct block.
+/// `on_action` is the chokepoint callback supplied by the editor pane.
+/// `focus_target`, when set to this widget's `block_id`, requests focus on
+/// the next reactive tick — used to land the caret in newly-split or merged
+/// blocks after a structural action.
 pub fn editable_inline(
     runs: RwSignal<Vec<InlineRun>>,
     selection: RwSignal<LocalSelection>,
     font_size: f32,
     force_bold: bool,
+    block_id: BlockId,
+    on_action: ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
 ) -> impl IntoView {
     let focused: RwSignal<bool> = RwSignal::new(false);
 
@@ -454,7 +465,10 @@ pub fn editable_inline(
     )
     .style(|s| s.width_full());
 
-    body.keyboard_navigable()
+    let on_action_for_focus_lost = on_action.clone();
+    let on_action_for_keydown = on_action;
+    let view = body
+        .keyboard_navigable()
         .on_click_stop(move |_| {
             // Click anywhere → collapse selection at end-of-block. Real
             // per-character hit-testing arrives in a follow-up.
@@ -467,11 +481,18 @@ pub fn editable_inline(
         })
         .on_event(EventListener::FocusLost, move |_| {
             focused.set(false);
+            // Commit any in-progress local edits to the document so other
+            // widgets observing the doc see the latest text.
+            let current = runs.get_untracked();
+            on_action_for_focus_lost(BlockAction::EditInline {
+                block_id,
+                new_runs: current,
+            });
             EventPropagation::Stop
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if handle_key_down(ke, runs, selection) {
+                if handle_key_down(ke, runs, selection, block_id, &on_action_for_keydown) {
                     return EventPropagation::Stop;
                 }
             }
@@ -484,7 +505,18 @@ pub fn editable_inline(
             } else {
                 s
             }
-        })
+        });
+
+    let view_id = view.id();
+    create_effect(move |_| {
+        if focus_target.get() == Some(block_id) {
+            view_id.request_focus();
+            // Clear so subsequent re-renders don't keep stealing focus.
+            focus_target.set(None);
+        }
+    });
+
+    view
 }
 
 /// Decide what to do for a single `KeyEvent`. Returns `true` when handled.
@@ -492,6 +524,8 @@ fn handle_key_down(
     ke: &floem::keyboard::KeyEvent,
     runs: RwSignal<Vec<InlineRun>>,
     selection: RwSignal<LocalSelection>,
+    block_id: BlockId,
+    on_action: &ActionSink,
 ) -> bool {
     let extending = ke.modifiers.shift();
 
@@ -515,6 +549,18 @@ fn handle_key_down(
         Key::Named(NamedKey::Backspace) => {
             let sel = selection.get_untracked();
             if sel.is_collapsed() {
+                if sel.head == Caret::START {
+                    // Backspace at block start → merge with previous block.
+                    // Commit current local runs first so the merge sees the
+                    // latest text.
+                    let current = runs.get_untracked();
+                    on_action(BlockAction::EditInline {
+                        block_id,
+                        new_runs: current,
+                    });
+                    on_action(BlockAction::MergeWithPrev { block_id });
+                    return true;
+                }
                 let mut new_caret = sel.head;
                 runs.update(|r| {
                     new_caret = backspace(r, new_caret);
@@ -551,7 +597,26 @@ fn handle_key_down(
             true
         }
         Key::Named(NamedKey::Enter) => {
-            // Reserved for block-split (Task 11). Swallow the keystroke.
+            if ke.modifiers.shift() {
+                // Reserve Shift+Enter for soft-break (later); swallow for now.
+                return true;
+            }
+            // Block split. Commit current local runs first so the split is
+            // performed on the latest text, then issue Split with the current
+            // caret coordinates. The editor pane's action sink will apply
+            // both and steer focus to the new block.
+            let sel = selection.get_untracked();
+            let head = sel.head;
+            let current = runs.get_untracked();
+            on_action(BlockAction::EditInline {
+                block_id,
+                new_runs: current,
+            });
+            on_action(BlockAction::Split {
+                block_id,
+                run: head.run,
+                offset: head.offset,
+            });
             true
         }
         _ => {

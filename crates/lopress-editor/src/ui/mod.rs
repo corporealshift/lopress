@@ -13,9 +13,11 @@ use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::model::types::EditorDoc;
+use crate::actions::{apply, BlockAction};
+use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
+use crate::ui::blocks::inline_editor::ActionSink;
 use lopress_gui_host::Session;
 
 /// Maximum number of recent workspaces to retain.
@@ -121,10 +123,45 @@ fn editing_view(
             .padding(8.)
     });
 
+    let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
+
+    // Chokepoint: every block-tree mutation routes through here. Pre/post
+    // lookups derive the block to focus after structural actions.
+    let on_action: ActionSink = Rc::new(move |action: BlockAction| {
+        let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
+            (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
+                .blocks
+                .iter()
+                .position(|b| b.id == *block_id)
+                .filter(|&i| i > 0)
+                .and_then(|i| d.blocks.get(i - 1))
+                .map(|b| b.id),
+            _ => None,
+        });
+        let action_for_apply = action.clone();
+        current_doc.update(|maybe| {
+            if let Some(d) = maybe {
+                apply(d, action_for_apply);
+            }
+        });
+        let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
+            (BlockAction::Split { block_id, .. }, Some(d)) => d
+                .blocks
+                .iter()
+                .position(|b| b.id == *block_id)
+                .and_then(|i| d.blocks.get(i + 1))
+                .map(|b| b.id),
+            _ => None,
+        });
+        if let Some(id) = pre_focus.or(post_focus) {
+            focus_target.set(Some(id));
+        }
+    });
+
     let editor = dyn_container(
         move || current_doc.get(),
         move |maybe_doc| match maybe_doc {
-            Some(doc) => editor_pane::editor_pane(&doc).into_any(),
+            Some(doc) => editor_pane::editor_pane(&doc, on_action.clone(), focus_target).into_any(),
             None => label(|| "No document open. Click \"Open first post\" to load one.")
                 .style(|s| {
                     s.width_full()
