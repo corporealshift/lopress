@@ -617,6 +617,18 @@ fn handle_key_down(
                     do_select_all(runs, block_id, on_action, sel_ctx);
                     return true;
                 }
+                "c" | "C" => {
+                    do_copy(runs, block_id, on_action, sel_ctx);
+                    return true;
+                }
+                "x" | "X" => {
+                    do_cut(runs, block_id, on_action, sel_ctx);
+                    return true;
+                }
+                "v" | "V" => {
+                    do_paste(runs, block_id, on_action, sel_ctx, focus_target);
+                    return true;
+                }
                 _ => {}
             }
         }
@@ -683,7 +695,7 @@ fn handle_key_down(
         _ => {
             if cmd {
                 if let Some(flag) = inline_flag_for_shortcut(ke) {
-                    apply_local_toggle(runs, block_id, sel_ctx, flag);
+                    apply_local_toggle(runs, block_id, sel_ctx, flag, on_action);
                     return true;
                 }
                 return false;
@@ -691,6 +703,14 @@ fn handle_key_down(
             let Some(text) = ke.key.text.as_ref() else {
                 return false;
             };
+            // If the doc selection spans multiple blocks, replace it first
+            // so the subsequent char insert lands at a clean caret.
+            let doc_sel = sel_ctx.doc_selection.get_untracked();
+            let multi_block = doc_sel.anchor.block != doc_sel.head.block;
+            if multi_block {
+                commit_runs(runs, block_id, on_action);
+                delete_range_and_collapse(on_action, sel_ctx);
+            }
             for ch in text.chars() {
                 if ch.is_control() {
                     continue;
@@ -702,7 +722,19 @@ fn handle_key_down(
                     on_action(BlockAction::OpenSlashMenu { block_id });
                     continue;
                 }
-                insert_at_doc_caret(runs, block_id, sel_ctx, ch);
+                // After a multi-block delete, doc_selection now points at
+                // the leading block; the focused widget for the next render
+                // will pick this up. For the immediate insert call we still
+                // need to address whichever block holds the new caret —
+                // route through the action sink for the cross-block case.
+                let head_block = sel_ctx.doc_selection.get_untracked().head.block;
+                if head_block == block_id {
+                    insert_at_doc_caret(runs, block_id, sel_ctx, ch);
+                } else {
+                    // Insert via EditInline on the new leading block (we
+                    // can't reach its local runs signal from here).
+                    insert_into_doc(sel_ctx, on_action, ch);
+                }
             }
             true
         }
@@ -724,16 +756,26 @@ fn inline_flag_for_shortcut(ke: &floem::keyboard::KeyEvent) -> Option<InlineFlag
     }
 }
 
-/// Apply a B/I/code/link toggle when the doc selection is local to this
-/// block. Cross-block toggles are deferred to Task 16.
+/// Apply a B/I/code/link toggle. Single-block selections operate on the
+/// local runs in-place; cross-block selections route to
+/// `BlockAction::ToggleInlineRange`.
 fn apply_local_toggle(
     runs: RwSignal<Vec<InlineRun>>,
     block_id: BlockId,
     sel_ctx: &SelectionContext,
     flag: InlineFlag,
+    on_action: &ActionSink,
 ) {
     let doc_sel = sel_ctx.doc_selection.get_untracked();
     if doc_sel.anchor.block != block_id || doc_sel.head.block != block_id {
+        if doc_sel.is_collapsed() {
+            return;
+        }
+        commit_runs(runs, block_id, on_action);
+        on_action(BlockAction::ToggleInlineRange {
+            selection: doc_sel,
+            flag,
+        });
         return;
     }
     let local = LocalSelection {
@@ -750,8 +792,9 @@ fn apply_local_toggle(
     });
 }
 
-/// Insert one character at the doc caret. The caret must be inside this
-/// block (callers guarantee this — we're the focused widget).
+/// Insert one character at the doc caret. For multi-block selections the
+/// caller has already routed through `delete_range_and_collapse`, so by
+/// this point the doc selection is collapsed inside the leading block.
 fn insert_at_doc_caret(
     runs: RwSignal<Vec<InlineRun>>,
     block_id: BlockId,
@@ -795,7 +838,7 @@ fn insert_at_doc_caret(
 
 /// Backspace at the doc caret. Block-start backspace merges with the
 /// previous block (existing behavior). Within-block proceeds via the local
-/// helpers. Multi-block selection delete is a Task-16 concern.
+/// helpers. Multi-block selection routes to `BlockAction::DeleteRange`.
 fn do_backspace(
     runs: RwSignal<Vec<InlineRun>>,
     block_id: BlockId,
@@ -803,6 +846,12 @@ fn do_backspace(
     sel_ctx: &SelectionContext,
 ) {
     let doc_sel = sel_ctx.doc_selection.get_untracked();
+    let single_block = doc_sel.anchor.block == block_id && doc_sel.head.block == block_id;
+    if !doc_sel.is_collapsed() && !single_block {
+        commit_runs(runs, block_id, on_action);
+        delete_range_and_collapse(on_action, sel_ctx);
+        return;
+    }
     if doc_sel.head.block != block_id {
         return;
     }
@@ -810,7 +859,6 @@ fn do_backspace(
         anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
         head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
     };
-    let single_block = doc_sel.anchor.block == block_id;
     if single_block && local.is_collapsed() && local.head == Caret::START {
         // Merge with previous block.
         let current = runs.get_untracked();
@@ -846,14 +894,21 @@ fn do_backspace(
         )));
 }
 
-/// Delete-key handling (delete forward).
+/// Delete-key handling (delete forward). Multi-block selection routes to
+/// `BlockAction::DeleteRange`.
 fn do_delete(
     runs: RwSignal<Vec<InlineRun>>,
     block_id: BlockId,
-    _on_action: &ActionSink,
+    on_action: &ActionSink,
     sel_ctx: &SelectionContext,
 ) {
     let doc_sel = sel_ctx.doc_selection.get_untracked();
+    let single_block = doc_sel.anchor.block == block_id && doc_sel.head.block == block_id;
+    if !doc_sel.is_collapsed() && !single_block {
+        commit_runs(runs, block_id, on_action);
+        delete_range_and_collapse(on_action, sel_ctx);
+        return;
+    }
     if doc_sel.head.block != block_id {
         return;
     }
@@ -861,7 +916,6 @@ fn do_delete(
         anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
         head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
     };
-    let single_block = doc_sel.anchor.block == block_id;
     if single_block && !local.is_collapsed() {
         let mut new_local = local;
         runs.update(|r| {
@@ -1147,6 +1201,140 @@ fn abs_to_run_offset(runs: &[InlineRun], abs: usize) -> (usize, usize) {
     let last = runs.len().saturating_sub(1);
     let last_len = runs.last().map(|r| r.text.chars().count()).unwrap_or(0);
     (last, last_len)
+}
+
+// ── Multi-block routing helpers ──────────────────────────────────────────────
+
+/// Issue a `DeleteRange` action for the current selection and collapse the
+/// doc selection to the start of the deleted range. Caller must already
+/// have committed any local runs.
+fn delete_range_and_collapse(on_action: &ActionSink, sel_ctx: &SelectionContext) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    let start = sel_ctx
+        .current_doc
+        .with_untracked(|maybe| maybe.as_ref().map(|d| doc_sel.ordered(d).0))
+        .unwrap_or(doc_sel.anchor);
+    on_action(BlockAction::DeleteRange { selection: doc_sel });
+    sel_ctx.doc_selection.set(DocSelection::caret(start));
+}
+
+/// Insert a single character at the doc caret via the action sink — used
+/// when the caret moved to a different block (after a multi-block delete)
+/// and we don't have direct access to that block's runs signal.
+fn insert_into_doc(sel_ctx: &SelectionContext, on_action: &ActionSink, ch: char) {
+    let head = sel_ctx.doc_selection.get_untracked().head;
+    sel_ctx.current_doc.with_untracked(|maybe| {
+        let Some(d) = maybe.as_ref() else { return };
+        let Some(block) = d.blocks.iter().find(|b| b.id == head.block) else {
+            return;
+        };
+        let crate::model::types::BlockBody::Inline(runs) = &block.body else {
+            return;
+        };
+        let mut new_runs = runs.clone();
+        let new_caret = insert_char(
+            &mut new_runs,
+            Caret { run: head.run, offset: head.offset },
+            ch,
+        );
+        on_action(BlockAction::EditInline {
+            block_id: head.block,
+            new_runs,
+        });
+        sel_ctx
+            .doc_selection
+            .set(DocSelection::caret(DocPosition::new(
+                head.block,
+                new_caret.run,
+                new_caret.offset,
+            )));
+    });
+}
+
+fn do_copy(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.is_collapsed() {
+        return;
+    }
+    commit_runs(runs, block_id, on_action);
+    sel_ctx.current_doc.with_untracked(|maybe| {
+        let Some(d) = maybe.as_ref() else { return };
+        let blocks = crate::ui::clipboard::extract_selection_blocks(d, doc_sel);
+        let md = crate::ui::clipboard::blocks_to_markdown(&blocks);
+        crate::ui::clipboard::write_clipboard(md);
+    });
+}
+
+fn do_cut(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.is_collapsed() {
+        return;
+    }
+    commit_runs(runs, block_id, on_action);
+    sel_ctx.current_doc.with_untracked(|maybe| {
+        let Some(d) = maybe.as_ref() else { return };
+        let blocks = crate::ui::clipboard::extract_selection_blocks(d, doc_sel);
+        let md = crate::ui::clipboard::blocks_to_markdown(&blocks);
+        crate::ui::clipboard::write_clipboard(md);
+    });
+    delete_range_and_collapse(on_action, sel_ctx);
+}
+
+fn do_paste(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+    focus_target: RwSignal<Option<BlockId>>,
+) {
+    let Some(text) = crate::ui::clipboard::read_clipboard() else {
+        return;
+    };
+    let blocks = crate::ui::clipboard::markdown_to_blocks(&text);
+    if blocks.is_empty() {
+        return;
+    }
+    commit_runs(runs, block_id, on_action);
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    // Replace any existing selection first.
+    if !doc_sel.is_collapsed() {
+        delete_range_and_collapse(on_action, sel_ctx);
+    }
+    let head = sel_ctx.doc_selection.get_untracked().head;
+    let last_block_id = blocks.last().map(|b| b.id);
+    on_action(BlockAction::PasteBlocks {
+        at: head,
+        blocks,
+    });
+    // Focus the last pasted block so the caret lands at its end-ish.
+    if let Some(id) = last_block_id {
+        focus_target.set(Some(id));
+        // Caret at end of that block (best we can do without knowing post-
+        // paste runs; the focused widget will collapse to end on click but
+        // we set doc_selection to a reasonable position).
+        sel_ctx.current_doc.with_untracked(|maybe| {
+            if let Some(d) = maybe.as_ref() {
+                if let Some(b) = d.blocks.iter().find(|b| b.id == id) {
+                    if let crate::model::types::BlockBody::Inline(r) = &b.body {
+                        let e = Caret::end(r);
+                        sel_ctx
+                            .doc_selection
+                            .set(DocSelection::caret(DocPosition::new(id, e.run, e.offset)));
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// Render the block given its slice of the doc selection.

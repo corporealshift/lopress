@@ -1,6 +1,7 @@
 //! Root UI module. Switches between Welcome and Editing views based on `AppState`.
 
 pub mod blocks;
+pub mod clipboard;
 pub mod dnd;
 pub mod editor_pane;
 pub mod sel_ctx;
