@@ -14,9 +14,11 @@
 
 use crate::actions::BlockAction;
 use crate::model::types::{BlockId, BlockKind, InlineRun};
+use crate::selection::DocPosition;
 use crate::ui::blocks::inline_editor::{
-    toggle_inline, ActionSink, FocusPublisher, InlineFlag, LocalSelection,
+    toggle_inline, ActionSink, Caret, FocusPublisher, InlineFlag, LocalSelection,
 };
+use crate::ui::sel_ctx::SelectionContext;
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -48,6 +50,7 @@ pub fn block_toolbar_for(
     current_kind: BlockKind,
     focus_pub: FocusPublisher,
     on_action: ActionSink,
+    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     let kinds: Vec<(&'static str, BlockKind)> = vec![
         ("P", BlockKind::Paragraph),
@@ -94,7 +97,7 @@ pub fn block_toolbar_for(
         ("</>", InlineFlag::Code),
         ("Link", InlineFlag::Link),
     ] {
-        buttons.push(toggle_button(lbl, flag, focus_pub).into_any());
+        buttons.push(toggle_button(lbl, flag, focus_pub, sel_ctx.clone()).into_any());
     }
 
     buttons.push(separator().into_any());
@@ -124,16 +127,21 @@ pub fn block_toolbar_for(
     })
 }
 
-/// One inline-flag toggle button. The button shows as filled when every
-/// run in the current selection has the flag set; clicking it toggles
-/// the flag across the selection (no-op for a collapsed selection — the
-/// helper `toggle_inline` returns the selection unchanged in that case).
-fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher) -> impl IntoView {
+/// One inline-flag toggle button. Active when the (single-block) doc
+/// selection inside the focused block has `flag` set on every overlapping
+/// run; clicking toggles it. No-op when the selection is collapsed or the
+/// selection spans multiple blocks (Task 16 will handle multi-block).
+fn toggle_button(
+    lbl: &'static str,
+    flag: InlineFlag,
+    focus_pub: FocusPublisher,
+    sel_ctx: SelectionContext,
+) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
-    // Reactive label that re-styles when the active state flips.
+    let sel_ctx_for_label = sel_ctx.clone();
     let lbl_view = label(move || lbl_owned.clone()).style(move |s| {
-        let active = flag_active(focus_pub, flag);
+        let active = flag_active(focus_pub, flag, &sel_ctx_for_label);
         if active {
             s.background(Color::rgb8(210, 220, 240))
                 .font_weight(Weight::BOLD)
@@ -142,33 +150,65 @@ fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher)
         }
     });
 
+    let sel_ctx_for_action = sel_ctx;
     button(lbl_view)
         .action(move || {
-            // Look up the focused widget's signals and apply the toggle.
-            let Some((runs, selection)) = focus_pub.signals.get_untracked() else {
+            let Some(runs) = focus_pub.runs.get_untracked() else {
                 return;
             };
-            let sel = selection.get_untracked();
-            let mut new_sel = sel;
+            let Some(block_id) = focus_pub.block.get_untracked() else {
+                return;
+            };
+            let local = match focused_local_selection(focus_pub, &sel_ctx_for_action) {
+                Some(l) => l,
+                None => return,
+            };
+            let mut new_local = local;
             runs.update(|r| {
-                new_sel = toggle_inline(r, sel, flag);
+                new_local = toggle_inline(r, local, flag);
             });
-            selection.set(new_sel);
+            sel_ctx_for_action.doc_selection.set(crate::selection::DocSelection {
+                anchor: DocPosition::new(block_id, new_local.anchor.run, new_local.anchor.offset),
+                head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
+            });
         })
         .style(|s| s.padding_horiz(6.).padding_vert(2.))
 }
 
-/// True if every run currently inside the focused selection has `flag` set.
-/// Returns false when nothing is focused or the selection is collapsed.
-fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
-    let Some((runs_sig, sel_sig)) = focus_pub.signals.get() else {
-        return false;
+/// Reads the doc selection and returns it projected as a `LocalSelection` —
+/// but only when both endpoints are inside the focused block. Cross-block
+/// selections currently fall through to `None` (toolbar shortcuts no-op).
+fn focused_local_selection(focus_pub: FocusPublisher, sel_ctx: &SelectionContext) -> Option<LocalSelection> {
+    let block_id = focus_pub.block.get_untracked()?;
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.anchor.block != block_id || doc_sel.head.block != block_id {
+        return None;
+    }
+    Some(LocalSelection {
+        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
+        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+    })
+}
+
+/// True if every run inside the focused block's selection has `flag` set.
+/// Returns false when nothing is focused, selection is collapsed, or the
+/// selection spans multiple blocks.
+fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag, sel_ctx: &SelectionContext) -> bool {
+    // Track signals for reactivity.
+    let _ = sel_ctx.doc_selection.get();
+    let runs_opt = focus_pub.runs.get();
+    let sel = match focused_local_selection(focus_pub, sel_ctx) {
+        Some(s) => s,
+        None => return false,
     };
-    let sel = sel_sig.get();
     if sel.is_collapsed() {
         return false;
     }
-    runs_sig.with(|runs| every_run_has_flag(runs, sel, flag))
+    let runs = match runs_opt {
+        Some(r) => r,
+        None => return false,
+    };
+    runs.with(|runs| every_run_has_flag(runs, sel, flag))
 }
 
 /// Walk `runs` from the start of the block to the end, tracking the absolute

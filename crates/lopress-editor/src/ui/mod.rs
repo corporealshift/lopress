@@ -3,6 +3,7 @@
 pub mod blocks;
 pub mod dnd;
 pub mod editor_pane;
+pub mod sel_ctx;
 pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
@@ -18,10 +19,12 @@ use std::rc::Rc;
 
 use crate::actions::{apply, BlockAction};
 use crate::model::types::{BlockId, EditorDoc};
+use crate::selection::{DocPosition, DocSelection, GeometryCache};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
+use crate::ui::sel_ctx::SelectionContext;
 use lopress_gui_host::Session;
 
 /// Maximum number of recent workspaces to retain.
@@ -131,6 +134,19 @@ fn editing_view(
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let dnd = DndState::new();
 
+    // Doc-level selection lives here. Initial value is a synthetic caret —
+    // each block's FocusGained handler resets it to a real position when the
+    // user clicks in.
+    let doc_selection: RwSignal<DocSelection> = RwSignal::new(DocSelection::caret(
+        DocPosition::new(BlockId::new(), 0, 0),
+    ));
+    let geometry = Rc::new(RefCell::new(GeometryCache::default()));
+    let sel_ctx = SelectionContext {
+        doc_selection,
+        current_doc,
+        geometry,
+    };
+
     // Chokepoint: every block-tree mutation routes through here. Pre/post
     // lookups derive the block to focus after structural actions.
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
@@ -184,6 +200,7 @@ fn editing_view(
                 focus_target,
                 slash_menu_open,
                 dnd,
+                sel_ctx.clone(),
             )
             .into_any(),
             None => label(|| "No document open. Click \"Open first post\" to load one.")

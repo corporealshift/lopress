@@ -13,15 +13,14 @@ use std::rc::Rc;
 /// through the `actions::apply` chokepoint owned by the editor pane.
 pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
-/// Pane-level signals an editable widget publishes to so the toolbar (and
-/// other surfaces) can read which block is focused and operate on its
-/// runs / selection. The widget sets `block` to its own id and `signals`
-/// to its `(runs, selection)` pair on `FocusGained`; on `FocusLost` it
-/// clears `block` (and `signals` if it still owns the slot).
+/// Pane-level slot that the focused editable widget publishes to so the
+/// toolbar can reach the focused block's runs. The selection itself lives
+/// in the pane-owned `SelectionContext::doc_selection`; the toolbar reads
+/// from there and projects onto the focused block.
 #[derive(Clone, Copy)]
 pub struct FocusPublisher {
     pub block: RwSignal<Option<BlockId>>,
-    pub signals: RwSignal<Option<(RwSignal<Vec<InlineRun>>, RwSignal<LocalSelection>)>>,
+    pub runs: RwSignal<Option<RwSignal<Vec<InlineRun>>>>,
 }
 
 /// Position within a `Vec<InlineRun>`. Offsets are *character* counts within
@@ -435,13 +434,19 @@ fn coalesce_range(runs: &mut Vec<InlineRun>, lo: usize, hi: usize) {
 
 // ── Floem widget ─────────────────────────────────────────────────────────────
 //
-// This first-pass widget (Task 8 / Option A in the design discussion) does
-// not yet support per-character click hit-testing. Clicking anywhere in the
-// block focuses it and snaps the caret to end-of-block. Arrow keys, Home/End,
-// Backspace, Delete, and printable character input all work through the pure
-// helpers above. Per-pixel click hit-testing is a follow-up.
+// Per-block widget for an Inline-bodied block. Selection lives in the
+// pane-owned `SelectionContext::doc_selection`; this widget reads its slice
+// of the doc selection (via `project`) and writes back through the same
+// signal. The runs themselves are still per-block so that local typing is
+// cheap; on FocusLost (and on every BlockAction) the latest local runs are
+// committed back to the document via `BlockAction::EditInline`.
 
+use crate::selection::{
+    doc_end_position, doc_start_position, project, BlockSelection, DocPosition,
+    DocSelection, GeometryCache,
+};
 use crate::ui::blocks::paragraph::{LINK_COLOR, MONO_FAMILY};
+use crate::ui::sel_ctx::SelectionContext;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
@@ -455,16 +460,8 @@ const CARET_COLOR: Color = Color::rgb8(40, 40, 40);
 const SELECTION_BG: Color = Color::rgb8(180, 210, 255);
 
 /// Build the editable inline-runs widget.
-///
-/// `block_id` identifies the owning block in the document — needed so
-/// keyboard handlers can emit `BlockAction`s that target the correct block.
-/// `on_action` is the chokepoint callback supplied by the editor pane.
-/// `focus_target`, when set to this widget's `block_id`, requests focus on
-/// the next reactive tick — used to land the caret in newly-split or merged
-/// blocks after a structural action.
 pub fn editable_inline(
     runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
     font_size: f32,
     force_bold: bool,
     block_id: BlockId,
@@ -472,45 +469,74 @@ pub fn editable_inline(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     slash_eligible: bool,
+    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     let focused: RwSignal<bool> = RwSignal::new(false);
 
-    // Re-render whenever runs / selection / focus change.
+    // Maintain this block's geometry cache entry: rebuild whenever runs
+    // change. Approximate widths are good enough for visually-correct
+    // vertical-arrow nav within ±1 char on unstyled paragraph text; a
+    // future task can swap in real per-glyph positions from a custom
+    // text-layout view.
+    let geometry_for_effect = sel_ctx.geometry.clone();
+    create_effect(move |_| {
+        let runs_v = runs.get();
+        let text: String = runs_v.iter().map(|r| r.text.clone()).collect();
+        let xs = GeometryCache::approximate_for(&text, font_size);
+        geometry_for_effect.borrow_mut().put(block_id, xs);
+    });
+
+    // Re-render on runs / doc_selection / focus changes. Project the doc
+    // selection onto this block to derive what to paint locally.
+    let doc_sel_sig = sel_ctx.doc_selection;
+    let current_doc_sig = sel_ctx.current_doc;
     let body = floem::views::dyn_container(
-        move || (runs.get(), selection.get(), focused.get()),
-        move |(runs_v, sel_v, foc)| {
-            render_with_selection(&runs_v, sel_v, foc, font_size, force_bold)
+        move || (runs.get(), doc_sel_sig.get(), focused.get()),
+        move |(runs_v, doc_sel_v, foc)| {
+            let bs = current_doc_sig.with_untracked(|maybe| {
+                maybe
+                    .as_ref()
+                    .and_then(|d| {
+                        d.blocks
+                            .iter()
+                            .find(|b| b.id == block_id)
+                            .map(|b| project(doc_sel_v, b, d))
+                    })
+                    .unwrap_or(BlockSelection::None)
+            });
+            render_block(&runs_v, bs, foc, font_size, force_bold)
         },
     )
     .style(|s| s.width_full());
 
     let on_action_for_focus_lost = on_action.clone();
     let on_action_for_keydown = on_action;
+    let sel_ctx_for_click = sel_ctx.clone();
+    let sel_ctx_for_keydown = sel_ctx.clone();
     let view = body
         .keyboard_navigable()
         .on_click_stop(move |_| {
-            // Click anywhere → collapse selection at end-of-block. Real
-            // per-character hit-testing arrives in a follow-up.
+            // Click anywhere → collapse caret at end-of-block. Real per-
+            // character hit-testing remains a follow-up.
             let end = runs.with_untracked(|r| Caret::end(r));
-            selection.set(LocalSelection::caret(end));
+            sel_ctx_for_click
+                .doc_selection
+                .set(DocSelection::caret(DocPosition::new(
+                    block_id, end.run, end.offset,
+                )));
         })
         .on_event(EventListener::FocusGained, move |_| {
             focused.set(true);
             focus_pub.block.set(Some(block_id));
-            focus_pub.signals.set(Some((runs, selection)));
+            focus_pub.runs.set(Some(runs));
             EventPropagation::Stop
         })
         .on_event(EventListener::FocusLost, move |_| {
             focused.set(false);
-            // Only clear the pane-level focus slot if we still own it; if
-            // another block already grabbed focus, leave its publication
-            // intact.
             if focus_pub.block.get_untracked() == Some(block_id) {
                 focus_pub.block.set(None);
-                focus_pub.signals.set(None);
+                focus_pub.runs.set(None);
             }
-            // Commit any in-progress local edits to the document so other
-            // widgets observing the doc see the latest text.
             let current = runs.get_untracked();
             on_action_for_focus_lost(BlockAction::EditInline {
                 block_id,
@@ -523,10 +549,11 @@ pub fn editable_inline(
                 if handle_key_down(
                     ke,
                     runs,
-                    selection,
                     block_id,
                     &on_action_for_keydown,
                     slash_eligible,
+                    &sel_ctx_for_keydown,
+                    focus_target,
                 ) {
                     return EventPropagation::Stop;
                 }
@@ -546,7 +573,6 @@ pub fn editable_inline(
     create_effect(move |_| {
         if focus_target.get() == Some(block_id) {
             view_id.request_focus();
-            // Clear so subsequent re-renders don't keep stealing focus.
             focus_target.set(None);
         }
     });
@@ -554,99 +580,94 @@ pub fn editable_inline(
     view
 }
 
+/// Direction for horizontal motion (←/→/Home/End).
+#[derive(Clone, Copy)]
+enum HMotion {
+    Left,
+    Right,
+    Home,
+    End,
+}
+
+/// Direction for vertical motion (↑/↓).
+#[derive(Clone, Copy)]
+enum VMotion {
+    Up,
+    Down,
+}
+
 /// Decide what to do for a single `KeyEvent`. Returns `true` when handled.
-///
-/// `slash_eligible` enables the slash-command trigger for paragraph blocks:
-/// when true and the block is empty, typing `/` opens the slash menu instead
-/// of inserting the literal character.
 fn handle_key_down(
     ke: &floem::keyboard::KeyEvent,
     runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
     block_id: BlockId,
     on_action: &ActionSink,
     slash_eligible: bool,
+    sel_ctx: &SelectionContext,
+    focus_target: RwSignal<Option<BlockId>>,
 ) -> bool {
     let extending = ke.modifiers.shift();
+    let cmd = ke.modifiers.control() || ke.modifiers.meta();
+
+    // Cmd/Ctrl-modified shortcuts handled first.
+    if cmd {
+        if let Key::Character(s) = &ke.key.logical_key {
+            match s.as_str() {
+                "a" | "A" => {
+                    do_select_all(runs, block_id, on_action, sel_ctx);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
 
     match ke.key.logical_key.clone() {
         Key::Named(NamedKey::ArrowLeft) => {
-            move_head(runs, selection, extending, |r, c| move_left(r, c));
+            do_horizontal(runs, block_id, extending, HMotion::Left, sel_ctx, on_action, focus_target);
             true
         }
         Key::Named(NamedKey::ArrowRight) => {
-            move_head(runs, selection, extending, |r, c| move_right(r, c));
+            do_horizontal(runs, block_id, extending, HMotion::Right, sel_ctx, on_action, focus_target);
             true
         }
         Key::Named(NamedKey::Home) => {
-            move_head(runs, selection, extending, |_r, _c| Caret::START);
+            do_horizontal(runs, block_id, extending, HMotion::Home, sel_ctx, on_action, focus_target);
             true
         }
         Key::Named(NamedKey::End) => {
-            move_head(runs, selection, extending, |r, _c| Caret::end(r));
+            do_horizontal(runs, block_id, extending, HMotion::End, sel_ctx, on_action, focus_target);
+            true
+        }
+        Key::Named(NamedKey::ArrowUp) => {
+            do_vertical(runs, block_id, extending, VMotion::Up, sel_ctx, on_action, focus_target);
+            true
+        }
+        Key::Named(NamedKey::ArrowDown) => {
+            do_vertical(runs, block_id, extending, VMotion::Down, sel_ctx, on_action, focus_target);
             true
         }
         Key::Named(NamedKey::Backspace) => {
-            let sel = selection.get_untracked();
-            if sel.is_collapsed() {
-                if sel.head == Caret::START {
-                    // Backspace at block start → merge with previous block.
-                    // Commit current local runs first so the merge sees the
-                    // latest text.
-                    let current = runs.get_untracked();
-                    on_action(BlockAction::EditInline {
-                        block_id,
-                        new_runs: current,
-                    });
-                    on_action(BlockAction::MergeWithPrev { block_id });
-                    return true;
-                }
-                let mut new_caret = sel.head;
-                runs.update(|r| {
-                    new_caret = backspace(r, new_caret);
-                });
-                selection.set(LocalSelection::caret(new_caret));
-            } else {
-                let mut new_sel = sel;
-                runs.update(|r| {
-                    new_sel = delete_selection(r, sel);
-                });
-                selection.set(new_sel);
-            }
+            do_backspace(runs, block_id, on_action, sel_ctx);
             true
         }
         Key::Named(NamedKey::Delete) => {
-            let sel = selection.get_untracked();
-            if sel.is_collapsed() {
-                let mut new_caret = sel.head;
-                runs.update(|r| {
-                    new_caret = delete(r, new_caret);
-                });
-                selection.set(LocalSelection::caret(new_caret));
-            } else {
-                let mut new_sel = sel;
-                runs.update(|r| {
-                    new_sel = delete_selection(r, sel);
-                });
-                selection.set(new_sel);
-            }
+            do_delete(runs, block_id, on_action, sel_ctx);
             true
         }
         Key::Named(NamedKey::Space) => {
-            insert_at_selection(runs, selection, ' ');
+            insert_at_doc_caret(runs, block_id, sel_ctx, ' ');
             true
         }
         Key::Named(NamedKey::Enter) => {
             if ke.modifiers.shift() {
-                // Reserve Shift+Enter for soft-break (later); swallow for now.
                 return true;
             }
-            // Block split. Commit current local runs first so the split is
-            // performed on the latest text, then issue Split with the current
-            // caret coordinates. The editor pane's action sink will apply
-            // both and steer focus to the new block.
-            let sel = selection.get_untracked();
-            let head = sel.head;
+            // Resolve head's local caret in this block, then split.
+            let head = sel_ctx.doc_selection.get_untracked().head;
+            if head.block != block_id {
+                return false;
+            }
             let current = runs.get_untracked();
             on_action(BlockAction::EditInline {
                 block_id,
@@ -660,9 +681,9 @@ fn handle_key_down(
             true
         }
         _ => {
-            if ke.modifiers.control() || ke.modifiers.meta() {
+            if cmd {
                 if let Some(flag) = inline_flag_for_shortcut(ke) {
-                    apply_toggle(runs, selection, flag);
+                    apply_local_toggle(runs, block_id, sel_ctx, flag);
                     return true;
                 }
                 return false;
@@ -681,63 +702,15 @@ fn handle_key_down(
                     on_action(BlockAction::OpenSlashMenu { block_id });
                     continue;
                 }
-                insert_at_selection(runs, selection, ch);
+                insert_at_doc_caret(runs, block_id, sel_ctx, ch);
             }
             true
         }
     }
 }
 
-/// Move the selection's `head` using `motion`. When `extending` (Shift held)
-/// `anchor` stays put. Otherwise the selection collapses around the new head;
-/// if the selection was non-collapsed and the user pressed an arrow without
-/// shift, the caret jumps to the appropriate end of the prior selection
-/// rather than to head ± 1.
-fn move_head<F>(
-    runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
-    extending: bool,
-    motion: F,
-) where
-    F: FnOnce(&[InlineRun], Caret) -> Caret,
-{
-    let sel = selection.get_untracked();
-    let pivot = if extending || sel.is_collapsed() {
-        sel.head
-    } else {
-        let (start, end) = sel.ordered();
-        if compare(sel.head, sel.anchor).is_le() {
-            start
-        } else {
-            end
-        }
-    };
-    // For non-extending arrow on a non-collapsed selection, pressing arrow
-    // collapses to the corresponding end without further motion.
-    let new_head = if !extending && !sel.is_collapsed() {
-        pivot
-    } else {
-        runs.with_untracked(|r| motion(r, pivot))
-    };
-    let new_sel = if extending {
-        LocalSelection {
-            anchor: sel.anchor,
-            head: new_head,
-        }
-    } else {
-        LocalSelection::caret(new_head)
-    };
-    selection.set(new_sel);
-}
-
-/// Map a Ctrl/Cmd-modified key event to the inline flag it toggles, or
-/// `None` when the shortcut isn't one we handle. Both Ctrl and Meta are
-/// accepted on every platform — small loss in pure-Mac purity, big gain in
-/// "just works on whatever the user reaches for."
+/// Map a Ctrl/Cmd-modified key event to the inline flag it toggles.
 fn inline_flag_for_shortcut(ke: &floem::keyboard::KeyEvent) -> Option<InlineFlag> {
-    if !(ke.modifiers.control() || ke.modifiers.meta()) {
-        return None;
-    }
     if let Key::Character(s) = &ke.key.logical_key {
         match s.as_str() {
             "b" | "B" => Some(InlineFlag::Bold),
@@ -751,51 +724,451 @@ fn inline_flag_for_shortcut(ke: &floem::keyboard::KeyEvent) -> Option<InlineFlag
     }
 }
 
-fn apply_toggle(
+/// Apply a B/I/code/link toggle when the doc selection is local to this
+/// block. Cross-block toggles are deferred to Task 16.
+fn apply_local_toggle(
     runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
+    block_id: BlockId,
+    sel_ctx: &SelectionContext,
     flag: InlineFlag,
 ) {
-    let sel = selection.get_untracked();
-    let mut new_sel = sel;
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.anchor.block != block_id || doc_sel.head.block != block_id {
+        return;
+    }
+    let local = LocalSelection {
+        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
+        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+    };
+    let mut new_local = local;
     runs.update(|r| {
-        new_sel = toggle_inline(r, sel, flag);
+        new_local = toggle_inline(r, local, flag);
     });
-    selection.set(new_sel);
+    sel_ctx.doc_selection.set(DocSelection {
+        anchor: DocPosition::new(block_id, new_local.anchor.run, new_local.anchor.offset),
+        head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
+    });
 }
 
-fn insert_at_selection(
+/// Insert one character at the doc caret. The caret must be inside this
+/// block (callers guarantee this — we're the focused widget).
+fn insert_at_doc_caret(
     runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
+    block_id: BlockId,
+    sel_ctx: &SelectionContext,
     ch: char,
 ) {
-    let sel = selection.get_untracked();
-    let mut new_caret = sel.head;
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.head.block != block_id {
+        return;
+    }
+    // For now only handle within-block selections; multi-block delete-then-
+    // insert is a Task-16 concern.
+    let local = LocalSelection {
+        anchor: Caret {
+            run: doc_sel.anchor.run,
+            offset: doc_sel.anchor.offset,
+        },
+        head: Caret {
+            run: doc_sel.head.run,
+            offset: doc_sel.head.offset,
+        },
+    };
+    let single_block = doc_sel.anchor.block == block_id;
+    let mut new_caret = local.head;
     runs.update(|r| {
-        // Replace any non-collapsed selection first.
-        let collapsed = if sel.is_collapsed() {
-            sel
+        let collapsed = if single_block && !local.is_collapsed() {
+            delete_selection(r, local)
         } else {
-            delete_selection(r, sel)
+            LocalSelection::caret(local.head)
         };
         new_caret = insert_char(r, collapsed.head, ch);
     });
-    selection.set(LocalSelection::caret(new_caret));
+    sel_ctx
+        .doc_selection
+        .set(DocSelection::caret(DocPosition::new(
+            block_id,
+            new_caret.run,
+            new_caret.offset,
+        )));
 }
 
-/// Render the runs as a wrapping flow of styled spans. When focused with a
-/// collapsed selection, inserts a caret bar at the head position. With a
-/// non-collapsed selection, the selected character range is rendered with a
-/// highlight background.
-fn render_with_selection(
+/// Backspace at the doc caret. Block-start backspace merges with the
+/// previous block (existing behavior). Within-block proceeds via the local
+/// helpers. Multi-block selection delete is a Task-16 concern.
+fn do_backspace(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.head.block != block_id {
+        return;
+    }
+    let local = LocalSelection {
+        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
+        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+    };
+    let single_block = doc_sel.anchor.block == block_id;
+    if single_block && local.is_collapsed() && local.head == Caret::START {
+        // Merge with previous block.
+        let current = runs.get_untracked();
+        on_action(BlockAction::EditInline {
+            block_id,
+            new_runs: current,
+        });
+        on_action(BlockAction::MergeWithPrev { block_id });
+        return;
+    }
+    if single_block && !local.is_collapsed() {
+        let mut new_local = local;
+        runs.update(|r| {
+            new_local = delete_selection(r, local);
+        });
+        sel_ctx.doc_selection.set(DocSelection {
+            anchor: DocPosition::new(block_id, new_local.anchor.run, new_local.anchor.offset),
+            head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
+        });
+        return;
+    }
+    // Single-caret backspace within this block.
+    let mut new_caret = local.head;
+    runs.update(|r| {
+        new_caret = backspace(r, new_caret);
+    });
+    sel_ctx
+        .doc_selection
+        .set(DocSelection::caret(DocPosition::new(
+            block_id,
+            new_caret.run,
+            new_caret.offset,
+        )));
+}
+
+/// Delete-key handling (delete forward).
+fn do_delete(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    _on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    if doc_sel.head.block != block_id {
+        return;
+    }
+    let local = LocalSelection {
+        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
+        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+    };
+    let single_block = doc_sel.anchor.block == block_id;
+    if single_block && !local.is_collapsed() {
+        let mut new_local = local;
+        runs.update(|r| {
+            new_local = delete_selection(r, local);
+        });
+        sel_ctx.doc_selection.set(DocSelection {
+            anchor: DocPosition::new(block_id, new_local.anchor.run, new_local.anchor.offset),
+            head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
+        });
+        return;
+    }
+    let mut new_caret = local.head;
+    runs.update(|r| {
+        new_caret = delete(r, new_caret);
+    });
+    sel_ctx
+        .doc_selection
+        .set(DocSelection::caret(DocPosition::new(
+            block_id,
+            new_caret.run,
+            new_caret.offset,
+        )));
+}
+
+/// Cmd/Ctrl-A: select the whole document.
+fn do_select_all(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    on_action: &ActionSink,
+    sel_ctx: &SelectionContext,
+) {
+    // Commit local runs first so doc_end_position sees latest text.
+    let current = runs.get_untracked();
+    on_action(BlockAction::EditInline {
+        block_id,
+        new_runs: current,
+    });
+    sel_ctx.current_doc.with_untracked(|maybe| {
+        if let Some(d) = maybe {
+            let anchor = doc_start_position(d);
+            let head = doc_end_position(d);
+            sel_ctx.doc_selection.set(DocSelection { anchor, head });
+        }
+    });
+}
+
+/// Horizontal motion. Prefers local runs for within-block movement to honor
+/// uncommitted edits; commits and consults the doc for cross-block hops.
+fn do_horizontal(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    extending: bool,
+    direction: HMotion,
+    sel_ctx: &SelectionContext,
+    on_action: &ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    let head = doc_sel.head;
+
+    // Non-extending arrow on a non-collapsed selection collapses to the
+    // corresponding end without further motion.
+    if !extending
+        && !doc_sel.is_collapsed()
+        && matches!(direction, HMotion::Left | HMotion::Right)
+    {
+        let target = sel_ctx.current_doc.with_untracked(|maybe| {
+            let d = maybe.as_ref()?;
+            let (lo, hi) = doc_sel.ordered(d);
+            Some(match direction {
+                HMotion::Left => lo,
+                HMotion::Right => hi,
+                _ => unreachable!(),
+            })
+        });
+        if let Some(t) = target {
+            sel_ctx.doc_selection.set(DocSelection::caret(t));
+            if t.block != block_id {
+                commit_runs(runs, block_id, on_action);
+                focus_target.set(Some(t.block));
+            }
+        }
+        return;
+    }
+
+    let new_head = match direction {
+        HMotion::Left => {
+            if head.block == block_id {
+                let runs_v = runs.get_untracked();
+                let c = move_left(&runs_v, Caret { run: head.run, offset: head.offset });
+                if c.run != head.run || c.offset != head.offset {
+                    DocPosition::new(block_id, c.run, c.offset)
+                } else {
+                    commit_runs(runs, block_id, on_action);
+                    sel_ctx
+                        .current_doc
+                        .with_untracked(|maybe| {
+                            maybe.as_ref().map(|d| head.step_left(d)).unwrap_or(head)
+                        })
+                }
+            } else {
+                sel_ctx
+                    .current_doc
+                    .with_untracked(|maybe| {
+                        maybe.as_ref().map(|d| head.step_left(d)).unwrap_or(head)
+                    })
+            }
+        }
+        HMotion::Right => {
+            if head.block == block_id {
+                let runs_v = runs.get_untracked();
+                let c = move_right(&runs_v, Caret { run: head.run, offset: head.offset });
+                if c.run != head.run || c.offset != head.offset {
+                    DocPosition::new(block_id, c.run, c.offset)
+                } else {
+                    commit_runs(runs, block_id, on_action);
+                    sel_ctx
+                        .current_doc
+                        .with_untracked(|maybe| {
+                            maybe.as_ref().map(|d| head.step_right(d)).unwrap_or(head)
+                        })
+                }
+            } else {
+                sel_ctx
+                    .current_doc
+                    .with_untracked(|maybe| {
+                        maybe.as_ref().map(|d| head.step_right(d)).unwrap_or(head)
+                    })
+            }
+        }
+        HMotion::Home => DocPosition::block_start(head.block),
+        HMotion::End => {
+            if head.block == block_id {
+                let end = runs.with_untracked(|r| Caret::end(r));
+                DocPosition::new(block_id, end.run, end.offset)
+            } else {
+                sel_ctx
+                    .current_doc
+                    .with_untracked(|maybe| end_of_block(maybe.as_ref(), head.block).unwrap_or(head))
+            }
+        }
+    };
+
+    let new_sel = if extending {
+        DocSelection {
+            anchor: doc_sel.anchor,
+            head: new_head,
+        }
+    } else {
+        DocSelection::caret(new_head)
+    };
+    sel_ctx.doc_selection.set(new_sel);
+
+    if !extending && new_head.block != block_id {
+        commit_runs(runs, block_id, on_action);
+        focus_target.set(Some(new_head.block));
+    }
+}
+
+/// Vertical motion across blocks. Reads the source block's x at `head.offset`
+/// from the geometry cache; finds the offset whose cached x is nearest in
+/// the target block.
+fn do_vertical(
+    runs: RwSignal<Vec<InlineRun>>,
+    block_id: BlockId,
+    extending: bool,
+    direction: VMotion,
+    sel_ctx: &SelectionContext,
+    on_action: &ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
+) {
+    let doc_sel = sel_ctx.doc_selection.get_untracked();
+    let head = doc_sel.head;
+
+    // Source-block absolute char offset → x.
+    let src_abs = sel_ctx.current_doc.with_untracked(|maybe| {
+        let d = maybe.as_ref()?;
+        let b = d.blocks.iter().find(|b| b.id == head.block)?;
+        if let crate::model::types::BlockBody::Inline(r) = &b.body {
+            Some(abs_offset(r, Caret { run: head.run, offset: head.offset }))
+        } else {
+            None
+        }
+    });
+    let x = src_abs
+        .and_then(|a| sel_ctx.geometry.borrow().x_at(head.block, a))
+        .unwrap_or(0.0);
+
+    let target_block_id = sel_ctx.current_doc.with_untracked(|maybe| {
+        let d = maybe.as_ref()?;
+        let i = d.blocks.iter().position(|b| b.id == head.block)?;
+        match direction {
+            VMotion::Up => {
+                if i == 0 {
+                    None
+                } else {
+                    Some(d.blocks[i - 1].id)
+                }
+            }
+            VMotion::Down => d.blocks.get(i + 1).map(|b| b.id),
+        }
+    });
+
+    let new_head = match target_block_id {
+        Some(tid) => {
+            let abs = sel_ctx
+                .geometry
+                .borrow()
+                .nearest_offset(tid, x)
+                .unwrap_or(0);
+            sel_ctx.current_doc.with_untracked(|maybe| {
+                let d = maybe
+                    .as_ref()
+                    .and_then(|d| d.blocks.iter().find(|b| b.id == tid));
+                match d {
+                    Some(b) => match &b.body {
+                        crate::model::types::BlockBody::Inline(r) => {
+                            let (run, offset) = abs_to_run_offset(r, abs);
+                            DocPosition::new(tid, run, offset)
+                        }
+                        _ => DocPosition::block_start(tid),
+                    },
+                    None => DocPosition::block_start(tid),
+                }
+            })
+        }
+        None => sel_ctx.current_doc.with_untracked(|maybe| {
+            maybe
+                .as_ref()
+                .map(|d| match direction {
+                    VMotion::Up => doc_start_position(d),
+                    VMotion::Down => doc_end_position(d),
+                })
+                .unwrap_or(head)
+        }),
+    };
+
+    let new_sel = if extending {
+        DocSelection {
+            anchor: doc_sel.anchor,
+            head: new_head,
+        }
+    } else {
+        DocSelection::caret(new_head)
+    };
+    if new_head.block != block_id {
+        commit_runs(runs, block_id, on_action);
+    }
+    sel_ctx.doc_selection.set(new_sel);
+    if !extending && new_head.block != block_id {
+        focus_target.set(Some(new_head.block));
+    }
+}
+
+fn commit_runs(runs: RwSignal<Vec<InlineRun>>, block_id: BlockId, on_action: &ActionSink) {
+    let current = runs.get_untracked();
+    on_action(BlockAction::EditInline {
+        block_id,
+        new_runs: current,
+    });
+}
+
+fn end_of_block(doc: Option<&crate::model::types::EditorDoc>, block_id: BlockId) -> Option<DocPosition> {
+    let d = doc?;
+    let b = d.blocks.iter().find(|b| b.id == block_id)?;
+    if let crate::model::types::BlockBody::Inline(r) = &b.body {
+        let e = Caret::end(r);
+        Some(DocPosition::new(block_id, e.run, e.offset))
+    } else {
+        Some(DocPosition::block_start(block_id))
+    }
+}
+
+fn abs_to_run_offset(runs: &[InlineRun], abs: usize) -> (usize, usize) {
+    let mut acc = 0;
+    for (i, r) in runs.iter().enumerate() {
+        let len = r.text.chars().count();
+        if abs <= acc + len {
+            return (i, abs - acc);
+        }
+        acc += len;
+    }
+    let last = runs.len().saturating_sub(1);
+    let last_len = runs.last().map(|r| r.text.chars().count()).unwrap_or(0);
+    (last, last_len)
+}
+
+/// Render the block given its slice of the doc selection.
+///
+/// `bs` carries which characters are part of the selection range and whether
+/// this block holds the doc selection's `head` (which is what determines
+/// whether to paint a caret here). `focused` controls whether we paint the
+/// caret as a visible bar — it should only be true on the block that owns
+/// Floem's keyboard focus, but selection painting happens regardless.
+fn render_block(
     runs: &[InlineRun],
-    sel: LocalSelection,
+    bs: BlockSelection,
     focused: bool,
     font_size: f32,
     force_bold: bool,
 ) -> AnyView {
+    // Collapse `bs` to a `(range, caret)` pair for the rendering loop.
+    let (range, caret) = block_render_inputs(bs, runs);
+
     if runs.is_empty() {
-        return if focused {
+        // An empty block can still hold the caret; paint it if focused.
+        return if focused && caret.is_some() {
             caret_span(font_size).into_any()
         } else {
             empty().into_any()
@@ -807,7 +1180,8 @@ fn render_with_selection(
         emit_run_segments(
             run,
             i,
-            sel,
+            range,
+            caret,
             focused,
             font_size,
             force_bold,
@@ -820,13 +1194,61 @@ fn render_with_selection(
         .into_any()
 }
 
+/// Translate `BlockSelection` into an inclusive range `[lo, hi)` of carets
+/// to paint as selection background, and an optional caret position.
+fn block_render_inputs(
+    bs: BlockSelection,
+    runs: &[InlineRun],
+) -> (Option<(Caret, Caret)>, Option<Caret>) {
+    match bs {
+        BlockSelection::None => (None, None),
+        BlockSelection::Local { local, holds_head } => {
+            let range = if local.is_collapsed() {
+                None
+            } else {
+                Some(local.ordered())
+            };
+            let caret = if holds_head { Some(local.head) } else { None };
+            (range, caret)
+        }
+        BlockSelection::Leading { end, holds_head } => {
+            let range = if end == Caret::START {
+                None
+            } else {
+                Some((Caret::START, end))
+            };
+            let caret = if holds_head { Some(end) } else { None };
+            (range, caret)
+        }
+        BlockSelection::Trailing { start, holds_head } => {
+            let block_end = Caret::end(runs);
+            let range = if start == block_end {
+                None
+            } else {
+                Some((start, block_end))
+            };
+            let caret = if holds_head { Some(start) } else { None };
+            (range, caret)
+        }
+        BlockSelection::Full => {
+            let block_end = Caret::end(runs);
+            let range = if block_end == Caret::START {
+                None
+            } else {
+                Some((Caret::START, block_end))
+            };
+            (range, None)
+        }
+    }
+}
+
 /// Slice one run into segments at selection boundaries (and at the caret
-/// position when the selection is collapsed) and append the corresponding
-/// styled spans to `out`.
+/// position when present) and append the corresponding styled spans to `out`.
 fn emit_run_segments(
     run: &InlineRun,
     run_idx: usize,
-    sel: LocalSelection,
+    range: Option<(Caret, Caret)>,
+    caret: Option<Caret>,
     focused: bool,
     font_size: f32,
     force_bold: bool,
@@ -835,35 +1257,41 @@ fn emit_run_segments(
     let chars: Vec<char> = run.text.chars().collect();
     let len = chars.len();
 
-    // Selection extent in this run, in chars (exclusive upper bound).
-    let (start, end) = sel.ordered();
-    let sel_lo: Option<usize> = if start.run < run_idx {
-        Some(0)
-    } else if start.run == run_idx {
-        Some(start.offset.min(len))
-    } else {
-        None
-    };
-    let sel_hi: Option<usize> = if end.run > run_idx {
-        Some(len)
-    } else if end.run == run_idx {
-        Some(end.offset.min(len))
-    } else {
-        None
-    };
+    let sel_lo: Option<usize> = range.map(|(s, _)| {
+        if s.run < run_idx {
+            0
+        } else if s.run == run_idx {
+            s.offset.min(len)
+        } else {
+            len + 1 // sentinel: range begins after this run
+        }
+    });
+    let sel_hi: Option<usize> = range.map(|(_, e)| {
+        if e.run > run_idx {
+            len
+        } else if e.run == run_idx {
+            e.offset.min(len)
+        } else {
+            0 // sentinel: range ended before this run
+        }
+    });
     let sel_range: Option<(usize, usize)> = match (sel_lo, sel_hi) {
-        (Some(a), Some(b)) if a < b => Some((a, b)),
+        (Some(a), Some(b)) if a < b && a <= len => Some((a, b)),
         _ => None,
     };
 
-    // Caret position in this run (only when collapsed and head is here).
-    let caret_off: Option<usize> = if focused && sel.is_collapsed() && sel.head.run == run_idx {
-        Some(sel.head.offset.min(len))
+    let caret_off: Option<usize> = if focused {
+        caret.and_then(|c| {
+            if c.run == run_idx {
+                Some(c.offset.min(len))
+            } else {
+                None
+            }
+        })
     } else {
         None
     };
 
-    // Build sorted, deduped split points.
     let mut splits: Vec<usize> = vec![0, len];
     if let Some((a, b)) = sel_range {
         splits.push(a);
@@ -875,8 +1303,6 @@ fn emit_run_segments(
     splits.sort_unstable();
     splits.dedup();
 
-    // Caret at the very start of the run is special-cased: nothing precedes
-    // it in this run, so the windowed loop wouldn't insert it.
     if caret_off == Some(0) {
         out.push(caret_span(font_size).into_any());
     }
@@ -885,9 +1311,7 @@ fn emit_run_segments(
         let (lo, hi) = (w[0], w[1]);
         if lo < hi {
             let segment_text: String = chars[lo..hi].iter().collect();
-            let in_sel = sel_range
-                .map(|(a, b)| lo >= a && hi <= b)
-                .unwrap_or(false);
+            let in_sel = sel_range.map(|(a, b)| lo >= a && hi <= b).unwrap_or(false);
             out.push(run_span(run, segment_text, font_size, force_bold, in_sel));
         }
         if Some(hi) == caret_off && hi != 0 {

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod model;
 pub mod recents;
+pub mod selection;
 pub mod settings;
 pub mod state;
 pub mod ui;

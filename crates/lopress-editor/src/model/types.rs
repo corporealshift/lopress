@@ -3,13 +3,19 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Stable identity for a block within an open document. Not persisted to disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(u64);
 
 impl BlockId {
     pub fn new() -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(1);
         Self(COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Raw monotonic counter value. Stable but opaque — for comparison
+    /// fallbacks when block identity outlives presence in the doc.
+    pub fn raw(self) -> u64 {
+        self.0
     }
 }
 

@@ -13,8 +13,9 @@ pub mod opaque;
 pub mod paragraph;
 
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
-use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher, LocalSelection};
+use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
+use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -30,35 +31,34 @@ pub fn block_view(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     dnd: DndState,
+    sel_ctx: SelectionContext,
 ) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
     let body = match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());
-            let selection_sig = RwSignal::new(LocalSelection::START);
             paragraph::render_paragraph_editable(
                 runs_sig,
-                selection_sig,
                 block.id,
                 on_action.clone(),
                 focus_target,
                 focus_pub,
+                sel_ctx.clone(),
             )
             .style(|s| s.padding_vert(6.))
             .into_any()
         }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());
-            let selection_sig = RwSignal::new(LocalSelection::START);
             heading::render_heading_editable(
                 *level,
                 runs_sig,
-                selection_sig,
                 block.id,
                 on_action.clone(),
                 focus_target,
                 focus_pub,
+                sel_ctx.clone(),
             )
             .into_any()
         }
@@ -81,6 +81,7 @@ pub fn block_view(
     let toolbar_slot = {
         let on_action = on_action.clone();
         let kind_for_slot = kind.clone();
+        let sel_ctx_for_slot = sel_ctx.clone();
         dyn_container(
             move || focus_pub.block.get() == Some(block_id),
             move |is_focused| {
@@ -90,6 +91,7 @@ pub fn block_view(
                         kind_for_slot.clone(),
                         focus_pub,
                         on_action.clone(),
+                        sel_ctx_for_slot.clone(),
                     )
                     .into_any()
                 } else {

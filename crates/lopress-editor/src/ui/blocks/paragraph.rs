@@ -3,9 +3,8 @@
 //! lays out one styled `text` element per inline run in a wrapping flex row.
 
 use crate::model::types::{BlockId, InlineRun};
-use crate::ui::blocks::inline_editor::{
-    editable_inline, ActionSink, FocusPublisher, LocalSelection,
-};
+use crate::ui::blocks::inline_editor::{editable_inline, ActionSink, FocusPublisher};
+use crate::ui::sel_ctx::SelectionContext;
 use floem::peniko::Color;
 use floem::reactive::RwSignal;
 use floem::style::FlexWrap;
@@ -26,15 +25,14 @@ pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
 pub fn render_paragraph_editable(
     runs: RwSignal<Vec<InlineRun>>,
-    selection: RwSignal<LocalSelection>,
     block_id: BlockId,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
+    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     editable_inline(
         runs,
-        selection,
         BODY_FONT_SIZE,
         false,
         block_id,
@@ -42,6 +40,7 @@ pub fn render_paragraph_editable(
         focus_target,
         focus_pub,
         true,
+        sel_ctx,
     )
 }
 

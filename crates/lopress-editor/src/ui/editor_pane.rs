@@ -5,6 +5,7 @@ use crate::model::types::{BlockId, EditorDoc};
 use crate::ui::blocks::block_view;
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{gap_drop_zone, DndState};
+use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::slash_menu::slash_menu;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, scroll, stack, v_stack_from_iter, Decorators};
@@ -29,10 +30,11 @@ pub fn editor_pane(
     focus_target: RwSignal<Option<BlockId>>,
     slash_menu_open: RwSignal<Option<BlockId>>,
     dnd: DndState,
+    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     let focus_pub = FocusPublisher {
         block: RwSignal::new(None),
-        signals: RwSignal::new(None),
+        runs: RwSignal::new(None),
     };
     // Interleave gap drop-zones with block views: gap(0), block(0), gap(1),
     // block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
@@ -40,7 +42,14 @@ pub fn editor_pane(
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
     for (i, b) in doc.blocks.iter().enumerate() {
         rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
-        rows.push(block_view(b, on_action.clone(), focus_target, focus_pub, dnd));
+        rows.push(block_view(
+            b,
+            on_action.clone(),
+            focus_target,
+            focus_pub,
+            dnd,
+            sel_ctx.clone(),
+        ));
     }
     rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
     let column = v_stack_from_iter(rows).style(|s| {
