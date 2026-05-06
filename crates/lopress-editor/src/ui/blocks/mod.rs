@@ -14,9 +14,11 @@ pub mod paragraph;
 
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher, LocalSelection};
+use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
-use floem::reactive::{RwSignal, SignalGet};
-use floem::views::{dyn_container, empty, v_stack, Decorators};
+use floem::event::{EventListener, EventPropagation};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
+use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
@@ -27,6 +29,7 @@ pub fn block_view(
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
+    dnd: DndState,
 ) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
@@ -97,7 +100,25 @@ pub fn block_view(
         .style(|s| s.width_full())
     };
 
-    v_stack((toolbar_slot, body))
+    // Hover gutter: shows the drag handle when the user is over this block
+    // (or while it's being dragged). PointerEnter/PointerLeave on the
+    // h_stack container set the local hover signal.
+    let hover: RwSignal<bool> = RwSignal::new(false);
+    let handle = drag_handle(block_id, dnd, hover)
+        .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.).items_center());
+
+    let row = h_stack((handle, body.style(|s| s.flex_grow(1.0))))
+        .style(|s| s.width_full())
+        .on_event(EventListener::PointerEnter, move |_| {
+            hover.set(true);
+            EventPropagation::Continue
+        })
+        .on_event(EventListener::PointerLeave, move |_| {
+            hover.set(false);
+            EventPropagation::Continue
+        });
+
+    v_stack((toolbar_slot, row))
         .style(|s| s.width_full())
         .into_any()
 }

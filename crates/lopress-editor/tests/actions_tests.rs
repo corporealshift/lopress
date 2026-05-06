@@ -203,6 +203,43 @@ fn move_backward() {
 }
 
 #[test]
+fn move_first_to_end_gap() {
+    let (id_a, a) = paragraph_with_id("a");
+    let (id_b, b) = paragraph_with_id("b");
+    let (id_c, c) = paragraph_with_id("c");
+    let mut doc = doc_with(vec![a, b, c]);
+    apply(
+        &mut doc,
+        BlockAction::Move {
+            block_id: id_a,
+            to_index: 3,
+        },
+    );
+    assert_eq!(doc.blocks[0].id, id_b);
+    assert_eq!(doc.blocks[1].id, id_c);
+    assert_eq!(doc.blocks[2].id, id_a);
+}
+
+#[test]
+fn move_to_self_adjacent_gap_is_noop() {
+    let (id_a, a) = paragraph_with_id("a");
+    let (id_b, b) = paragraph_with_id("b");
+    let (id_c, c) = paragraph_with_id("c");
+    let mut doc = doc_with(vec![a, b, c]);
+    // gap immediately after id_b: that's where id_b already lives.
+    apply(
+        &mut doc,
+        BlockAction::Move {
+            block_id: id_b,
+            to_index: 2,
+        },
+    );
+    assert_eq!(doc.blocks[0].id, id_a);
+    assert_eq!(doc.blocks[1].id, id_b);
+    assert_eq!(doc.blocks[2].id, id_c);
+}
+
+#[test]
 fn change_paragraph_to_heading() {
     let (id, a) = paragraph_with_id("title");
     let mut doc = doc_with(vec![a]);

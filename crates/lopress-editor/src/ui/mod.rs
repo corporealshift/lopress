@@ -1,6 +1,7 @@
 //! Root UI module. Switches between Welcome and Editing views based on `AppState`.
 
 pub mod blocks;
+pub mod dnd;
 pub mod editor_pane;
 pub mod slash_menu;
 pub mod toolbar;
@@ -20,6 +21,7 @@ use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
+use crate::ui::dnd::DndState;
 use lopress_gui_host::Session;
 
 /// Maximum number of recent workspaces to retain.
@@ -127,6 +129,7 @@ fn editing_view(
 
     let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
+    let dnd = DndState::new();
 
     // Chokepoint: every block-tree mutation routes through here. Pre/post
     // lookups derive the block to focus after structural actions.
@@ -180,6 +183,7 @@ fn editing_view(
                 on_action.clone(),
                 focus_target,
                 slash_menu_open,
+                dnd,
             )
             .into_any(),
             None => label(|| "No document open. Click \"Open first post\" to load one.")

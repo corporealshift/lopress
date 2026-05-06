@@ -32,8 +32,11 @@ pub enum BlockAction {
     Delete {
         block_id: BlockId,
     },
-    /// Move `block_id` to position `to_index`. Indices are interpreted in the
-    /// pre-removal coordinate system.
+    /// Move `block_id` to gap `to_index`. Gaps are numbered in pre-removal
+    /// coordinates: gap `i` is the slot before block `i`, so `to_index = 0`
+    /// drops at the very start and `to_index = blocks.len()` drops at the
+    /// very end. Dropping into the gap immediately before or after `block_id`
+    /// is a no-op.
     Move {
         block_id: BlockId,
         to_index: usize,
@@ -192,13 +195,14 @@ fn apply_delete(doc: &mut EditorDoc, id: BlockId) {
 
 fn apply_move(doc: &mut EditorDoc, id: BlockId, to_index: usize) {
     let Some(from) = find_idx(doc, id) else { return };
-    let to = to_index.min(doc.blocks.len().saturating_sub(1));
-    if from == to {
+    let target_gap = to_index.min(doc.blocks.len());
+    // Dropping into the gap immediately before or after self is a no-op.
+    if target_gap == from || target_gap == from + 1 {
         return;
     }
     let block = doc.blocks.remove(from);
-    let adjusted = if to > from { to - 1 } else { to };
-    doc.blocks.insert(adjusted, block);
+    let insert_at = if target_gap > from { target_gap - 1 } else { target_gap };
+    doc.blocks.insert(insert_at, block);
 }
 
 fn apply_change_type(doc: &mut EditorDoc, id: BlockId, new_kind: BlockKind) {
