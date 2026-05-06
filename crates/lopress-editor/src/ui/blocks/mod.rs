@@ -13,9 +13,10 @@ pub mod opaque;
 pub mod paragraph;
 
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
-use crate::ui::blocks::inline_editor::{ActionSink, LocalSelection};
-use floem::reactive::RwSignal;
-use floem::views::{empty, Decorators};
+use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher, LocalSelection};
+use crate::ui::toolbar::block_toolbar_for;
+use floem::reactive::{RwSignal, SignalGet};
+use floem::views::{dyn_container, empty, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
@@ -25,8 +26,11 @@ pub fn block_view(
     block: &EditorBlock,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
+    focus_pub: FocusPublisher,
 ) -> AnyView {
-    match (&block.kind, &block.body) {
+    let block_id = block.id;
+    let kind = block.kind.clone();
+    let body = match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());
             let selection_sig = RwSignal::new(LocalSelection::START);
@@ -34,8 +38,9 @@ pub fn block_view(
                 runs_sig,
                 selection_sig,
                 block.id,
-                on_action,
+                on_action.clone(),
                 focus_target,
+                focus_pub,
             )
             .style(|s| s.padding_vert(6.))
             .into_any()
@@ -48,8 +53,9 @@ pub fn block_view(
                 runs_sig,
                 selection_sig,
                 block.id,
-                on_action,
+                on_action.clone(),
                 focus_target,
+                focus_pub,
             )
             .into_any()
         }
@@ -64,5 +70,34 @@ pub fn block_view(
         }
         // Body/kind mismatch — render nothing.
         _ => empty().into_any(),
-    }
+    };
+
+    // Anchored toolbar: rendered above this block's body iff this block is
+    // the focused one. Uses a `dyn_container` keyed on `focus_pub.block` so
+    // it appears/disappears reactively.
+    let toolbar_slot = {
+        let on_action = on_action.clone();
+        let kind_for_slot = kind.clone();
+        dyn_container(
+            move || focus_pub.block.get() == Some(block_id),
+            move |is_focused| {
+                if is_focused {
+                    block_toolbar_for(
+                        block_id,
+                        kind_for_slot.clone(),
+                        focus_pub,
+                        on_action.clone(),
+                    )
+                    .into_any()
+                } else {
+                    empty().into_any()
+                }
+            },
+        )
+        .style(|s| s.width_full())
+    };
+
+    v_stack((toolbar_slot, body))
+        .style(|s| s.width_full())
+        .into_any()
 }

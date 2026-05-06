@@ -13,6 +13,17 @@ use std::rc::Rc;
 /// through the `actions::apply` chokepoint owned by the editor pane.
 pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
+/// Pane-level signals an editable widget publishes to so the toolbar (and
+/// other surfaces) can read which block is focused and operate on its
+/// runs / selection. The widget sets `block` to its own id and `signals`
+/// to its `(runs, selection)` pair on `FocusGained`; on `FocusLost` it
+/// clears `block` (and `signals` if it still owns the slot).
+#[derive(Clone, Copy)]
+pub struct FocusPublisher {
+    pub block: RwSignal<Option<BlockId>>,
+    pub signals: RwSignal<Option<(RwSignal<Vec<InlineRun>>, RwSignal<LocalSelection>)>>,
+}
+
 /// Position within a `Vec<InlineRun>`. Offsets are *character* counts within
 /// `run.text`, not byte indices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -453,6 +464,7 @@ pub fn editable_inline(
     block_id: BlockId,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
+    focus_pub: FocusPublisher,
 ) -> impl IntoView {
     let focused: RwSignal<bool> = RwSignal::new(false);
 
@@ -477,10 +489,19 @@ pub fn editable_inline(
         })
         .on_event(EventListener::FocusGained, move |_| {
             focused.set(true);
+            focus_pub.block.set(Some(block_id));
+            focus_pub.signals.set(Some((runs, selection)));
             EventPropagation::Stop
         })
         .on_event(EventListener::FocusLost, move |_| {
             focused.set(false);
+            // Only clear the pane-level focus slot if we still own it; if
+            // another block already grabbed focus, leave its publication
+            // intact.
+            if focus_pub.block.get_untracked() == Some(block_id) {
+                focus_pub.block.set(None);
+                focus_pub.signals.set(None);
+            }
             // Commit any in-progress local edits to the document so other
             // widgets observing the doc see the latest text.
             let current = runs.get_untracked();

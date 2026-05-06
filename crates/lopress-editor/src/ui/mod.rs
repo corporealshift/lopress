@@ -2,6 +2,7 @@
 
 pub mod blocks;
 pub mod editor_pane;
+pub mod toolbar;
 pub mod welcome;
 
 use floem::peniko::Color;
