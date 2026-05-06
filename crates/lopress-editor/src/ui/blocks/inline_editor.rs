@@ -164,6 +164,12 @@ pub fn move_right(runs: &[InlineRun], caret: Caret) -> Caret {
     caret
 }
 
+/// True when `runs` contains no characters — either an empty vector or only
+/// runs whose `text` is empty. Used by the slash-menu trigger.
+pub fn block_is_empty(runs: &[InlineRun]) -> bool {
+    runs.iter().all(|r| r.text.is_empty())
+}
+
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
@@ -465,6 +471,7 @@ pub fn editable_inline(
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
+    slash_eligible: bool,
 ) -> impl IntoView {
     let focused: RwSignal<bool> = RwSignal::new(false);
 
@@ -513,7 +520,14 @@ pub fn editable_inline(
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if handle_key_down(ke, runs, selection, block_id, &on_action_for_keydown) {
+                if handle_key_down(
+                    ke,
+                    runs,
+                    selection,
+                    block_id,
+                    &on_action_for_keydown,
+                    slash_eligible,
+                ) {
                     return EventPropagation::Stop;
                 }
             }
@@ -541,12 +555,17 @@ pub fn editable_inline(
 }
 
 /// Decide what to do for a single `KeyEvent`. Returns `true` when handled.
+///
+/// `slash_eligible` enables the slash-command trigger for paragraph blocks:
+/// when true and the block is empty, typing `/` opens the slash menu instead
+/// of inserting the literal character.
 fn handle_key_down(
     ke: &floem::keyboard::KeyEvent,
     runs: RwSignal<Vec<InlineRun>>,
     selection: RwSignal<LocalSelection>,
     block_id: BlockId,
     on_action: &ActionSink,
+    slash_eligible: bool,
 ) -> bool {
     let extending = ke.modifiers.shift();
 
@@ -653,6 +672,13 @@ fn handle_key_down(
             };
             for ch in text.chars() {
                 if ch.is_control() {
+                    continue;
+                }
+                if ch == '/'
+                    && slash_eligible
+                    && runs.with_untracked(|r| block_is_empty(r))
+                {
+                    on_action(BlockAction::OpenSlashMenu { block_id });
                     continue;
                 }
                 insert_at_selection(runs, selection, ch);

@@ -2,6 +2,7 @@
 
 pub mod blocks;
 pub mod editor_pane;
+pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
 
@@ -125,10 +126,22 @@ fn editing_view(
     });
 
     let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
+    let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
 
     // Chokepoint: every block-tree mutation routes through here. Pre/post
     // lookups derive the block to focus after structural actions.
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
+        // UI-only action: hand off to the slash-menu signal and skip the
+        // model. Doing this before `apply` keeps the chokepoint single-entry
+        // for block widgets while letting non-mutating actions piggyback.
+        if let BlockAction::OpenSlashMenu { block_id } = action {
+            slash_menu_open.set(Some(block_id));
+            return;
+        }
+        // Any block-tree mutation closes an open slash menu.
+        if slash_menu_open.get_untracked().is_some() {
+            slash_menu_open.set(None);
+        }
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
                 .blocks
@@ -162,7 +175,13 @@ fn editing_view(
     let editor = dyn_container(
         move || current_doc.get(),
         move |maybe_doc| match maybe_doc {
-            Some(doc) => editor_pane::editor_pane(&doc, on_action.clone(), focus_target).into_any(),
+            Some(doc) => editor_pane::editor_pane(
+                &doc,
+                on_action.clone(),
+                focus_target,
+                slash_menu_open,
+            )
+            .into_any(),
             None => label(|| "No document open. Click \"Open first post\" to load one.")
                 .style(|s| {
                     s.width_full()

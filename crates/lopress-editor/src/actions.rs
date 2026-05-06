@@ -53,6 +53,12 @@ pub enum BlockAction {
         block_id: BlockId,
         new_text: String,
     },
+    /// UI-only action: request the slash command menu for `block_id`. Handled
+    /// by the editor pane's action sink (which sets a reactive flag); the
+    /// document model is unchanged, so `apply` is a no-op for this variant.
+    OpenSlashMenu {
+        block_id: BlockId,
+    },
 }
 
 /// Apply one `BlockAction` to the document. Unknown block ids are no-ops.
@@ -84,6 +90,8 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             block_id,
             new_text,
         } => apply_edit_code(doc, block_id, new_text),
+        // UI-only — handled by the editor pane's action sink, not the model.
+        BlockAction::OpenSlashMenu { .. } => {}
     }
 }
 

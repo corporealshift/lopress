@@ -41,6 +41,7 @@ pub fn render_paragraph_editable(
         on_action,
         focus_target,
         focus_pub,
+        true,
     )
 }
 

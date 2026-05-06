@@ -42,6 +42,7 @@ pub fn render_heading_editable(
         on_action,
         focus_target,
         focus_pub,
+        false,
     )
     .style(|s| s.padding_top(16.).padding_bottom(8.))
 }
