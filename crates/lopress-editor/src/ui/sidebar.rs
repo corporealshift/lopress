@@ -11,8 +11,7 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet};
 use floem::text::Weight;
 use floem::views::{
-    button, dyn_container, h_stack_from_iter, label, scroll, v_stack, v_stack_from_iter,
-    Decorators,
+    button, dyn_container, h_stack_from_iter, label, scroll, v_stack, v_stack_from_iter, Decorators,
 };
 use floem::{AnyView, IntoView};
 use lopress_gui_host::{DocumentRef, WorkspaceSummary};
@@ -108,7 +107,11 @@ fn group(
     if items.is_empty() {
         rows.push(
             label(|| "(none)".to_string())
-                .style(|s| s.padding_horiz(12.).color(Color::rgb8(160, 160, 170)).font_size(12.))
+                .style(|s| {
+                    s.padding_horiz(12.)
+                        .color(Color::rgb8(160, 160, 170))
+                        .font_size(12.)
+                })
                 .into_any(),
         );
     } else {
@@ -122,8 +125,7 @@ fn group(
 
 fn row(item: DocumentRef, active: bool, on_open: Rc<dyn Fn(DocumentRef)>) -> AnyView {
     let title = item.title.clone();
-    let title_view = label(move || title.clone())
-        .style(|s| s.flex_grow(1.).font_size(13.));
+    let title_view = label(move || title.clone()).style(|s| s.flex_grow(1.).font_size(13.));
 
     let mut elements: Vec<AnyView> = vec![title_view.into_any()];
     if item.is_draft {
@@ -133,8 +135,7 @@ fn row(item: DocumentRef, active: bool, on_open: Rc<dyn Fn(DocumentRef)>) -> Any
         elements.push(pill("error", PILL_ERR_BG, PILL_ERR_FG).into_any());
     }
 
-    let inner = h_stack_from_iter(elements)
-        .style(|s| s.gap(4.).items_center().width_full());
+    let inner = h_stack_from_iter(elements).style(|s| s.gap(4.).items_center().width_full());
 
     let item_for_click = item;
     inner

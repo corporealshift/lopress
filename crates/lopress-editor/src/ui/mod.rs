@@ -18,9 +18,9 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, h_stack, label, stack, Decorators};
 use floem::IntoView;
-use std::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::actions::{apply, BlockAction};
 use crate::model::types::{BlockId, EditorDoc};
@@ -29,9 +29,9 @@ use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
-use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::footer::{footer_view, serve_url, start_build_status_poll};
 use crate::ui::inspector::inspector_view;
+use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
 use lopress_gui_host::{BuildStatus, DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
@@ -99,9 +99,7 @@ pub fn root_view(ctx: AppContext, settings_signal: RwSignal<Settings>) -> impl I
             StateTag::Welcome => {
                 welcome::welcome_view(welcome_signal, settings_signal, on_open.clone()).into_any()
             }
-            StateTag::Editing => {
-                editing_view(Rc::clone(&editing_for_view), current_doc).into_any()
-            }
+            StateTag::Editing => editing_view(Rc::clone(&editing_for_view), current_doc).into_any(),
         },
     )
     .style(|s| s.width_full().height_full())
@@ -170,9 +168,8 @@ fn editing_view(
     // Doc-level selection lives here. Initial value is a synthetic caret —
     // each block's FocusGained handler resets it to a real position when the
     // user clicks in.
-    let doc_selection: RwSignal<DocSelection> = RwSignal::new(DocSelection::caret(
-        DocPosition::new(BlockId::new(), 0, 0),
-    ));
+    let doc_selection: RwSignal<DocSelection> =
+        RwSignal::new(DocSelection::caret(DocPosition::new(BlockId::new(), 0, 0)));
     let geometry = Rc::new(RefCell::new(GeometryCache::default()));
     let sel_ctx = SelectionContext {
         doc_selection,
@@ -323,8 +320,7 @@ fn editing_view(
         serve_url_str,
     );
 
-    let columns = h_stack((sidebar, editor, inspector))
-        .style(|s| s.width_full().flex_grow(1.0));
+    let columns = h_stack((sidebar, editor, inspector)).style(|s| s.width_full().flex_grow(1.0));
 
     let editing_for_close = Rc::clone(&editing);
     stack((columns, footer))

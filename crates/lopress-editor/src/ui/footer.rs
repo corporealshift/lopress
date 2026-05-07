@@ -43,8 +43,7 @@ pub fn footer_view(
     );
 
     let word_label = label(move || {
-        let n = current_doc
-            .with(|maybe| maybe.as_ref().map(word_count).unwrap_or(0));
+        let n = current_doc.with(|maybe| maybe.as_ref().map(word_count).unwrap_or(0));
         format!("{n} words")
     })
     .style(|s| s.color(MUTED).font_size(12.));
@@ -137,10 +136,7 @@ pub fn word_count(doc: &EditorDoc) -> usize {
 
 fn block_word_count(b: &EditorBlock) -> usize {
     match &b.body {
-        BlockBody::Inline(runs) => runs
-            .iter()
-            .map(|r| r.text.split_whitespace().count())
-            .sum(),
+        BlockBody::Inline(runs) => runs.iter().map(|r| r.text.split_whitespace().count()).sum(),
         BlockBody::Code(text) => text.split_whitespace().count(),
         BlockBody::List(items) => items
             .iter()
@@ -158,10 +154,7 @@ pub fn start_build_status_poll(
     session: std::rc::Rc<dyn Fn() -> BuildStatus>,
     sink: RwSignal<BuildStatus>,
 ) {
-    fn schedule(
-        session: std::rc::Rc<dyn Fn() -> BuildStatus>,
-        sink: RwSignal<BuildStatus>,
-    ) {
+    fn schedule(session: std::rc::Rc<dyn Fn() -> BuildStatus>, sink: RwSignal<BuildStatus>) {
         floem::action::exec_after(std::time::Duration::from_millis(250), move |_| {
             sink.set((session)());
             schedule(session, sink);

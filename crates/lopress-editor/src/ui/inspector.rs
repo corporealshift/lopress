@@ -67,8 +67,11 @@ fn form(
     let fm = &doc.front_matter;
     let title_buf: RwSignal<String> = RwSignal::new(fm.title.clone().unwrap_or_default());
     let slug_buf: RwSignal<String> = RwSignal::new(fm.slug.clone().unwrap_or_default());
-    let date_buf: RwSignal<String> =
-        RwSignal::new(fm.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default());
+    let date_buf: RwSignal<String> = RwSignal::new(
+        fm.date
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default(),
+    );
     let tags_buf: RwSignal<String> = RwSignal::new(fm.tags.join(", "));
     let draft_sig: RwSignal<bool> = RwSignal::new(fm.draft);
     let date_invalid: RwSignal<bool> = RwSignal::new(false);
@@ -93,7 +96,11 @@ fn form(
         let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
-                let next = if new_title.is_empty() { None } else { Some(new_title.clone()) };
+                let next = if new_title.is_empty() {
+                    None
+                } else {
+                    Some(new_title.clone())
+                };
                 if d.front_matter.title != next {
                     d.front_matter.title = next;
                     changed = true;
@@ -110,7 +117,11 @@ fn form(
         let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
-                let next = if new_slug.is_empty() { None } else { Some(new_slug.clone()) };
+                let next = if new_slug.is_empty() {
+                    None
+                } else {
+                    Some(new_slug.clone())
+                };
                 if d.front_matter.slug != next {
                     d.front_matter.slug = next;
                     changed = true;
@@ -201,10 +212,7 @@ fn form(
     });
 
     // ── Field widgets ────────────────────────────────────────────────────
-    let title_field = field_row(
-        "Title",
-        text_input(title_buf).style(input_style).into_any(),
-    );
+    let title_field = field_row("Title", text_input(title_buf).style(input_style).into_any());
     let slug_field = field_row(
         "Slug",
         text_input(slug_buf)
@@ -231,10 +239,7 @@ fn form(
             .style(input_style)
             .into_any(),
     );
-    let draft_field = field_row(
-        "Draft",
-        Checkbox::new_rw(draft_sig).into_any(),
-    );
+    let draft_field = field_row("Draft", Checkbox::new_rw(draft_sig).into_any());
 
     v_stack((
         label(|| "Front matter".to_string()).style(|s| {
