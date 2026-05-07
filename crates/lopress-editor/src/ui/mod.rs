@@ -5,15 +5,14 @@ pub mod clipboard;
 pub mod dnd;
 pub mod editor_pane;
 pub mod sel_ctx;
+pub mod sidebar;
 pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
 
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{
-    button, dyn_container, empty, h_stack, label, stack, v_stack, Decorators,
-};
+use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,7 +25,9 @@ use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
 use crate::ui::sel_ctx::SelectionContext;
-use lopress_gui_host::Session;
+use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
+use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
+use std::path::PathBuf;
 
 /// Maximum number of recent workspaces to retain.
 const MAX_RECENTS: usize = 5;
@@ -105,31 +106,55 @@ fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
 ) -> impl IntoView {
-    let editing_for_btn = Rc::clone(&editing);
-    let open_first = button(label(|| "Open first post")).action(move || {
-        let mut guard = editing_for_btn.borrow_mut();
+    // Snapshot the workspace once at view-build time. Sidebar actions
+    // (new post / new page) call `session.rescan()` and then update this
+    // signal; clicks just call `open_document` and update `current_path`.
+    let initial_ws: WorkspaceSummary = editing
+        .borrow()
+        .as_ref()
+        .map(|s| s.session.workspace())
+        .unwrap_or_else(|| WorkspaceSummary {
+            root: PathBuf::new(),
+            name: String::new(),
+            posts: Vec::new(),
+            pages: Vec::new(),
+        });
+    let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
+    let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
+
+    let editing_for_open = Rc::clone(&editing);
+    let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
+        let mut guard = editing_for_open.borrow_mut();
         let Some(state) = guard.as_mut() else {
             return;
         };
-        let workspace = state.session.workspace();
-        if let Some(first) = workspace.posts.first().cloned() {
-            state.open_document(&first);
-            current_doc.set(state.current_doc.clone());
-        }
+        state.open_document(&doc_ref);
+        current_doc.set(state.current_doc.clone());
+        current_path.set(Some(doc_ref.path));
     });
 
-    let sidebar = v_stack((
-        label(|| "Posts").style(|s| s.font_weight(floem::text::Weight::SEMIBOLD).padding(8.)),
-        open_first,
-    ))
-    .style(|s| {
-        s.width(220.)
-            .height_full()
-            .background(Color::rgb8(248, 248, 248))
-            .border_right(1.)
-            .border_color(Color::rgb8(220, 220, 220))
-            .padding(8.)
-    });
+    let on_new_post = make_new_doc_action(
+        Rc::clone(&editing),
+        workspace_signal,
+        current_doc,
+        current_path,
+        DocKind::Post,
+    );
+    let on_new_page = make_new_doc_action(
+        Rc::clone(&editing),
+        workspace_signal,
+        current_doc,
+        current_path,
+        DocKind::Page,
+    );
+
+    let sidebar = sidebar_view(
+        workspace_signal,
+        current_path,
+        on_open,
+        on_new_post,
+        on_new_page,
+    );
 
     let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
@@ -204,7 +229,7 @@ fn editing_view(
                 sel_ctx.clone(),
             )
             .into_any(),
-            None => label(|| "No document open. Click \"Open first post\" to load one.")
+            None => label(|| "No document open. Pick one from the sidebar.")
                 .style(|s| {
                     s.width_full()
                         .height_full()
@@ -244,4 +269,73 @@ fn editing_view(
 enum StateTag {
     Welcome,
     Editing,
+}
+
+/// Whether a "+ New …" sidebar action targets the Posts or Pages directory.
+#[derive(Clone, Copy)]
+enum DocKind {
+    Post,
+    Page,
+}
+
+impl DocKind {
+    fn default_title(self) -> &'static str {
+        match self {
+            DocKind::Post => "New Post",
+            DocKind::Page => "New Page",
+        }
+    }
+}
+
+/// Build the closure the sidebar invokes for "+ New post" / "+ New page".
+///
+/// The closure: picks a fresh `untitled-N.md` filename, writes the stub
+/// markdown, rescans the workspace, then opens the new doc through
+/// `EditingState::open_document` so the editor pane and current_path signal
+/// stay in sync with the sidebar.
+fn make_new_doc_action(
+    editing: Rc<RefCell<Option<EditingState>>>,
+    workspace_signal: RwSignal<WorkspaceSummary>,
+    current_doc: RwSignal<Option<EditorDoc>>,
+    current_path: RwSignal<Option<PathBuf>>,
+    kind: DocKind,
+) -> Rc<dyn Fn()> {
+    Rc::new(move || {
+        let mut guard = editing.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let dir = match kind {
+            DocKind::Post => state.session.posts_dir(),
+            DocKind::Page => state.session.pages_dir(),
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("failed to create {}: {e}", dir.display());
+            return;
+        }
+        let path = unique_untitled_path(&dir);
+        if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
+            eprintln!("failed to write {}: {e}", path.display());
+            return;
+        }
+
+        let summary = state.session.rescan();
+        let doc_ref = summary
+            .posts
+            .iter()
+            .chain(summary.pages.iter())
+            .find(|d| d.path == path)
+            .cloned()
+            .unwrap_or_else(|| DocumentRef {
+                path: path.clone(),
+                title: kind.default_title().to_string(),
+                is_draft: true,
+                has_parse_error: false,
+            });
+
+        state.open_document(&doc_ref);
+        current_doc.set(state.current_doc.clone());
+        current_path.set(Some(doc_ref.path));
+        workspace_signal.set(summary);
+    })
 }

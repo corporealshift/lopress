@@ -200,6 +200,26 @@ impl Session {
         Ok(())
     }
 
+    /// Posts directory for this workspace. Sidebar uses this to write
+    /// new-post stubs.
+    pub fn posts_dir(&self) -> PathBuf {
+        self.workspace.posts_dir()
+    }
+
+    /// Pages directory for this workspace.
+    pub fn pages_dir(&self) -> PathBuf {
+        self.workspace.pages_dir()
+    }
+
+    /// Re-scan the workspace's posts and pages directories and update the
+    /// cached summary. Call this after creating a new file so the next
+    /// `workspace()` call reflects it without waiting for the watcher.
+    pub fn rescan(&self) -> WorkspaceSummary {
+        let new_summary = scan_workspace(&self.workspace);
+        *lock(&self.summary) = new_summary.clone();
+        new_summary
+    }
+
     /// Load the plugin registry for this workspace. Recomputes on each call —
     /// callers that want to cache should hold onto the returned value (e.g.
     /// `EditingState` does this once at session-open time).
