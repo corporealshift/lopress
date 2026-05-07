@@ -4,6 +4,7 @@ pub mod blocks;
 pub mod clipboard;
 pub mod dnd;
 pub mod editor_pane;
+pub mod inspector;
 pub mod sel_ctx;
 pub mod sidebar;
 pub mod slash_menu;
@@ -25,6 +26,7 @@ use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
 use crate::ui::sel_ctx::SelectionContext;
+use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
 use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
@@ -242,13 +244,7 @@ fn editing_view(
     )
     .style(|s| s.flex_grow(1.0).height_full());
 
-    let inspector = empty().style(|s| {
-        s.width(280.)
-            .height_full()
-            .background(Color::rgb8(250, 250, 250))
-            .border_left(1.)
-            .border_color(Color::rgb8(220, 220, 220))
-    });
+    let inspector = inspector_view(current_doc, current_path);
 
     let footer = empty().style(|s| {
         s.width_full()
