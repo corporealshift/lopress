@@ -4,6 +4,7 @@ pub mod blocks;
 pub mod clipboard;
 pub mod dnd;
 pub mod editor_pane;
+pub mod footer;
 pub mod inspector;
 pub mod sel_ctx;
 pub mod sidebar;
@@ -13,7 +14,7 @@ pub mod welcome;
 
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
+use floem::views::{dyn_container, h_stack, label, stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,9 +27,10 @@ use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
 use crate::ui::sel_ctx::SelectionContext;
+use crate::ui::footer::{footer_view, serve_url, start_build_status_poll};
 use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
-use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
+use lopress_gui_host::{BuildStatus, DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
 
 /// Maximum number of recent workspaces to retain.
@@ -246,13 +248,36 @@ fn editing_view(
 
     let inspector = inspector_view(current_doc, current_path);
 
-    let footer = empty().style(|s| {
-        s.width_full()
-            .height(28.)
-            .background(Color::rgb8(245, 245, 245))
-            .border_top(1.)
-            .border_color(Color::rgb8(220, 220, 220))
-    });
+    // Footer signals: build status is polled, dirty/save_error are placeholders
+    // wired up properly in Task 21.
+    let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
+    let dirty_sig: RwSignal<bool> = RwSignal::new(false);
+    let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
+
+    let serve_url_str = editing
+        .borrow()
+        .as_ref()
+        .and_then(|s| serve_url(s.session.serve_status()));
+
+    {
+        let editing_for_poll = Rc::clone(&editing);
+        let session_reader: Rc<dyn Fn() -> BuildStatus> = Rc::new(move || {
+            editing_for_poll
+                .borrow()
+                .as_ref()
+                .map(|s| s.session.build_status())
+                .unwrap_or(BuildStatus::Idle)
+        });
+        start_build_status_poll(session_reader, build_status_sig);
+    }
+
+    let footer = footer_view(
+        build_status_sig,
+        dirty_sig,
+        save_error_sig,
+        current_doc,
+        serve_url_str,
+    );
 
     let columns = h_stack((sidebar, editor, inspector))
         .style(|s| s.width_full().flex_grow(1.0));
