@@ -42,7 +42,7 @@ pub struct EditorBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockKind {
     Paragraph,
-    Heading(u8),               // 1..=6
+    Heading(u8), // 1..=6
     Code { lang: String },
     List { ordered: bool },
     Opaque { type_name: String },

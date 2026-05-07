@@ -26,7 +26,12 @@ pub fn slash_menu_items() -> Vec<(&'static str, BlockKind)> {
         ("Heading 1", BlockKind::Heading(1)),
         ("Heading 2", BlockKind::Heading(2)),
         ("Heading 3", BlockKind::Heading(3)),
-        ("Code block", BlockKind::Code { lang: String::new() }),
+        (
+            "Code block",
+            BlockKind::Code {
+                lang: String::new(),
+            },
+        ),
         ("Unordered list", BlockKind::List { ordered: false }),
         ("Ordered list", BlockKind::List { ordered: true }),
     ]

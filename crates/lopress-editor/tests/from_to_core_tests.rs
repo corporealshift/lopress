@@ -18,11 +18,11 @@
 
 use lopress_core::{parse, serialize, Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
-use lopress_plugin::PluginRegistry;
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
     BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem,
 };
+use lopress_plugin::PluginRegistry;
 use serde_json::json;
 
 #[test]
@@ -57,7 +57,8 @@ fn opaque_block_preserved_byte_identical() {
     // we stash the original `Block` JSON in the body, byte-identity through
     // `serialize` is achievable here even though the supported subset only
     // promises semantic equality.
-    let src = "before\n\n<!-- lopress:video {\"src\":\"a.mp4\"} -->\n<!-- /lopress:video -->\n\nafter\n";
+    let src =
+        "before\n\n<!-- lopress:video {\"src\":\"a.mp4\"} -->\n<!-- /lopress:video -->\n\nafter\n";
     let core = parse(src).unwrap();
     let editor = doc_from_core(&core, &PluginRegistry::default());
 
@@ -76,7 +77,8 @@ fn opaque_block_preserved_byte_identical() {
 
 #[test]
 fn nested_block_inside_custom_falls_through_opaque() {
-    let src = "<!-- lopress:callout {\"kind\":\"warning\"} -->\nbody para\n<!-- /lopress:callout -->\n";
+    let src =
+        "<!-- lopress:callout {\"kind\":\"warning\"} -->\nbody para\n<!-- /lopress:callout -->\n";
     let core = parse(src).unwrap();
     let editor = doc_from_core(&core, &PluginRegistry::default());
 

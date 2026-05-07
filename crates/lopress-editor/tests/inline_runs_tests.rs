@@ -107,7 +107,11 @@ fn adjacent_same_style_coalesced() {
     let s = serialize_inline(&runs);
     // serialize produces "**foobar**" — one merged bold span
     let reparsed = parse_inline(&s);
-    assert_eq!(reparsed.len(), 1, "serialized adjacent bold should parse as one run");
+    assert_eq!(
+        reparsed.len(),
+        1,
+        "serialized adjacent bold should parse as one run"
+    );
     assert_eq!(reparsed[0].text, "foobar");
     assert!(reparsed[0].bold);
 }

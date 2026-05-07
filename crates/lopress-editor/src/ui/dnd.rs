@@ -75,8 +75,7 @@ pub fn drag_handle(block_id: BlockId, dnd: DndState, hover: RwSignal<bool>) -> i
             EventPropagation::Continue
         })
         .style(move |s| {
-            let visible =
-                hover.get() || dnd.dragging.get() == Some(block_id);
+            let visible = hover.get() || dnd.dragging.get() == Some(block_id);
             let s = s
                 .padding_horiz(4.)
                 .font_size(14.)
@@ -95,11 +94,7 @@ pub fn drag_handle(block_id: BlockId, dnd: DndState, hover: RwSignal<bool>) -> i
 /// tall). During a drag, when the pointer hovers it, a 2 px indicator line
 /// appears across the editor column. On `Drop`, emits `BlockAction::Move`
 /// with the gap index.
-pub fn gap_drop_zone(
-    gap_index: usize,
-    dnd: DndState,
-    on_action: ActionSink,
-) -> impl IntoView {
+pub fn gap_drop_zone(gap_index: usize, dnd: DndState, on_action: ActionSink) -> impl IntoView {
     empty()
         .on_event(EventListener::DragOver, move |_| {
             // Only update when we're actually in a drag and the value would
@@ -130,13 +125,14 @@ pub fn gap_drop_zone(
             EventPropagation::Stop
         })
         .style(move |s| {
-            let active = dnd.dragging.get().is_some()
-                && dnd.hover_gap.get() == Some(gap_index);
+            let active = dnd.dragging.get().is_some() && dnd.hover_gap.get() == Some(gap_index);
             let s = s.width_full().height(8.);
             if active {
                 // Draw the 2 px indicator as a top border, vertically
                 // centered by a 3 px top margin.
-                s.margin_top(3.).border_top(2.).border_color(INDICATOR_COLOR)
+                s.margin_top(3.)
+                    .border_top(2.)
+                    .border_color(INDICATOR_COLOR)
             } else {
                 s
             }

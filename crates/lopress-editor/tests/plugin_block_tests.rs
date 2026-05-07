@@ -55,10 +55,16 @@ fn unknown_plugin_falls_back_to_opaque_and_round_trips() {
     // Empty registry: no plugin matches → opaque path.
     let editor = doc_from_core(&core, &PluginRegistry::default());
     let first = &editor.blocks[0];
-    assert!(first.plugin.is_none(), "unknown plugin should not flag plugin meta");
+    assert!(
+        first.plugin.is_none(),
+        "unknown plugin should not flag plugin meta"
+    );
     assert!(matches!(first.kind, BlockKind::Opaque { .. }));
 
     let core_back = doc_to_core(&editor);
     let serialized = lopress_core::serialize(&core_back);
-    assert_eq!(serialized, raw, "opaque round-trip should be byte-identical");
+    assert_eq!(
+        serialized, raw,
+        "opaque round-trip should be byte-identical"
+    );
 }

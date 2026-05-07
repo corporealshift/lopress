@@ -13,8 +13,7 @@ use serde_json::Value;
 
 pub fn render_opaque(type_name: &str, value: &Value) -> impl IntoView {
     let title = format!("[{type_name}]");
-    let json_pretty =
-        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    let json_pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
     let expanded: RwSignal<bool> = RwSignal::new(false);
 
     let header = stack((

@@ -21,8 +21,7 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::{
-    checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter,
-    Decorators,
+    checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators,
 };
 use floem::{AnyView, IntoView};
 use lopress_plugin::{AttrDecl, AttrType};
@@ -64,12 +63,7 @@ pub fn plugin_block_view(
 
     let attrs_sig: RwSignal<serde_json::Map<String, Value>> = RwSignal::new(meta.attrs.clone());
     let on_action_for_attrs = on_action.clone();
-    let form = build_attr_form(
-        &meta.attr_decls,
-        attrs_sig,
-        block_id,
-        on_action_for_attrs,
-    );
+    let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
     let body = render_body(block, on_action.clone(), focus_target, focus_pub, sel_ctx);
 
@@ -114,7 +108,13 @@ fn build_attr_form(
     let names: Vec<String> = snapshot.keys().cloned().collect();
     for (i, decl) in decls.iter().enumerate() {
         let name = names.get(i).cloned().unwrap_or_else(|| format!("attr_{i}"));
-        rows.push(attr_row(name, decl.clone(), attrs_sig, block_id, on_action.clone()));
+        rows.push(attr_row(
+            name,
+            decl.clone(),
+            attrs_sig,
+            block_id,
+            on_action.clone(),
+        ));
     }
     v_stack_from_iter(rows)
         .style(|s| s.gap(2.).padding_horiz(2.))
@@ -130,25 +130,28 @@ fn attr_row(
 ) -> AnyView {
     let lbl_text = name.clone();
     let lbl = label(move || lbl_text.clone()).style(|s| {
-        s.min_width(80.).color(Color::rgb8(110, 100, 130)).font_size(12.)
+        s.min_width(80.)
+            .color(Color::rgb8(110, 100, 130))
+            .font_size(12.)
     });
 
     let ui_hint = decl.ui.as_deref().unwrap_or("text").to_string();
     let input: AnyView = match (decl.kind, ui_hint.as_str()) {
         (AttrType::Bool, _) | (_, "checkbox") => {
-            attr_checkbox(name.clone(), attrs_sig, block_id, on_action.clone())
-                .into_any()
+            attr_checkbox(name.clone(), attrs_sig, block_id, on_action.clone()).into_any()
         }
-        (_, "select") => {
-            attr_select(name.clone(), decl.options.clone(), attrs_sig, block_id, on_action.clone())
-                .into_any()
-        }
+        (_, "select") => attr_select(
+            name.clone(),
+            decl.options.clone(),
+            attrs_sig,
+            block_id,
+            on_action.clone(),
+        )
+        .into_any(),
         (AttrType::Number, _) | (_, "number") => {
-            attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), true)
-                .into_any()
+            attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), true).into_any()
         }
-        _ => attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), false)
-            .into_any(),
+        _ => attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), false).into_any(),
     };
 
     h_stack_from_iter(vec![lbl.into_any(), input])
@@ -176,32 +179,29 @@ fn attr_text(
     let attrs_for_commit = attrs_sig;
     let on_action_for_commit = on_action;
     text_input(buf)
-        .on_event(
-            floem::event::EventListener::FocusLost,
-            move |_| {
-                let s = buf.get_untracked();
-                let parsed = if numeric {
-                    s.parse::<f64>()
-                        .map(|n| {
-                            serde_json::Number::from_f64(n)
-                                .map(Value::Number)
-                                .unwrap_or(Value::String(s.clone()))
-                        })
-                        .unwrap_or(Value::String(s.clone()))
-                } else {
-                    Value::String(s)
-                };
-                attrs_for_commit.update(|m| {
-                    m.insert(name_for_commit.clone(), parsed);
-                });
-                let new_attrs = attrs_for_commit.get_untracked();
-                on_action_for_commit(BlockAction::EditAttrs {
-                    block_id,
-                    new_attrs,
-                });
-                floem::event::EventPropagation::Continue
-            },
-        )
+        .on_event(floem::event::EventListener::FocusLost, move |_| {
+            let s = buf.get_untracked();
+            let parsed = if numeric {
+                s.parse::<f64>()
+                    .map(|n| {
+                        serde_json::Number::from_f64(n)
+                            .map(Value::Number)
+                            .unwrap_or(Value::String(s.clone()))
+                    })
+                    .unwrap_or(Value::String(s.clone()))
+            } else {
+                Value::String(s)
+            };
+            attrs_for_commit.update(|m| {
+                m.insert(name_for_commit.clone(), parsed);
+            });
+            let new_attrs = attrs_for_commit.get_untracked();
+            on_action_for_commit(BlockAction::EditAttrs {
+                block_id,
+                new_attrs,
+            });
+            floem::event::EventPropagation::Continue
+        })
         .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))
 }
 
@@ -214,19 +214,18 @@ fn attr_checkbox(
     let checked: RwSignal<bool> = RwSignal::new(
         attrs_sig.with_untracked(|m| m.get(&name).and_then(Value::as_bool).unwrap_or(false)),
     );
-    checkbox(move || checked.get())
-        .on_click_stop(move |_| {
-            let new_value = !checked.get_untracked();
-            checked.set(new_value);
-            attrs_sig.update(|m| {
-                m.insert(name.clone(), Value::Bool(new_value));
-            });
-            let new_attrs = attrs_sig.get_untracked();
-            on_action(BlockAction::EditAttrs {
-                block_id,
-                new_attrs,
-            });
-        })
+    checkbox(move || checked.get()).on_click_stop(move |_| {
+        let new_value = !checked.get_untracked();
+        checked.set(new_value);
+        attrs_sig.update(|m| {
+            m.insert(name.clone(), Value::Bool(new_value));
+        });
+        let new_attrs = attrs_sig.get_untracked();
+        on_action(BlockAction::EditAttrs {
+            block_id,
+            new_attrs,
+        });
+    })
 }
 
 fn attr_select(
@@ -240,10 +239,7 @@ fn attr_select(
     // The currently-selected option highlights.
     let opts = options.clone();
     let selected: RwSignal<Option<String>> = RwSignal::new(
-        attrs_sig.with_untracked(|m| {
-            m.get(&name)
-                .and_then(|v| v.as_str().map(str::to_string))
-        }),
+        attrs_sig.with_untracked(|m| m.get(&name).and_then(|v| v.as_str().map(str::to_string))),
     );
     let mut buttons: Vec<AnyView> = Vec::with_capacity(opts.len().max(1));
     if opts.is_empty() {
@@ -315,11 +311,12 @@ fn render_body(
             )
             .into_any()
         }
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => code::render_code(lang, text).into_any(),
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+            code::render_code(lang, text).into_any()
+        }
         (BlockKind::List { ordered }, BlockBody::List(items)) => {
             list::render_list(*ordered, items).into_any()
         }
         _ => floem::views::empty().into_any(),
     }
 }
-

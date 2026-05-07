@@ -57,7 +57,10 @@ pub fn render_runs_with_size(
     font_size: f32,
     force_bold: bool,
 ) -> impl IntoView {
-    let spans: Vec<_> = runs.iter().map(|r| run_span(r, font_size, force_bold)).collect();
+    let spans: Vec<_> = runs
+        .iter()
+        .map(|r| run_span(r, font_size, force_bold))
+        .collect();
     h_stack_from_iter(spans).style(|s| s.flex_wrap(FlexWrap::Wrap))
 }
 

@@ -135,17 +135,9 @@ pub fn serialize_inline(runs: &[InlineRun]) -> String {
             escape_plain(&r.text)
         };
 
-        let text = if r.italic {
-            format!("_{text}_")
-        } else {
-            text
-        };
+        let text = if r.italic { format!("_{text}_") } else { text };
 
-        let text = if r.bold {
-            format!("**{text}**")
-        } else {
-            text
-        };
+        let text = if r.bold { format!("**{text}**") } else { text };
 
         let text = if let Some(url) = &r.link {
             format!("[{text}]({url})")

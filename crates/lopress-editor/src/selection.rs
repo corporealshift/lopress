@@ -103,7 +103,10 @@ pub enum BlockSelection {
     None,
     /// This block contains a caret/range bounded by `local`. The block also
     /// holds `head` iff `holds_head` is true (caret painted only then).
-    Local { local: LocalSelection, holds_head: bool },
+    Local {
+        local: LocalSelection,
+        holds_head: bool,
+    },
     /// The selection enters this block from the start and exits at `end`.
     /// `holds_head` indicates whether the head endpoint is the one inside.
     Leading { end: Caret, holds_head: bool },
@@ -117,11 +120,7 @@ pub enum BlockSelection {
 }
 
 /// Project `doc_sel` into the slice that lives inside `block` (in `doc`).
-pub fn project(
-    doc_sel: DocSelection,
-    block: &EditorBlock,
-    doc: &EditorDoc,
-) -> BlockSelection {
+pub fn project(doc_sel: DocSelection, block: &EditorBlock, doc: &EditorDoc) -> BlockSelection {
     let (start, end) = doc_sel.ordered(doc);
     let here = block.id;
     let here_idx = match block_index(doc, here) {
@@ -249,7 +248,13 @@ impl DocPosition {
         };
         let block = &doc.blocks[idx];
         if let BlockBody::Inline(runs) = &block.body {
-            let Caret { run, offset } = step_caret_right(runs, Caret { run: self.run, offset: self.offset });
+            let Caret { run, offset } = step_caret_right(
+                runs,
+                Caret {
+                    run: self.run,
+                    offset: self.offset,
+                },
+            );
             // If we didn't advance, hop to the next block's start.
             if run == self.run && offset == self.offset {
                 if let Some(next) = doc.blocks.get(idx + 1) {
@@ -274,8 +279,13 @@ impl DocPosition {
         let block = &doc.blocks[idx];
         if let BlockBody::Inline(runs) = &block.body {
             if self.run > 0 || self.offset > 0 {
-                let Caret { run, offset } =
-                    step_caret_left(runs, Caret { run: self.run, offset: self.offset });
+                let Caret { run, offset } = step_caret_left(
+                    runs,
+                    Caret {
+                        run: self.run,
+                        offset: self.offset,
+                    },
+                );
                 return DocPosition::new(self.block, run, offset);
             }
         }
@@ -296,9 +306,15 @@ fn step_caret_right(runs: &[crate::model::types::InlineRun], c: Caret) -> Caret 
     let Some(r) = runs.get(c.run) else { return c };
     let len = r.text.chars().count();
     if c.offset < len {
-        Caret { run: c.run, offset: c.offset + 1 }
+        Caret {
+            run: c.run,
+            offset: c.offset + 1,
+        }
     } else if c.run + 1 < runs.len() {
-        Caret { run: c.run + 1, offset: 0 }
+        Caret {
+            run: c.run + 1,
+            offset: 0,
+        }
     } else {
         c
     }
@@ -306,14 +322,20 @@ fn step_caret_right(runs: &[crate::model::types::InlineRun], c: Caret) -> Caret 
 
 fn step_caret_left(runs: &[crate::model::types::InlineRun], c: Caret) -> Caret {
     if c.offset > 0 {
-        return Caret { run: c.run, offset: c.offset - 1 };
+        return Caret {
+            run: c.run,
+            offset: c.offset - 1,
+        };
     }
     if c.run > 0 {
         let prev_len = runs
             .get(c.run - 1)
             .map(|r| r.text.chars().count())
             .unwrap_or(0);
-        return Caret { run: c.run - 1, offset: prev_len };
+        return Caret {
+            run: c.run - 1,
+            offset: prev_len,
+        };
     }
     c
 }

@@ -102,12 +102,10 @@ impl Settings {
 
 /// Resolve the platform-standard settings file path under the lopress config dir.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "lopress")
-        .map(|d| d.config_dir().join("settings.json"))
+    directories::ProjectDirs::from("", "", "lopress").map(|d| d.config_dir().join("settings.json"))
 }
 
 /// Resolve the legacy `recents.json` path for migration purposes.
 pub fn legacy_recents_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "lopress")
-        .map(|d| d.config_dir().join("recents.json"))
+    directories::ProjectDirs::from("", "", "lopress").map(|d| d.config_dir().join("recents.json"))
 }

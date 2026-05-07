@@ -71,20 +71,14 @@ pub fn editor_pane(
             Some(block_id) => {
                 let on_action_for_select = on_action_for_menu.clone();
                 let on_select = move |new_kind| {
-                    on_action_for_select(BlockAction::ChangeType {
-                        block_id,
-                        new_kind,
-                    });
+                    on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
                 };
                 let on_close = move || {
                     slash_menu_open.set(None);
                     focus_target.set(Some(block_id));
                 };
                 slash_menu(on_select, on_close)
-                    .style(|s| {
-                        s.margin_top(40.)
-                            .margin_horiz(floem::unit::PxPctAuto::Auto)
-                    })
+                    .style(|s| s.margin_top(40.).margin_horiz(floem::unit::PxPctAuto::Auto))
                     .into_any()
             }
         },

@@ -2,8 +2,8 @@
 
 use lopress_editor::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use lopress_editor::selection::{
-    compare_positions, doc_end_position, doc_start_position, project, BlockSelection,
-    DocPosition, DocSelection, GeometryCache, APPROX_CHAR_RATIO,
+    compare_positions, doc_end_position, doc_start_position, project, BlockSelection, DocPosition,
+    DocSelection, GeometryCache, APPROX_CHAR_RATIO,
 };
 use lopress_editor::ui::blocks::inline_editor::{Caret, LocalSelection};
 
@@ -44,7 +44,10 @@ fn ordered_returns_min_max() {
     let (doc, ids) = doc_of(&["x", "y"]);
     let p1 = DocPosition::new(ids[0], 0, 0);
     let p2 = DocPosition::new(ids[1], 0, 0);
-    let sel = DocSelection { anchor: p2, head: p1 };
+    let sel = DocSelection {
+        anchor: p2,
+        head: p1,
+    };
     let (lo, hi) = sel.ordered(&doc);
     assert_eq!(lo, p1);
     assert_eq!(hi, p2);

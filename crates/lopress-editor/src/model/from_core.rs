@@ -94,9 +94,7 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
                 .and_then(|c| c.attrs.get("lang").and_then(serde_json::Value::as_str))
                 .unwrap_or("")
                 .to_string();
-            let text = inner
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
+            let text = inner.and_then(|c| c.text.clone()).unwrap_or_default();
             (BlockKind::Code { lang }, BlockBody::Code(text))
         }
         "list" => {
@@ -104,10 +102,7 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
                 .and_then(|c| c.attrs.get("ordered").and_then(serde_json::Value::as_bool))
                 .unwrap_or(false);
             let items = inner.map(list_items_from_block).unwrap_or_default();
-            (
-                BlockKind::List { ordered },
-                BlockBody::List(items),
-            )
+            (BlockKind::List { ordered }, BlockBody::List(items))
         }
         _ => {
             let text = inner.and_then(|c| c.text.as_deref()).unwrap_or("");

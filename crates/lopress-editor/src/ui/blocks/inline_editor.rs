@@ -133,7 +133,10 @@ pub fn move_left(runs: &[InlineRun], caret: Caret) -> Caret {
     }
     if caret.run > 0 {
         let prev_idx = caret.run - 1;
-        let prev_len = runs.get(prev_idx).map(|r| r.text.chars().count()).unwrap_or(0);
+        let prev_len = runs
+            .get(prev_idx)
+            .map(|r| r.text.chars().count())
+            .unwrap_or(0);
         return Caret {
             run: prev_idx,
             offset: prev_len,
@@ -442,8 +445,8 @@ fn coalesce_range(runs: &mut Vec<InlineRun>, lo: usize, hi: usize) {
 // committed back to the document via `BlockAction::EditInline`.
 
 use crate::selection::{
-    doc_end_position, doc_start_position, project, BlockSelection, DocPosition,
-    DocSelection, GeometryCache,
+    doc_end_position, doc_start_position, project, BlockSelection, DocPosition, DocSelection,
+    GeometryCache,
 };
 use crate::ui::blocks::paragraph::{LINK_COLOR, MONO_FAMILY};
 use crate::ui::sel_ctx::SelectionContext;
@@ -636,27 +639,75 @@ fn handle_key_down(
 
     match ke.key.logical_key.clone() {
         Key::Named(NamedKey::ArrowLeft) => {
-            do_horizontal(runs, block_id, extending, HMotion::Left, sel_ctx, on_action, focus_target);
+            do_horizontal(
+                runs,
+                block_id,
+                extending,
+                HMotion::Left,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::ArrowRight) => {
-            do_horizontal(runs, block_id, extending, HMotion::Right, sel_ctx, on_action, focus_target);
+            do_horizontal(
+                runs,
+                block_id,
+                extending,
+                HMotion::Right,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::Home) => {
-            do_horizontal(runs, block_id, extending, HMotion::Home, sel_ctx, on_action, focus_target);
+            do_horizontal(
+                runs,
+                block_id,
+                extending,
+                HMotion::Home,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::End) => {
-            do_horizontal(runs, block_id, extending, HMotion::End, sel_ctx, on_action, focus_target);
+            do_horizontal(
+                runs,
+                block_id,
+                extending,
+                HMotion::End,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::ArrowUp) => {
-            do_vertical(runs, block_id, extending, VMotion::Up, sel_ctx, on_action, focus_target);
+            do_vertical(
+                runs,
+                block_id,
+                extending,
+                VMotion::Up,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::ArrowDown) => {
-            do_vertical(runs, block_id, extending, VMotion::Down, sel_ctx, on_action, focus_target);
+            do_vertical(
+                runs,
+                block_id,
+                extending,
+                VMotion::Down,
+                sel_ctx,
+                on_action,
+                focus_target,
+            );
             true
         }
         Key::Named(NamedKey::Backspace) => {
@@ -715,10 +766,7 @@ fn handle_key_down(
                 if ch.is_control() {
                     continue;
                 }
-                if ch == '/'
-                    && slash_eligible
-                    && runs.with_untracked(|r| block_is_empty(r))
-                {
+                if ch == '/' && slash_eligible && runs.with_untracked(|r| block_is_empty(r)) {
                     on_action(BlockAction::OpenSlashMenu { block_id });
                     continue;
                 }
@@ -779,8 +827,14 @@ fn apply_local_toggle(
         return;
     }
     let local = LocalSelection {
-        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
-        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+        anchor: Caret {
+            run: doc_sel.anchor.run,
+            offset: doc_sel.anchor.offset,
+        },
+        head: Caret {
+            run: doc_sel.head.run,
+            offset: doc_sel.head.offset,
+        },
     };
     let mut new_local = local;
     runs.update(|r| {
@@ -856,8 +910,14 @@ fn do_backspace(
         return;
     }
     let local = LocalSelection {
-        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
-        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+        anchor: Caret {
+            run: doc_sel.anchor.run,
+            offset: doc_sel.anchor.offset,
+        },
+        head: Caret {
+            run: doc_sel.head.run,
+            offset: doc_sel.head.offset,
+        },
     };
     if single_block && local.is_collapsed() && local.head == Caret::START {
         // Merge with previous block.
@@ -913,8 +973,14 @@ fn do_delete(
         return;
     }
     let local = LocalSelection {
-        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
-        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+        anchor: Caret {
+            run: doc_sel.anchor.run,
+            offset: doc_sel.anchor.offset,
+        },
+        head: Caret {
+            run: doc_sel.head.run,
+            offset: doc_sel.head.offset,
+        },
     };
     if single_block && !local.is_collapsed() {
         let mut new_local = local;
@@ -978,9 +1044,7 @@ fn do_horizontal(
 
     // Non-extending arrow on a non-collapsed selection collapses to the
     // corresponding end without further motion.
-    if !extending
-        && !doc_sel.is_collapsed()
-        && matches!(direction, HMotion::Left | HMotion::Right)
+    if !extending && !doc_sel.is_collapsed() && matches!(direction, HMotion::Left | HMotion::Right)
     {
         let target = sel_ctx.current_doc.with_untracked(|maybe| {
             let d = maybe.as_ref()?;
@@ -1005,45 +1069,49 @@ fn do_horizontal(
         HMotion::Left => {
             if head.block == block_id {
                 let runs_v = runs.get_untracked();
-                let c = move_left(&runs_v, Caret { run: head.run, offset: head.offset });
+                let c = move_left(
+                    &runs_v,
+                    Caret {
+                        run: head.run,
+                        offset: head.offset,
+                    },
+                );
                 if c.run != head.run || c.offset != head.offset {
                     DocPosition::new(block_id, c.run, c.offset)
                 } else {
                     commit_runs(runs, block_id, on_action);
-                    sel_ctx
-                        .current_doc
-                        .with_untracked(|maybe| {
-                            maybe.as_ref().map(|d| head.step_left(d)).unwrap_or(head)
-                        })
-                }
-            } else {
-                sel_ctx
-                    .current_doc
-                    .with_untracked(|maybe| {
+                    sel_ctx.current_doc.with_untracked(|maybe| {
                         maybe.as_ref().map(|d| head.step_left(d)).unwrap_or(head)
                     })
+                }
+            } else {
+                sel_ctx.current_doc.with_untracked(|maybe| {
+                    maybe.as_ref().map(|d| head.step_left(d)).unwrap_or(head)
+                })
             }
         }
         HMotion::Right => {
             if head.block == block_id {
                 let runs_v = runs.get_untracked();
-                let c = move_right(&runs_v, Caret { run: head.run, offset: head.offset });
+                let c = move_right(
+                    &runs_v,
+                    Caret {
+                        run: head.run,
+                        offset: head.offset,
+                    },
+                );
                 if c.run != head.run || c.offset != head.offset {
                     DocPosition::new(block_id, c.run, c.offset)
                 } else {
                     commit_runs(runs, block_id, on_action);
-                    sel_ctx
-                        .current_doc
-                        .with_untracked(|maybe| {
-                            maybe.as_ref().map(|d| head.step_right(d)).unwrap_or(head)
-                        })
-                }
-            } else {
-                sel_ctx
-                    .current_doc
-                    .with_untracked(|maybe| {
+                    sel_ctx.current_doc.with_untracked(|maybe| {
                         maybe.as_ref().map(|d| head.step_right(d)).unwrap_or(head)
                     })
+                }
+            } else {
+                sel_ctx.current_doc.with_untracked(|maybe| {
+                    maybe.as_ref().map(|d| head.step_right(d)).unwrap_or(head)
+                })
             }
         }
         HMotion::Home => DocPosition::block_start(head.block),
@@ -1052,9 +1120,9 @@ fn do_horizontal(
                 let end = runs.with_untracked(|r| Caret::end(r));
                 DocPosition::new(block_id, end.run, end.offset)
             } else {
-                sel_ctx
-                    .current_doc
-                    .with_untracked(|maybe| end_of_block(maybe.as_ref(), head.block).unwrap_or(head))
+                sel_ctx.current_doc.with_untracked(|maybe| {
+                    end_of_block(maybe.as_ref(), head.block).unwrap_or(head)
+                })
             }
         }
     };
@@ -1095,7 +1163,13 @@ fn do_vertical(
         let d = maybe.as_ref()?;
         let b = d.blocks.iter().find(|b| b.id == head.block)?;
         if let crate::model::types::BlockBody::Inline(r) = &b.body {
-            Some(abs_offset(r, Caret { run: head.run, offset: head.offset }))
+            Some(abs_offset(
+                r,
+                Caret {
+                    run: head.run,
+                    offset: head.offset,
+                },
+            ))
         } else {
             None
         }
@@ -1178,7 +1252,10 @@ fn commit_runs(runs: RwSignal<Vec<InlineRun>>, block_id: BlockId, on_action: &Ac
     });
 }
 
-fn end_of_block(doc: Option<&crate::model::types::EditorDoc>, block_id: BlockId) -> Option<DocPosition> {
+fn end_of_block(
+    doc: Option<&crate::model::types::EditorDoc>,
+    block_id: BlockId,
+) -> Option<DocPosition> {
     let d = doc?;
     let b = d.blocks.iter().find(|b| b.id == block_id)?;
     if let crate::model::types::BlockBody::Inline(r) = &b.body {
@@ -1234,7 +1311,10 @@ fn insert_into_doc(sel_ctx: &SelectionContext, on_action: &ActionSink, ch: char)
         let mut new_runs = runs.clone();
         let new_caret = insert_char(
             &mut new_runs,
-            Caret { run: head.run, offset: head.offset },
+            Caret {
+                run: head.run,
+                offset: head.offset,
+            },
             ch,
         );
         on_action(BlockAction::EditInline {
@@ -1316,10 +1396,7 @@ fn do_paste(
     }
     let head = sel_ctx.doc_selection.get_untracked().head;
     let last_block_id = blocks.last().map(|b| b.id);
-    on_action(BlockAction::PasteBlocks {
-        at: head,
-        blocks,
-    });
+    on_action(BlockAction::PasteBlocks { at: head, blocks });
     // Focus the last pasted block so the caret lands at its end-ish.
     if let Some(id) = last_block_id {
         focus_target.set(Some(id));
@@ -1552,9 +1629,5 @@ fn run_span(
 
 fn caret_span(font_size: f32) -> impl IntoView {
     // 1 logical-px-wide vertical bar sized to the run height.
-    empty().style(move |s| {
-        s.width(1.)
-            .height(font_size * 1.3)
-            .background(CARET_COLOR)
-    })
+    empty().style(move |s| s.width(1.).height(font_size * 1.3).background(CARET_COLOR))
 }

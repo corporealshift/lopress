@@ -32,15 +32,24 @@ pub fn extract_selection_blocks(doc: &EditorDoc, selection: DocSelection) -> Vec
     if start_idx == end_idx {
         return vec![slice_inline_block(
             &doc.blocks[start_idx],
-            Some(Caret { run: start.run, offset: start.offset }),
-            Some(Caret { run: end.run, offset: end.offset }),
+            Some(Caret {
+                run: start.run,
+                offset: start.offset,
+            }),
+            Some(Caret {
+                run: end.run,
+                offset: end.offset,
+            }),
         )];
     }
 
     let mut out = Vec::with_capacity(end_idx - start_idx + 1);
     out.push(slice_inline_block(
         &doc.blocks[start_idx],
-        Some(Caret { run: start.run, offset: start.offset }),
+        Some(Caret {
+            run: start.run,
+            offset: start.offset,
+        }),
         None,
     ));
     for b in &doc.blocks[start_idx + 1..end_idx] {
@@ -49,7 +58,10 @@ pub fn extract_selection_blocks(doc: &EditorDoc, selection: DocSelection) -> Vec
     out.push(slice_inline_block(
         &doc.blocks[end_idx],
         None,
-        Some(Caret { run: end.run, offset: end.offset }),
+        Some(Caret {
+            run: end.run,
+            offset: end.offset,
+        }),
     ));
     out
 }
@@ -79,8 +91,16 @@ fn slice_inline_block(
             continue;
         }
         let chars: Vec<char> = r.text.chars().collect();
-        let lo = if i == start.run { start.offset.min(chars.len()) } else { 0 };
-        let hi = if i == end.run { end.offset.min(chars.len()) } else { chars.len() };
+        let lo = if i == start.run {
+            start.offset.min(chars.len())
+        } else {
+            0
+        };
+        let hi = if i == end.run {
+            end.offset.min(chars.len())
+        } else {
+            chars.len()
+        };
         if lo >= hi {
             continue;
         }
@@ -110,10 +130,7 @@ pub fn blocks_to_markdown(blocks: &[EditorBlock]) -> String {
 ///
 /// `registry` is consulted for plugin-declared block types; an external
 /// paste with no plugin context can pass `&PluginRegistry::default()`.
-pub fn markdown_to_blocks(
-    s: &str,
-    registry: &lopress_plugin::PluginRegistry,
-) -> Vec<EditorBlock> {
+pub fn markdown_to_blocks(s: &str, registry: &lopress_plugin::PluginRegistry) -> Vec<EditorBlock> {
     match lopress_core::parse(s) {
         Ok(core_doc) => doc_from_core(&core_doc, registry).blocks,
         Err(_) => Vec::new(),

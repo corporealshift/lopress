@@ -57,7 +57,12 @@ pub fn block_toolbar_for(
         ("H1", BlockKind::Heading(1)),
         ("H2", BlockKind::Heading(2)),
         ("H3", BlockKind::Heading(3)),
-        ("Code", BlockKind::Code { lang: String::new() }),
+        (
+            "Code",
+            BlockKind::Code {
+                lang: String::new(),
+            },
+        ),
         ("UL", BlockKind::List { ordered: false }),
         ("OL", BlockKind::List { ordered: true }),
     ];
@@ -167,10 +172,16 @@ fn toggle_button(
             runs.update(|r| {
                 new_local = toggle_inline(r, local, flag);
             });
-            sel_ctx_for_action.doc_selection.set(crate::selection::DocSelection {
-                anchor: DocPosition::new(block_id, new_local.anchor.run, new_local.anchor.offset),
-                head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
-            });
+            sel_ctx_for_action
+                .doc_selection
+                .set(crate::selection::DocSelection {
+                    anchor: DocPosition::new(
+                        block_id,
+                        new_local.anchor.run,
+                        new_local.anchor.offset,
+                    ),
+                    head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
+                });
         })
         .style(|s| s.padding_horiz(6.).padding_vert(2.))
 }
@@ -178,15 +189,24 @@ fn toggle_button(
 /// Reads the doc selection and returns it projected as a `LocalSelection` —
 /// but only when both endpoints are inside the focused block. Cross-block
 /// selections currently fall through to `None` (toolbar shortcuts no-op).
-fn focused_local_selection(focus_pub: FocusPublisher, sel_ctx: &SelectionContext) -> Option<LocalSelection> {
+fn focused_local_selection(
+    focus_pub: FocusPublisher,
+    sel_ctx: &SelectionContext,
+) -> Option<LocalSelection> {
     let block_id = focus_pub.block.get_untracked()?;
     let doc_sel = sel_ctx.doc_selection.get_untracked();
     if doc_sel.anchor.block != block_id || doc_sel.head.block != block_id {
         return None;
     }
     Some(LocalSelection {
-        anchor: Caret { run: doc_sel.anchor.run, offset: doc_sel.anchor.offset },
-        head: Caret { run: doc_sel.head.run, offset: doc_sel.head.offset },
+        anchor: Caret {
+            run: doc_sel.anchor.run,
+            offset: doc_sel.anchor.offset,
+        },
+        head: Caret {
+            run: doc_sel.head.run,
+            offset: doc_sel.head.offset,
+        },
     })
 }
 

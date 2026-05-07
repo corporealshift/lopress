@@ -105,22 +105,14 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             apply_insert_after(doc, anchor, new_block)
         }
         BlockAction::Delete { block_id } => apply_delete(doc, block_id),
-        BlockAction::Move {
-            block_id,
-            to_index,
-        } => apply_move(doc, block_id, to_index),
-        BlockAction::ChangeType {
-            block_id,
-            new_kind,
-        } => apply_change_type(doc, block_id, new_kind),
-        BlockAction::EditInline {
-            block_id,
-            new_runs,
-        } => apply_edit_inline(doc, block_id, new_runs),
-        BlockAction::EditCode {
-            block_id,
-            new_text,
-        } => apply_edit_code(doc, block_id, new_text),
+        BlockAction::Move { block_id, to_index } => apply_move(doc, block_id, to_index),
+        BlockAction::ChangeType { block_id, new_kind } => {
+            apply_change_type(doc, block_id, new_kind)
+        }
+        BlockAction::EditInline { block_id, new_runs } => {
+            apply_edit_inline(doc, block_id, new_runs)
+        }
+        BlockAction::EditCode { block_id, new_text } => apply_edit_code(doc, block_id, new_text),
         // UI-only — handled by the editor pane's action sink, not the model.
         BlockAction::OpenSlashMenu { .. } => {}
         BlockAction::DeleteRange { selection } => apply_delete_range(doc, selection),
@@ -128,9 +120,10 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             apply_toggle_inline_range(doc, selection, flag)
         }
         BlockAction::PasteBlocks { at, blocks } => apply_paste_blocks(doc, at, blocks),
-        BlockAction::EditAttrs { block_id, new_attrs } => {
-            apply_edit_attrs(doc, block_id, new_attrs)
-        }
+        BlockAction::EditAttrs {
+            block_id,
+            new_attrs,
+        } => apply_edit_attrs(doc, block_id, new_attrs),
     }
 }
 
@@ -244,14 +237,20 @@ fn apply_delete(doc: &mut EditorDoc, id: BlockId) {
 }
 
 fn apply_move(doc: &mut EditorDoc, id: BlockId, to_index: usize) {
-    let Some(from) = find_idx(doc, id) else { return };
+    let Some(from) = find_idx(doc, id) else {
+        return;
+    };
     let target_gap = to_index.min(doc.blocks.len());
     // Dropping into the gap immediately before or after self is a no-op.
     if target_gap == from || target_gap == from + 1 {
         return;
     }
     let block = doc.blocks.remove(from);
-    let insert_at = if target_gap > from { target_gap - 1 } else { target_gap };
+    let insert_at = if target_gap > from {
+        target_gap - 1
+    } else {
+        target_gap
+    };
     doc.blocks.insert(insert_at, block);
 }
 
@@ -309,16 +308,28 @@ fn apply_edit_code(doc: &mut EditorDoc, id: BlockId, new_text: String) {
 /// trailing-block runs. Blocks strictly between the endpoints are removed.
 fn apply_delete_range(doc: &mut EditorDoc, selection: DocSelection) {
     let (start, end) = selection.ordered(doc);
-    let Some(start_idx) = find_idx(doc, start.block) else { return };
-    let Some(end_idx) = find_idx(doc, end.block) else { return };
+    let Some(start_idx) = find_idx(doc, start.block) else {
+        return;
+    };
+    let Some(end_idx) = find_idx(doc, end.block) else {
+        return;
+    };
     if start_idx == end_idx {
         // Single-block range: splice within the one block via the existing
         // local helper, then commit.
-        let Some(block) = doc.blocks.get_mut(start_idx) else { return };
+        let Some(block) = doc.blocks.get_mut(start_idx) else {
+            return;
+        };
         if let BlockBody::Inline(runs) = &mut block.body {
             let local = LocalSelection {
-                anchor: Caret { run: start.run, offset: start.offset },
-                head: Caret { run: end.run, offset: end.offset },
+                anchor: Caret {
+                    run: start.run,
+                    offset: start.offset,
+                },
+                head: Caret {
+                    run: end.run,
+                    offset: end.offset,
+                },
             };
             crate::ui::blocks::inline_editor::delete_selection(runs, local);
         }
@@ -382,22 +393,28 @@ fn apply_delete_range(doc: &mut EditorDoc, selection: DocSelection) {
 }
 
 /// Toggle `flag` across every Inline-bodied block touched by `selection`.
-fn apply_toggle_inline_range(
-    doc: &mut EditorDoc,
-    selection: DocSelection,
-    flag: InlineFlag,
-) {
+fn apply_toggle_inline_range(doc: &mut EditorDoc, selection: DocSelection, flag: InlineFlag) {
     let (start, end) = selection.ordered(doc);
-    let Some(start_idx) = find_idx(doc, start.block) else { return };
-    let Some(end_idx) = find_idx(doc, end.block) else { return };
+    let Some(start_idx) = find_idx(doc, start.block) else {
+        return;
+    };
+    let Some(end_idx) = find_idx(doc, end.block) else {
+        return;
+    };
 
     if start_idx == end_idx {
         // Single block — just delegate to toggle_inline.
         if let Some(block) = doc.blocks.get_mut(start_idx) {
             if let BlockBody::Inline(runs) = &mut block.body {
                 let local = LocalSelection {
-                    anchor: Caret { run: start.run, offset: start.offset },
-                    head: Caret { run: end.run, offset: end.offset },
+                    anchor: Caret {
+                        run: start.run,
+                        offset: start.offset,
+                    },
+                    head: Caret {
+                        run: end.run,
+                        offset: end.offset,
+                    },
                 };
                 toggle_inline(runs, local, flag);
             }
@@ -421,12 +438,18 @@ fn apply_toggle_inline_range(
             continue;
         };
         let local_anchor = if i == start_idx {
-            Caret { run: start.run, offset: start.offset }
+            Caret {
+                run: start.run,
+                offset: start.offset,
+            }
         } else {
             Caret::START
         };
         let local_head = if i == end_idx {
-            Caret { run: end.run, offset: end.offset }
+            Caret {
+                run: end.run,
+                offset: end.offset,
+            }
         } else {
             Caret::end(runs)
         };
