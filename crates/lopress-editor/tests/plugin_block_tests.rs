@@ -35,11 +35,14 @@ fn plugin_block_round_trips_byte_identical() {
         Some("rust")
     );
     assert!(matches!(first.kind, BlockKind::Code { .. }));
-    if let BlockBody::Code(t) = &first.body {
-        assert!(t.contains("println!"));
-    } else {
-        panic!("expected Code body");
-    }
+    let t = match &first.body {
+        BlockBody::Code(t) => t,
+        other => {
+            assert!(matches!(other, BlockBody::Code(_)), "expected Code body");
+            return;
+        }
+    };
+    assert!(t.contains("println!"));
 
     // Round-trip: editor → core → markdown should equal the original raw text.
     let core_back = doc_to_core(&editor);

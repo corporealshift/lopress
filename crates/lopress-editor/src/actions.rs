@@ -337,12 +337,12 @@ fn apply_delete_range(doc: &mut EditorDoc, selection: DocSelection) {
     }
 
     // Multi-block: build the merged runs for the leading block.
-    let leading_runs = match &doc.blocks[start_idx].body {
-        BlockBody::Inline(r) => r.clone(),
+    let leading_runs = match doc.blocks.get(start_idx).map(|b| &b.body) {
+        Some(BlockBody::Inline(r)) => r.clone(),
         _ => Vec::new(),
     };
-    let trailing_runs = match &doc.blocks[end_idx].body {
-        BlockBody::Inline(r) => r.clone(),
+    let trailing_runs = match doc.blocks.get(end_idx).map(|b| &b.body) {
+        Some(BlockBody::Inline(r)) => r.clone(),
         _ => Vec::new(),
     };
 
@@ -475,7 +475,9 @@ fn apply_paste_blocks(doc: &mut EditorDoc, at: DocPosition, blocks: Vec<EditorBl
         doc.blocks.extend(blocks);
         return;
     };
-    let target_block = &doc.blocks[idx];
+    let Some(target_block) = doc.blocks.get(idx) else {
+        return;
+    };
     match &target_block.body {
         BlockBody::Inline(_) => {
             // Split at (run, offset), then insert pasted blocks between.

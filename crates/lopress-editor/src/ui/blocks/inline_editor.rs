@@ -286,7 +286,8 @@ pub fn delete_selection(runs: &mut Vec<InlineRun>, sel: LocalSelection) -> Local
     // run (so subsequent edits have somewhere to go).
     let mut i = 0;
     while i < runs.len() {
-        if runs[i].text.is_empty() && runs.len() > 1 {
+        let is_empty = runs.get(i).is_some_and(|r| r.text.is_empty());
+        if is_empty && runs.len() > 1 {
             runs.remove(i);
         } else {
             i += 1;
@@ -382,18 +383,23 @@ fn split_at_abs(runs: &mut Vec<InlineRun>, abs: usize) {
     let mut acc = 0;
     let mut i = 0;
     while i < runs.len() {
-        let len = runs[i].text.chars().count();
+        let Some(run) = runs.get(i) else {
+            return;
+        };
+        let len = run.text.chars().count();
         if abs > acc && abs < acc + len {
             let local_off = abs - acc;
-            let byte = char_to_byte(&runs[i].text, local_off);
-            let (left, right) = runs[i].text.split_at(byte);
+            let byte = char_to_byte(&run.text, local_off);
+            let (left, right) = run.text.split_at(byte);
             let left = left.to_string();
             let right = right.to_string();
-            let mut left_run = runs[i].clone();
+            let mut left_run = run.clone();
             left_run.text = left;
-            let mut right_run = runs[i].clone();
+            let mut right_run = run.clone();
             right_run.text = right;
-            runs[i] = left_run;
+            if let Some(slot) = runs.get_mut(i) {
+                *slot = left_run;
+            }
             runs.insert(i + 1, right_run);
             return;
         }
@@ -463,6 +469,7 @@ const CARET_COLOR: Color = Color::rgb8(40, 40, 40);
 const SELECTION_BG: Color = Color::rgb8(180, 210, 255);
 
 /// Build the editable inline-runs widget.
+#[allow(clippy::too_many_arguments)]
 pub fn editable_inline(
     runs: RwSignal<Vec<InlineRun>>,
     font_size: f32,
@@ -1049,11 +1056,14 @@ fn do_horizontal(
         let target = sel_ctx.current_doc.with_untracked(|maybe| {
             let d = maybe.as_ref()?;
             let (lo, hi) = doc_sel.ordered(d);
-            Some(match direction {
-                HMotion::Left => lo,
-                HMotion::Right => hi,
-                _ => unreachable!(),
-            })
+            match direction {
+                HMotion::Left => Some(lo),
+                HMotion::Right => Some(hi),
+                // Outer `matches!` guard above keeps this arm unreachable in
+                // practice, but returning None here keeps the lints happy
+                // without a panic path.
+                _ => None,
+            }
         });
         if let Some(t) = target {
             sel_ctx.doc_selection.set(DocSelection::caret(t));
@@ -1182,13 +1192,7 @@ fn do_vertical(
         let d = maybe.as_ref()?;
         let i = d.blocks.iter().position(|b| b.id == head.block)?;
         match direction {
-            VMotion::Up => {
-                if i == 0 {
-                    None
-                } else {
-                    Some(d.blocks[i - 1].id)
-                }
-            }
+            VMotion::Up => i.checked_sub(1).and_then(|j| d.blocks.get(j)).map(|b| b.id),
             VMotion::Down => d.blocks.get(i + 1).map(|b| b.id),
         }
     });
@@ -1513,6 +1517,7 @@ fn block_render_inputs(
 
 /// Slice one run into segments at selection boundaries (and at the caret
 /// position when present) and append the corresponding styled spans to `out`.
+#[allow(clippy::too_many_arguments)]
 fn emit_run_segments(
     run: &InlineRun,
     run_idx: usize,
@@ -1577,10 +1582,10 @@ fn emit_run_segments(
     }
 
     for w in splits.windows(2) {
-        let (lo, hi) = (w[0], w[1]);
+        let &[lo, hi] = w else { continue };
         if lo < hi {
-            let segment_text: String = chars[lo..hi].iter().collect();
-            let in_sel = sel_range.map(|(a, b)| lo >= a && hi <= b).unwrap_or(false);
+            let segment_text: String = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
+            let in_sel = sel_range.is_some_and(|(a, b)| lo >= a && hi <= b);
             out.push(run_span(run, segment_text, font_size, force_bold, in_sel));
         }
         if Some(hi) == caret_off && hi != 0 {

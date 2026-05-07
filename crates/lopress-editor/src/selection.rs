@@ -195,11 +195,11 @@ impl GeometryCache {
     /// `None` if no entry exists for `id`.
     pub fn nearest_offset(&self, id: BlockId, target_x: f32) -> Option<usize> {
         let xs = self.get(id)?;
-        if xs.is_empty() {
+        let Some(&first) = xs.first() else {
             return Some(0);
-        }
+        };
         let mut best_i = 0;
-        let mut best_d = (xs[0] - target_x).abs();
+        let mut best_d = (first - target_x).abs();
         for (i, x) in xs.iter().enumerate().skip(1) {
             let d = (*x - target_x).abs();
             if d < best_d {
@@ -218,7 +218,7 @@ impl GeometryCache {
             return Some(0.0);
         }
         let i = offset.min(xs.len() - 1);
-        Some(xs[i])
+        xs.get(i).copied()
     }
 
     /// Synthesize an x-position table by approximating each character as
@@ -227,7 +227,9 @@ impl GeometryCache {
     pub fn approximate_for(runs_text: &str, font_size: f32) -> Vec<f32> {
         let n = runs_text.chars().count();
         let w = font_size * APPROX_CHAR_RATIO;
-        (0..=n).map(|i| i as f32 * w).collect()
+        (0..=n)
+            .map(|i| f32::from(u16::try_from(i).unwrap_or(u16::MAX)) * w)
+            .collect()
     }
 }
 
@@ -246,7 +248,9 @@ impl DocPosition {
         let Some(idx) = block_index(doc, self.block) else {
             return self;
         };
-        let block = &doc.blocks[idx];
+        let Some(block) = doc.blocks.get(idx) else {
+            return self;
+        };
         if let BlockBody::Inline(runs) = &block.body {
             let Caret { run, offset } = step_caret_right(
                 runs,
@@ -276,7 +280,9 @@ impl DocPosition {
         let Some(idx) = block_index(doc, self.block) else {
             return self;
         };
-        let block = &doc.blocks[idx];
+        let Some(block) = doc.blocks.get(idx) else {
+            return self;
+        };
         if let BlockBody::Inline(runs) = &block.body {
             if self.run > 0 || self.offset > 0 {
                 let Caret { run, offset } = step_caret_left(
@@ -290,10 +296,9 @@ impl DocPosition {
             }
         }
         // At block start: hop to end of previous block.
-        if idx == 0 {
+        let Some(prev) = idx.checked_sub(1).and_then(|i| doc.blocks.get(i)) else {
             return self;
-        }
-        let prev = &doc.blocks[idx - 1];
+        };
         if let BlockBody::Inline(runs) = &prev.body {
             let end = Caret::end(runs);
             return DocPosition::new(prev.id, end.run, end.offset);

@@ -29,9 +29,16 @@ pub fn extract_selection_blocks(doc: &EditorDoc, selection: DocSelection) -> Vec
         return Vec::new();
     };
 
+    let Some(start_block) = doc.blocks.get(start_idx) else {
+        return Vec::new();
+    };
+    let Some(end_block) = doc.blocks.get(end_idx) else {
+        return Vec::new();
+    };
+
     if start_idx == end_idx {
         return vec![slice_inline_block(
-            &doc.blocks[start_idx],
+            start_block,
             Some(Caret {
                 run: start.run,
                 offset: start.offset,
@@ -45,18 +52,19 @@ pub fn extract_selection_blocks(doc: &EditorDoc, selection: DocSelection) -> Vec
 
     let mut out = Vec::with_capacity(end_idx - start_idx + 1);
     out.push(slice_inline_block(
-        &doc.blocks[start_idx],
+        start_block,
         Some(Caret {
             run: start.run,
             offset: start.offset,
         }),
         None,
     ));
-    for b in &doc.blocks[start_idx + 1..end_idx] {
+    let middle = doc.blocks.get(start_idx + 1..end_idx).unwrap_or(&[]);
+    for b in middle {
         out.push(b.clone());
     }
     out.push(slice_inline_block(
-        &doc.blocks[end_idx],
+        end_block,
         None,
         Some(Caret {
             run: end.run,
@@ -105,7 +113,7 @@ fn slice_inline_block(
             continue;
         }
         let mut clipped = r.clone();
-        clipped.text = chars[lo..hi].iter().collect();
+        clipped.text = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
         out.push(clipped);
     }
     if out.is_empty() {
