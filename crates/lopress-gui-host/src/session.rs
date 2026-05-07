@@ -200,6 +200,19 @@ impl Session {
         Ok(())
     }
 
+    /// Load the plugin registry for this workspace. Recomputes on each call —
+    /// callers that want to cache should hold onto the returned value (e.g.
+    /// `EditingState` does this once at session-open time).
+    pub fn plugin_registry(&self) -> lopress_plugin::PluginRegistry {
+        let plugins_dir = self.workspace.plugins_dir();
+        let enabled = if self.workspace.config.plugins.enabled.is_empty() {
+            None
+        } else {
+            Some(self.workspace.config.plugins.enabled.as_slice())
+        };
+        lopress_plugin::load_dir(&plugins_dir, enabled).unwrap_or_default()
+    }
+
     /// Trigger a rebuild and SSE broadcast on a background thread.
     /// Safe to call even if a watcher-triggered rebuild is already in flight —
     /// the worst case is two sequential builds.

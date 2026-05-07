@@ -84,6 +84,12 @@ pub enum BlockAction {
         at: DocPosition,
         blocks: Vec<EditorBlock>,
     },
+    /// Replace the attrs map of `block_id`'s `PluginMeta`. No-op when the
+    /// block isn't plugin-flagged. Used by the plugin block's attr form.
+    EditAttrs {
+        block_id: BlockId,
+        new_attrs: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 /// Apply one `BlockAction` to the document. Unknown block ids are no-ops.
@@ -122,6 +128,23 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             apply_toggle_inline_range(doc, selection, flag)
         }
         BlockAction::PasteBlocks { at, blocks } => apply_paste_blocks(doc, at, blocks),
+        BlockAction::EditAttrs { block_id, new_attrs } => {
+            apply_edit_attrs(doc, block_id, new_attrs)
+        }
+    }
+}
+
+fn apply_edit_attrs(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    new_attrs: serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(idx) = find_idx(doc, id) else { return };
+    let Some(block) = doc.blocks.get_mut(idx) else {
+        return;
+    };
+    if let Some(meta) = block.plugin.as_mut() {
+        meta.attrs = new_attrs;
     }
 }
 

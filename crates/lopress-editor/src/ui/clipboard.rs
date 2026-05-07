@@ -107,9 +107,15 @@ pub fn blocks_to_markdown(blocks: &[EditorBlock]) -> String {
 
 /// Parse a markdown string into a `Vec<EditorBlock>`. Returns an empty
 /// vector if parsing fails — paste then becomes a no-op.
-pub fn markdown_to_blocks(s: &str) -> Vec<EditorBlock> {
+///
+/// `registry` is consulted for plugin-declared block types; an external
+/// paste with no plugin context can pass `&PluginRegistry::default()`.
+pub fn markdown_to_blocks(
+    s: &str,
+    registry: &lopress_plugin::PluginRegistry,
+) -> Vec<EditorBlock> {
     match lopress_core::parse(s) {
-        Ok(core_doc) => doc_from_core(&core_doc).blocks,
+        Ok(core_doc) => doc_from_core(&core_doc, registry).blocks,
         Err(_) => Vec::new(),
     }
 }

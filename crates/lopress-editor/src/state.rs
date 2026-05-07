@@ -5,6 +5,7 @@ use crate::model::types::EditorDoc;
 use crate::settings::Settings;
 use lopress_core::Document;
 use lopress_gui_host::{DocumentRef, Session};
+use lopress_plugin::PluginRegistry;
 
 /// Top-level application state, discriminated by which screen is active.
 pub enum AppState {
@@ -22,6 +23,10 @@ pub struct WelcomeState {
 /// State for the Editing screen.
 pub struct EditingState {
     pub session: Session,
+    /// Plugin registry loaded from the workspace at session-open time.
+    /// Used by `from_core` to classify plugin-declared block types and by
+    /// the plugin block view to render attr forms.
+    pub plugin_registry: PluginRegistry,
     /// The currently active document, if one has been opened.
     pub current_doc: Option<EditorDoc>,
     pub current_ref: Option<DocumentRef>,
@@ -32,8 +37,10 @@ pub struct EditingState {
 impl EditingState {
     /// Create a new `EditingState` wrapping the given `session`.
     pub fn new(session: Session) -> Self {
+        let plugin_registry = session.plugin_registry();
         Self {
             session,
+            plugin_registry,
             current_doc: None,
             current_ref: None,
             last_error: None,
@@ -49,7 +56,7 @@ impl EditingState {
                     front_matter: loaded.front_matter,
                     blocks: loaded.blocks,
                 };
-                self.current_doc = Some(doc_from_core(&core_doc));
+                self.current_doc = Some(doc_from_core(&core_doc, &self.plugin_registry));
                 self.current_ref = Some(doc_ref.clone());
                 self.last_error = None;
             }

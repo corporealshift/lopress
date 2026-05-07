@@ -1,0 +1,4 @@
+[site]
+title = "Plugin Round-trip Fixture"
+base_url = "http://localhost"
+theme = "default"

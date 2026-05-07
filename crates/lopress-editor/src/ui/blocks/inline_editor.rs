@@ -1300,7 +1300,11 @@ fn do_paste(
     let Some(text) = crate::ui::clipboard::read_clipboard() else {
         return;
     };
-    let blocks = crate::ui::clipboard::markdown_to_blocks(&text);
+    // Paste from clipboard runs with an empty registry — plugin block types
+    // can't be reconstructed from raw markdown without context. Internal
+    // copy/paste of plugin blocks via this path will fall back to opaque.
+    let registry = lopress_plugin::PluginRegistry::default();
+    let blocks = crate::ui::clipboard::markdown_to_blocks(&text, &registry);
     if blocks.is_empty() {
         return;
     }

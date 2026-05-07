@@ -11,6 +11,7 @@ pub mod inline_editor;
 pub mod list;
 pub mod opaque;
 pub mod paragraph;
+pub mod plugin;
 
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
@@ -35,6 +36,48 @@ pub fn block_view(
 ) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
+
+    // Plugin blocks take precedence: header strip + attr form + body editor.
+    // Built-in dispatch only runs when the block isn't plugin-flagged.
+    if block.plugin.is_some() {
+        let plugin_view = plugin::plugin_block_view(
+            block,
+            on_action.clone(),
+            focus_target,
+            focus_pub,
+            sel_ctx.clone(),
+            dnd,
+        );
+        // The toolbar slot still mounts above plugin blocks so kind / B / I
+        // toggles still work on the body editor.
+        let toolbar_slot = {
+            let on_action = on_action.clone();
+            let kind_for_slot = kind.clone();
+            let sel_ctx_for_slot = sel_ctx.clone();
+            dyn_container(
+                move || focus_pub.block.get() == Some(block_id),
+                move |is_focused| {
+                    if is_focused {
+                        block_toolbar_for(
+                            block_id,
+                            kind_for_slot.clone(),
+                            focus_pub,
+                            on_action.clone(),
+                            sel_ctx_for_slot.clone(),
+                        )
+                        .into_any()
+                    } else {
+                        empty().into_any()
+                    }
+                },
+            )
+            .style(|s| s.width_full())
+        };
+        return v_stack((toolbar_slot, plugin_view))
+            .style(|s| s.width_full())
+            .into_any();
+    }
+
     let body = match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
             let runs_sig = RwSignal::new(runs.clone());

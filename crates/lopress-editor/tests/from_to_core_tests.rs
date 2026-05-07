@@ -18,6 +18,7 @@
 
 use lopress_core::{parse, serialize, Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
+use lopress_plugin::PluginRegistry;
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
     BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem,
@@ -28,7 +29,7 @@ use serde_json::json;
 fn paragraph_round_trips_via_document_equality() {
     let src = "---\ntitle: Test Post\n---\n# Heading 1\n\nA plain paragraph.\n\n## Heading 2\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }
@@ -37,7 +38,7 @@ fn paragraph_round_trips_via_document_equality() {
 fn code_block_round_trips_with_language() {
     let src = "```rust\nfn main() {}\n```\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
 
     // Sanity: the editor classifies it correctly.
     assert!(matches!(
@@ -58,7 +59,7 @@ fn opaque_block_preserved_byte_identical() {
     // promises semantic equality.
     let src = "before\n\n<!-- lopress:video {\"src\":\"a.mp4\"} -->\n<!-- /lopress:video -->\n\nafter\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
 
     let video = &editor.blocks[1];
     assert!(
@@ -77,7 +78,7 @@ fn opaque_block_preserved_byte_identical() {
 fn nested_block_inside_custom_falls_through_opaque() {
     let src = "<!-- lopress:callout {\"kind\":\"warning\"} -->\nbody para\n<!-- /lopress:callout -->\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
 
     // A `lopress:callout` containing children must still come back as a single
     // Opaque block — the editor doesn't currently model nested children.
@@ -130,7 +131,7 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     assert_eq!(item.children[0].text.as_deref(), Some("first item"));
 
     // And the reverse direction reconstructs the same editor structure.
-    let editor_back = doc_from_core(&core);
+    let editor_back = doc_from_core(&core, &PluginRegistry::default());
     assert!(matches!(
         editor_back.blocks[0].kind,
         BlockKind::List { ordered: false }
@@ -177,7 +178,7 @@ fn nested_list_becomes_opaque() {
         blocks: vec![nested_list],
     };
 
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
     assert!(matches!(
         &editor.blocks[0].kind,
         BlockKind::Opaque { type_name } if type_name == "list"
@@ -191,7 +192,7 @@ fn nested_list_becomes_opaque() {
 fn empty_document_round_trips() {
     let src = "---\ntitle: Empty\n---\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
     assert!(editor.blocks.is_empty());
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
@@ -208,7 +209,7 @@ fn front_matter_is_preserved() {
         front_matter: fm.clone(),
         blocks: vec![Block::paragraph("hello")],
     };
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
     assert_eq!(editor.front_matter, fm);
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back.front_matter, fm);
@@ -218,7 +219,7 @@ fn front_matter_is_preserved() {
 fn heading_levels_round_trip() {
     let src = "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core);
+    let editor = doc_from_core(&core, &PluginRegistry::default());
 
     let levels: Vec<u8> = editor
         .blocks
