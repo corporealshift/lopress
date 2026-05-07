@@ -1,10 +1,11 @@
 //! App state. Adds the live `EditorDoc` slot to `EditingState` (Task 7).
 
 use crate::model::from_core::doc_from_core;
+use crate::model::to_core::doc_to_core;
 use crate::model::types::EditorDoc;
 use crate::settings::Settings;
 use lopress_core::Document;
-use lopress_gui_host::{DocumentRef, Session};
+use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
 use lopress_plugin::PluginRegistry;
 
 /// Top-level application state, discriminated by which screen is active.
@@ -45,6 +46,31 @@ impl EditingState {
             current_ref: None,
             last_error: None,
         }
+    }
+
+    /// Save the given `EditorDoc` to the path of the currently open document.
+    /// Returns the error message on failure.
+    ///
+    /// Takes the doc to save by reference rather than reading
+    /// `self.current_doc` because the live edit state lives in a UI signal,
+    /// not in `EditingState` (which only stores the doc as opened).
+    pub fn save_doc(&self, doc: &EditorDoc) -> Result<(), String> {
+        let path = self
+            .current_ref
+            .as_ref()
+            .map(|r| r.path.clone())
+            .ok_or_else(|| "no document open".to_string())?;
+        let core = doc_to_core(doc);
+        let loaded = LoadedDocument {
+            path,
+            front_matter: core.front_matter,
+            blocks: core.blocks,
+            dirty: false,
+            dirty_at: None,
+            last_written: None,
+            last_save_error: None,
+        };
+        self.session.save(&loaded).map_err(|e| e.to_string())
     }
 
     /// Load and parse the document at `doc_ref.path`, replacing `current_doc`.

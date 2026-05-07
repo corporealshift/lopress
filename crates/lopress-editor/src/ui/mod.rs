@@ -12,10 +12,13 @@ pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
 
+use floem::action::debounce_action;
+use floem::event::{Event, EventListener};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, h_stack, label, stack, Decorators};
 use floem::IntoView;
+use std::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -177,8 +180,23 @@ fn editing_view(
         geometry,
     };
 
+    // ── Save-debounce signals ────────────────────────────────────────────
+    // `dirty_counter` bumps on every legitimate edit; `debounce_action`
+    // watches it and runs the save closure 500 ms after the last bump.
+    // `dirty_sig` / `save_error_sig` drive the footer's status display.
+    let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
+    let dirty_sig: RwSignal<bool> = RwSignal::new(false);
+    let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
+    let dirty_counter: RwSignal<u64> = RwSignal::new(0);
+
+    let mark_dirty: Rc<dyn Fn()> = Rc::new(move || {
+        dirty_sig.set(true);
+        dirty_counter.update(|n| *n = n.wrapping_add(1));
+    });
+
     // Chokepoint: every block-tree mutation routes through here. Pre/post
     // lookups derive the block to focus after structural actions.
+    let on_action_mark_dirty = Rc::clone(&mark_dirty);
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
         // UI-only action: hand off to the slash-menu signal and skip the
         // model. Doing this before `apply` keeps the chokepoint single-entry
@@ -219,6 +237,7 @@ fn editing_view(
         if let Some(id) = pre_focus.or(post_focus) {
             focus_target.set(Some(id));
         }
+        on_action_mark_dirty();
     });
 
     let editor = dyn_container(
@@ -246,13 +265,7 @@ fn editing_view(
     )
     .style(|s| s.flex_grow(1.0).height_full());
 
-    let inspector = inspector_view(current_doc, current_path);
-
-    // Footer signals: build status is polled, dirty/save_error are placeholders
-    // wired up properly in Task 21.
-    let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
-    let dirty_sig: RwSignal<bool> = RwSignal::new(false);
-    let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
+    let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
 
     let serve_url_str = editing
         .borrow()
@@ -271,6 +284,37 @@ fn editing_view(
         start_build_status_poll(session_reader, build_status_sig);
     }
 
+    // Debounced save+rebuild. `debounce_action` resets its internal timer on
+    // every counter bump and fires the closure 500 ms after the last bump.
+    {
+        let editing_for_save = Rc::clone(&editing);
+        debounce_action(dirty_counter, Duration::from_millis(500), move || {
+            let doc = match current_doc.with_untracked(|d| d.clone()) {
+                Some(d) => d,
+                None => return,
+            };
+            let result = {
+                let guard = editing_for_save.borrow();
+                match guard.as_ref() {
+                    Some(state) => state.save_doc(&doc),
+                    None => return,
+                }
+            };
+            match result {
+                Ok(()) => {
+                    dirty_sig.set(false);
+                    save_error_sig.set(None);
+                    if let Some(state) = editing_for_save.borrow().as_ref() {
+                        state.session.rebuild();
+                    }
+                }
+                Err(msg) => {
+                    save_error_sig.set(Some(msg));
+                }
+            }
+        });
+    }
+
     let footer = footer_view(
         build_status_sig,
         dirty_sig,
@@ -282,7 +326,22 @@ fn editing_view(
     let columns = h_stack((sidebar, editor, inspector))
         .style(|s| s.width_full().flex_grow(1.0));
 
-    stack((columns, footer)).style(|s| s.flex_col().width_full().height_full())
+    let editing_for_close = Rc::clone(&editing);
+    stack((columns, footer))
+        .style(|s| s.flex_col().width_full().height_full())
+        .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
+            // Force-flush any unsaved edits before the window dies.
+            if !dirty_sig.get_untracked() {
+                return;
+            }
+            let doc = match current_doc.with_untracked(|d| d.clone()) {
+                Some(d) => d,
+                None => return,
+            };
+            if let Some(state) = editing_for_close.borrow().as_ref() {
+                let _ = state.save_doc(&doc);
+            }
+        })
 }
 
 /// Lightweight discriminant so `dyn_container` can derive equality cheaply.

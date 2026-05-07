@@ -18,6 +18,7 @@ use floem::views::{
 };
 use floem::{AnyView, IntoView};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::model::types::EditorDoc;
 
@@ -30,14 +31,19 @@ const INPUT_BG: Color = Color::rgb8(255, 255, 255);
 const INPUT_BORDER: Color = Color::rgb8(210, 210, 215);
 
 /// Build the inspector view. Empty placeholder when no doc is open.
+///
+/// `mark_dirty` is called whenever a field edit actually changes
+/// `current_doc.front_matter`; the save-debounce machinery in `mod.rs`
+/// listens for this to schedule a write.
 pub fn inspector_view(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
+    mark_dirty: Rc<dyn Fn()>,
 ) -> impl IntoView {
     let body = dyn_container(
         move || current_path.get(),
         move |path| match current_doc.with_untracked(|d| d.clone()) {
-            Some(doc) => form(doc, path, current_doc).into_any(),
+            Some(doc) => form(doc, path, current_doc, mark_dirty.clone()).into_any(),
             None => empty().into_any(),
         },
     )
@@ -56,6 +62,7 @@ fn form(
     doc: EditorDoc,
     path: Option<PathBuf>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    mark_dirty: Rc<dyn Fn()>,
 ) -> AnyView {
     let fm = &doc.front_matter;
     let title_buf: RwSignal<String> = RwSignal::new(fm.title.clone().unwrap_or_default());
@@ -76,51 +83,78 @@ fn form(
         .to_string();
 
     // ── Effects: push buffer changes into current_doc.front_matter ────────
+    // Each effect mutates `current_doc` only when the value actually
+    // changed, then calls `mark_dirty` so the save-debounce in `mod.rs` is
+    // triggered. Without the diff-guard the effects would fire on initial
+    // mount and falsely mark a fresh doc dirty.
+    let md = mark_dirty.clone();
     create_effect(move |_| {
         let new_title = title_buf.get();
+        let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
                 let next = if new_title.is_empty() { None } else { Some(new_title.clone()) };
                 if d.front_matter.title != next {
                     d.front_matter.title = next;
+                    changed = true;
                 }
             }
         });
+        if changed {
+            md();
+        }
     });
+    let md = mark_dirty.clone();
     create_effect(move |_| {
         let new_slug = slug_buf.get();
+        let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
                 let next = if new_slug.is_empty() { None } else { Some(new_slug.clone()) };
                 if d.front_matter.slug != next {
                     d.front_matter.slug = next;
+                    changed = true;
                 }
             }
         });
+        if changed {
+            md();
+        }
     });
+    let md = mark_dirty.clone();
     create_effect(move |_| {
         let raw = date_buf.get();
         if raw.trim().is_empty() {
             date_invalid.set(false);
+            let mut changed = false;
             current_doc.update(|maybe| {
                 if let Some(d) = maybe {
                     if d.front_matter.date.is_some() {
                         d.front_matter.date = None;
+                        changed = true;
                     }
                 }
             });
+            if changed {
+                md();
+            }
             return;
         }
         match NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d") {
             Ok(d) => {
                 date_invalid.set(false);
+                let mut changed = false;
                 current_doc.update(|maybe| {
                     if let Some(doc) = maybe {
                         if doc.front_matter.date != Some(d) {
                             doc.front_matter.date = Some(d);
+                            changed = true;
                         }
                     }
                 });
+                if changed {
+                    md();
+                }
             }
             Err(_) => {
                 // Don't write through bad input; surface a hint instead.
@@ -128,6 +162,7 @@ fn form(
             }
         }
     });
+    let md = mark_dirty.clone();
     create_effect(move |_| {
         let raw = tags_buf.get();
         let tags: Vec<String> = raw
@@ -135,23 +170,34 @@ fn form(
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
             .collect();
+        let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
                 if d.front_matter.tags != tags {
                     d.front_matter.tags = tags.clone();
+                    changed = true;
                 }
             }
         });
+        if changed {
+            md();
+        }
     });
+    let md = mark_dirty.clone();
     create_effect(move |_| {
         let v = draft_sig.get();
+        let mut changed = false;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
                 if d.front_matter.draft != v {
                     d.front_matter.draft = v;
+                    changed = true;
                 }
             }
         });
+        if changed {
+            md();
+        }
     });
 
     // ── Field widgets ────────────────────────────────────────────────────
