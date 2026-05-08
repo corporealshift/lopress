@@ -525,14 +525,42 @@ pub fn editable_inline(
     let sel_ctx_for_keydown = sel_ctx.clone();
     let view = body
         .keyboard_navigable()
-        .on_click_stop(move |_| {
-            // Click anywhere → collapse caret at end-of-block. Real per-
-            // character hit-testing remains a follow-up.
-            let end = runs.with_untracked(|r| Caret::end(r));
+        .on_click_stop(move |e| {
+            // Hit-test the click x against this block's approximate geometry
+            // to land the caret near where the user clicked. Geometry is a
+            // single-line approximation; for wrapped paragraphs it lands on
+            // the visually-closest character on whichever wrapped line shares
+            // that x — usable, but not pixel-perfect.
+            let click_x = match e {
+                Event::PointerUp(pe) => pe.pos.x,
+                _ => f64::NAN,
+            };
+            let runs_v = runs.get_untracked();
+            // f64 → f32 here is a known precision loss; we only need rough
+            // pixel-accuracy for hit-testing so saturating to f32 is fine.
+            #[allow(clippy::cast_possible_truncation)]
+            let click_x_f32 = click_x as f32;
+            let caret = if click_x.is_finite() {
+                let abs = sel_ctx_for_click
+                    .geometry
+                    .borrow()
+                    .nearest_offset(block_id, click_x_f32)
+                    .unwrap_or_else(|| {
+                        // No geometry yet: fall back to end-of-block.
+                        let end = Caret::end(&runs_v);
+                        abs_offset(&runs_v, end)
+                    });
+                let (run, offset) = abs_to_run_offset(&runs_v, abs);
+                Caret { run, offset }
+            } else {
+                Caret::end(&runs_v)
+            };
             sel_ctx_for_click
                 .doc_selection
                 .set(DocSelection::caret(DocPosition::new(
-                    block_id, end.run, end.offset,
+                    block_id,
+                    caret.run,
+                    caret.offset,
                 )));
         })
         .on_event(EventListener::FocusGained, move |_| {
@@ -543,10 +571,12 @@ pub fn editable_inline(
         })
         .on_event(EventListener::FocusLost, move |_| {
             focused.set(false);
-            if focus_pub.block.get_untracked() == Some(block_id) {
-                focus_pub.block.set(None);
-                focus_pub.runs.set(None);
-            }
+            // Intentionally do NOT clear focus_pub here. Clicking a toolbar
+            // button (or any sibling control) fires FocusLost mid-click; if
+            // we cleared focus_pub the toolbar would unmount before the
+            // click action ran, and inline-flag toggles read focus_pub.runs
+            // to operate on the active block's runs signal. Another block
+            // gaining focus will overwrite focus_pub via FocusGained.
             let current = runs.get_untracked();
             on_action_for_focus_lost(BlockAction::EditInline {
                 block_id,

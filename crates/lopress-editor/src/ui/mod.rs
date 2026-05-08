@@ -16,7 +16,7 @@ use floem::action::debounce_action;
 use floem::event::{Event, EventListener};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, h_stack, label, stack, Decorators};
+use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -234,12 +234,32 @@ fn editing_view(
         if let Some(id) = pre_focus.or(post_focus) {
             focus_target.set(Some(id));
         }
+        // Split: also move the doc caret into the new block, otherwise the
+        // next keystroke routes back to the original block via the cross-
+        // block insert path (head.block != typing widget's block_id).
+        if let (BlockAction::Split { .. }, Some(new_id)) = (&action, post_focus) {
+            doc_selection.set(DocSelection::caret(DocPosition::new(new_id, 0, 0)));
+        }
         on_action_mark_dirty();
     });
 
-    let editor = dyn_container(
-        move || current_doc.get(),
-        move |maybe_doc| match maybe_doc {
+    // Key the editor-pane rebuild on the *shape* of the doc — block id
+    // sequence, document identity — not the full content. Within-block text
+    // edits (which fire EditInline → current_doc.update) must NOT tear down
+    // the per-block widgets, otherwise focus is lost every time the user
+    // commits runs (e.g., arrow-key navigation between blocks calls
+    // commit_runs first; rebuilding the pane afterwards would orphan focus
+    // on the destination block). The per-block widgets own their own
+    // `runs_sig` reactive copies; structural changes (split, delete,
+    // insert, reorder) change the id list and trigger a rebuild.
+    let pane_key = move || {
+        current_doc.with(|d| {
+            d.as_ref()
+                .map(|d| d.blocks.iter().map(|b| b.id).collect::<Vec<_>>())
+        })
+    };
+    let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
+        Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
             Some(doc) => editor_pane::editor_pane(
                 &doc,
                 on_action.clone(),
@@ -249,17 +269,18 @@ fn editing_view(
                 sel_ctx.clone(),
             )
             .into_any(),
-            None => label(|| "No document open. Pick one from the sidebar.")
-                .style(|s| {
-                    s.width_full()
-                        .height_full()
-                        .items_center()
-                        .justify_center()
-                        .color(Color::rgb8(140, 140, 140))
-                })
-                .into_any(),
+            None => empty().into_any(),
         },
-    )
+        None => label(|| "No document open. Pick one from the sidebar.")
+            .style(|s| {
+                s.width_full()
+                    .height_full()
+                    .items_center()
+                    .justify_center()
+                    .color(Color::rgb8(140, 140, 140))
+            })
+            .into_any(),
+    })
     .style(|s| s.flex_grow(1.0).height_full());
 
     let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
