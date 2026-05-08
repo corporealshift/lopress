@@ -521,47 +521,71 @@ pub fn editable_inline(
 
     let on_action_for_focus_lost = on_action.clone();
     let on_action_for_keydown = on_action;
-    let sel_ctx_for_click = sel_ctx.clone();
+    let sel_ctx_for_down = sel_ctx.clone();
+    let sel_ctx_for_move = sel_ctx.clone();
     let sel_ctx_for_keydown = sel_ctx.clone();
-    let view = body
-        .keyboard_navigable()
-        .on_click_stop(move |e| {
-            // Hit-test the click x against this block's approximate geometry
-            // to land the caret near where the user clicked. Geometry is a
-            // single-line approximation; for wrapped paragraphs it lands on
-            // the visually-closest character on whichever wrapped line shares
-            // that x — usable, but not pixel-perfect.
-            let click_x = match e {
-                Event::PointerUp(pe) => pe.pos.x,
-                _ => f64::NAN,
+    let nav_view = body.keyboard_navigable();
+    let view_id_for_click = nav_view.id();
+    // Local "primary mouse button is held" flag so PointerMove only updates
+    // the selection head while the user is mid-drag.
+    let dragging: RwSignal<bool> = RwSignal::new(false);
+    let view = nav_view
+        .on_event(EventListener::PointerDown, move |e| {
+            // PointerDown must keep keyboard focus on the inline-editor
+            // wrapper (otherwise a click on a deep text child quietly hands
+            // focus to a non-focusable descendant and the caret disappears).
+            view_id_for_click.request_focus();
+            let Event::PointerDown(pe) = e else {
+                return EventPropagation::Continue;
+            };
+            if !pe.button.is_primary() {
+                return EventPropagation::Continue;
+            }
+            let runs_v = runs.get_untracked();
+            let caret = caret_for_x(
+                &runs_v,
+                pe.pos.x,
+                block_id,
+                &sel_ctx_for_down.geometry.borrow(),
+            );
+            // Shift-click extends the existing selection rather than
+            // collapsing it to a fresh caret.
+            let extend = pe.modifiers.shift();
+            let head = DocPosition::new(block_id, caret.run, caret.offset);
+            sel_ctx_for_down.doc_selection.update(|sel| {
+                if extend {
+                    sel.head = head;
+                } else {
+                    sel.anchor = head;
+                    sel.head = head;
+                }
+            });
+            dragging.set(true);
+            EventPropagation::Stop
+        })
+        .on_event(EventListener::PointerMove, move |e| {
+            if !dragging.get_untracked() {
+                return EventPropagation::Continue;
+            }
+            let Event::PointerMove(pe) = e else {
+                return EventPropagation::Continue;
             };
             let runs_v = runs.get_untracked();
-            // f64 → f32 here is a known precision loss; we only need rough
-            // pixel-accuracy for hit-testing so saturating to f32 is fine.
-            #[allow(clippy::cast_possible_truncation)]
-            let click_x_f32 = click_x as f32;
-            let caret = if click_x.is_finite() {
-                let abs = sel_ctx_for_click
-                    .geometry
-                    .borrow()
-                    .nearest_offset(block_id, click_x_f32)
-                    .unwrap_or_else(|| {
-                        // No geometry yet: fall back to end-of-block.
-                        let end = Caret::end(&runs_v);
-                        abs_offset(&runs_v, end)
-                    });
-                let (run, offset) = abs_to_run_offset(&runs_v, abs);
-                Caret { run, offset }
-            } else {
-                Caret::end(&runs_v)
-            };
-            sel_ctx_for_click
-                .doc_selection
-                .set(DocSelection::caret(DocPosition::new(
-                    block_id,
-                    caret.run,
-                    caret.offset,
-                )));
+            let caret = caret_for_x(
+                &runs_v,
+                pe.pos.x,
+                block_id,
+                &sel_ctx_for_move.geometry.borrow(),
+            );
+            let head = DocPosition::new(block_id, caret.run, caret.offset);
+            sel_ctx_for_move.doc_selection.update(|sel| {
+                sel.head = head;
+            });
+            EventPropagation::Continue
+        })
+        .on_event(EventListener::PointerUp, move |_| {
+            dragging.set(false);
+            EventPropagation::Continue
         })
         .on_event(EventListener::FocusGained, move |_| {
             focused.set(true);
@@ -609,10 +633,9 @@ pub fn editable_inline(
             }
         });
 
-    let view_id = view.id();
     create_effect(move |_| {
         if focus_target.get() == Some(block_id) {
-            view_id.request_focus();
+            view_id_for_click.request_focus();
             focus_target.set(None);
         }
     });
@@ -1300,6 +1323,28 @@ fn end_of_block(
     }
 }
 
+/// Map a pointer x (in this block's local coords) to the nearest character
+/// caret. Uses the block's geometry-cache row of approximate character x
+/// positions — single-line approximation, so for wrapped paragraphs the
+/// returned caret is on whichever wrapped line shares that x. Falls back to
+/// end-of-block when the geometry isn't populated yet.
+fn caret_for_x(runs: &[InlineRun], x: f64, block_id: BlockId, geometry: &GeometryCache) -> Caret {
+    if !x.is_finite() {
+        return Caret::end(runs);
+    }
+    // f64→f32 is a known precision loss; pixel-level hit-testing only needs
+    // a few decimal places.
+    #[allow(clippy::cast_possible_truncation)]
+    let x_f32 = x as f32;
+    match geometry.nearest_offset(block_id, x_f32) {
+        Some(abs) => {
+            let (run, offset) = abs_to_run_offset(runs, abs);
+            Caret { run, offset }
+        }
+        None => Caret::end(runs),
+    }
+}
+
 fn abs_to_run_offset(runs: &[InlineRun], abs: usize) -> (usize, usize) {
     let mut acc = 0;
     for (i, r) in runs.iter().enumerate() {
@@ -1614,14 +1659,43 @@ fn emit_run_segments(
     for w in splits.windows(2) {
         let &[lo, hi] = w else { continue };
         if lo < hi {
-            let segment_text: String = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
+            let segment: String = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
             let in_sel = sel_range.is_some_and(|(a, b)| lo >= a && hi <= b);
-            out.push(run_span(run, segment_text, font_size, force_bold, in_sel));
+            // Emit one widget per word/whitespace chunk so the parent
+            // h_stack's flex_wrap can break between them. A single `text()`
+            // never wraps inside its own box in Floem 0.2.
+            for chunk in word_chunks(&segment) {
+                out.push(run_span(run, chunk, font_size, force_bold, in_sel));
+            }
         }
         if Some(hi) == caret_off && hi != 0 {
             out.push(caret_span(font_size).into_any());
         }
     }
+}
+
+/// Split `text` into runs of [non-whitespace, whitespace, non-whitespace, …]
+/// preserving every character. The caller emits one widget per chunk so the
+/// parent flex container can wrap at whitespace boundaries.
+fn word_chunks(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if text.is_empty() {
+        return out;
+    }
+    let mut buf = String::new();
+    let mut buf_is_ws = false;
+    for ch in text.chars() {
+        let ch_is_ws = ch.is_whitespace();
+        if !buf.is_empty() && ch_is_ws != buf_is_ws {
+            out.push(std::mem::take(&mut buf));
+        }
+        buf_is_ws = ch_is_ws;
+        buf.push(ch);
+    }
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    out
 }
 
 fn run_span(

@@ -231,7 +231,14 @@ fn editing_view(
                 .map(|b| b.id),
             _ => None,
         });
-        if let Some(id) = pre_focus.or(post_focus) {
+        // ChangeType swaps the per-block widget (paragraph ↔ heading ↔ …),
+        // so we must re-focus the rebuilt block; otherwise the toolbar's
+        // P/H1/H2 buttons feel inert because the widget vanishes underfoot.
+        let change_type_focus = match &action {
+            BlockAction::ChangeType { block_id, .. } => Some(*block_id),
+            _ => None,
+        };
+        if let Some(id) = pre_focus.or(post_focus).or(change_type_focus) {
             focus_target.set(Some(id));
         }
         // Split: also move the doc caret into the new block, otherwise the
@@ -244,18 +251,25 @@ fn editing_view(
     });
 
     // Key the editor-pane rebuild on the *shape* of the doc — block id
-    // sequence, document identity — not the full content. Within-block text
-    // edits (which fire EditInline → current_doc.update) must NOT tear down
-    // the per-block widgets, otherwise focus is lost every time the user
-    // commits runs (e.g., arrow-key navigation between blocks calls
-    // commit_runs first; rebuilding the pane afterwards would orphan focus
-    // on the destination block). The per-block widgets own their own
-    // `runs_sig` reactive copies; structural changes (split, delete,
-    // insert, reorder) change the id list and trigger a rebuild.
+    // sequence + per-block kind tag + plugin presence — not the full
+    // content. Within-block text edits (which fire EditInline →
+    // current_doc.update) must NOT tear down the per-block widgets,
+    // otherwise focus is lost every time the user commits runs (e.g.,
+    // arrow-key navigation between blocks calls commit_runs first;
+    // rebuilding the pane afterwards would orphan focus on the destination
+    // block). The per-block widgets own their own `runs_sig` reactive
+    // copies; structural changes (split, delete, insert, reorder) change
+    // the id list and trigger a rebuild. Block-kind changes (toolbar
+    // P/H1/H2/Code/UL/OL buttons) do too — discriminant comparison covers
+    // Heading(1) vs Heading(2), List{ordered:false} vs ordered:true, etc.
     let pane_key = move || {
         current_doc.with(|d| {
-            d.as_ref()
-                .map(|d| d.blocks.iter().map(|b| b.id).collect::<Vec<_>>())
+            d.as_ref().map(|d| {
+                d.blocks
+                    .iter()
+                    .map(|b| (b.id, kind_tag(&b.kind), b.plugin.is_some()))
+                    .collect::<Vec<_>>()
+            })
         })
     };
     let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
@@ -366,6 +380,30 @@ fn editing_view(
 enum StateTag {
     Welcome,
     Editing,
+}
+
+/// Compact equality tag for `BlockKind` used by the editor-pane rebuild key.
+/// `Eq` is fine; this is just a discriminator (Heading(1) vs Heading(2),
+/// List{ordered:false} vs ordered:true, etc.) so we trigger a pane rebuild
+/// when the toolbar's type buttons swap a block's kind.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum KindTag {
+    Paragraph,
+    Heading(u8),
+    Code,
+    List { ordered: bool },
+    Opaque,
+}
+
+fn kind_tag(k: &crate::model::types::BlockKind) -> KindTag {
+    use crate::model::types::BlockKind;
+    match k {
+        BlockKind::Paragraph => KindTag::Paragraph,
+        BlockKind::Heading(level) => KindTag::Heading(*level),
+        BlockKind::Code { .. } => KindTag::Code,
+        BlockKind::List { ordered } => KindTag::List { ordered: *ordered },
+        BlockKind::Opaque { .. } => KindTag::Opaque,
+    }
 }
 
 /// Whether a "+ New …" sidebar action targets the Posts or Pages directory.
