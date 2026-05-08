@@ -625,7 +625,17 @@ pub fn editable_inline(
             EventPropagation::Continue
         })
         .style(move |s| {
-            let s = s.padding_vert(2.).padding_horiz(2.).border_radius(2.);
+            // min_height + width_full give empty blocks a real click target.
+            // Without it the wrapper collapses to ~1 logical px (just the
+            // caret span) and the user has to land the pointer pixel-perfect
+            // on the left edge to focus.
+            let line_h = (f64::from(font_size) * 1.5).max(20.);
+            let s = s
+                .padding_vert(2.)
+                .padding_horiz(2.)
+                .border_radius(2.)
+                .width_full()
+                .min_height(line_h);
             if focused.get() {
                 s.background(Color::rgb8(245, 248, 255))
             } else {
@@ -1659,43 +1669,14 @@ fn emit_run_segments(
     for w in splits.windows(2) {
         let &[lo, hi] = w else { continue };
         if lo < hi {
-            let segment: String = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
+            let segment_text: String = chars.get(lo..hi).unwrap_or(&[]).iter().collect();
             let in_sel = sel_range.is_some_and(|(a, b)| lo >= a && hi <= b);
-            // Emit one widget per word/whitespace chunk so the parent
-            // h_stack's flex_wrap can break between them. A single `text()`
-            // never wraps inside its own box in Floem 0.2.
-            for chunk in word_chunks(&segment) {
-                out.push(run_span(run, chunk, font_size, force_bold, in_sel));
-            }
+            out.push(run_span(run, segment_text, font_size, force_bold, in_sel));
         }
         if Some(hi) == caret_off && hi != 0 {
             out.push(caret_span(font_size).into_any());
         }
     }
-}
-
-/// Split `text` into runs of [non-whitespace, whitespace, non-whitespace, …]
-/// preserving every character. The caller emits one widget per chunk so the
-/// parent flex container can wrap at whitespace boundaries.
-fn word_chunks(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    if text.is_empty() {
-        return out;
-    }
-    let mut buf = String::new();
-    let mut buf_is_ws = false;
-    for ch in text.chars() {
-        let ch_is_ws = ch.is_whitespace();
-        if !buf.is_empty() && ch_is_ws != buf_is_ws {
-            out.push(std::mem::take(&mut buf));
-        }
-        buf_is_ws = ch_is_ws;
-        buf.push(ch);
-    }
-    if !buf.is_empty() {
-        out.push(buf);
-    }
-    out
 }
 
 fn run_span(

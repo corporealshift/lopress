@@ -75,6 +75,17 @@ pub fn block_toolbar_for(
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
             .action(move || {
+                // Commit any uncommitted runs from the active block widget
+                // before changing kind — otherwise the pane rebuild will
+                // pick up the stale `current_doc` body and the user's
+                // unsaved typing in this block silently disappears.
+                if let Some(runs) = focus_pub.runs.get_untracked() {
+                    let current = runs.get_untracked();
+                    on_action_for_btn(BlockAction::EditInline {
+                        block_id,
+                        new_runs: current,
+                    });
+                }
                 on_action_for_btn(BlockAction::ChangeType {
                     block_id,
                     new_kind: kind_for_action.clone(),

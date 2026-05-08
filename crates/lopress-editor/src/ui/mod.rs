@@ -239,7 +239,17 @@ fn editing_view(
             _ => None,
         };
         if let Some(id) = pre_focus.or(post_focus).or(change_type_focus) {
-            focus_target.set(Some(id));
+            // Defer focus_target.set to the next event-loop tick so that the
+            // pane rebuild triggered by `current_doc.update` above has a
+            // chance to mount the new block widget *before* we ask it to
+            // take focus. Setting synchronously fires the OLD widget's
+            // create_effect, which clears focus_target as a side-effect, so
+            // the NEW widget mounts with focus_target already None and never
+            // requests focus — that's the "Enter creates a block but doesn't
+            // focus into it" / "ChangeType silently changes kind" symptom.
+            floem::action::exec_after(Duration::from_millis(0), move |_| {
+                focus_target.set(Some(id));
+            });
         }
         // Split: also move the doc caret into the new block, otherwise the
         // next keystroke routes back to the original block via the cross-
