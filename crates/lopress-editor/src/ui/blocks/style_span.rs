@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::text::{Attrs, AttrsList, FamilyOwned, Style, Weight};
@@ -62,6 +60,8 @@ impl Styling for InlineRunStyling {
             .map(str::len)
             .unwrap_or(0);
         let line_end = line_start + line_len;
+        // Allocated once per apply_attr_styles call, not once per span.
+        let mono_family = [FamilyOwned::Name(MONO_FAMILY.into())];
 
         for span in &spans {
             // Skip spans that don't overlap this logical line.
@@ -76,8 +76,6 @@ impl Styling for InlineRunStyling {
                 continue;
             }
 
-            // mono_family must outlive `a` since Attrs borrows the slice.
-            let mono_family = [FamilyOwned::Name(MONO_FAMILY.into())];
             let mut a = default.clone();
             if span.bold {
                 a = a.weight(Weight::BOLD);
