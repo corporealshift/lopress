@@ -2,25 +2,20 @@
 //!
 //! Reads:
 //!   - focused block kind (for the type label / cycler)
-//!   - the focused block's runs + selection signals (for B/I/code/link
-//!     "active" fill states and to mutate via `toggle_inline`)
+//!   - the focused block's editor + style-span signals (for B/I/code/link
+//!     "active" fill states and to mutate via `apply_style_toggle`)
 //!
 //! Emits:
 //!   - `BlockAction::ChangeType` (via the type-cycler buttons)
 //!   - `BlockAction::Delete`
-//!   - inline-flag toggles applied directly to the focused block's
-//!     `runs`/`selection` signals (matching the inline editor's keyboard
-//!     shortcut path)
+//!   - inline-flag toggles applied via `apply_style_toggle`
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockId, BlockKind, InlineRun};
-use crate::selection::DocPosition;
-use crate::ui::blocks::inline_editor::{
-    toggle_inline, ActionSink, Caret, FocusPublisher, InlineFlag, LocalSelection,
-};
-use crate::ui::sel_ctx::SelectionContext;
+use crate::model::style_span::InlineFlag;
+use crate::model::types::{BlockId, BlockKind};
+use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{SignalGet, SignalWith};
 use floem::text::Weight;
 use floem::views::{button, h_stack_from_iter, label, Decorators};
 use floem::{AnyView, IntoView};
@@ -50,7 +45,6 @@ pub fn block_toolbar_for(
     current_kind: BlockKind,
     focus_pub: FocusPublisher,
     on_action: ActionSink,
-    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     let kinds: Vec<(&'static str, BlockKind)> = vec![
         ("P", BlockKind::Paragraph),
@@ -75,15 +69,15 @@ pub fn block_toolbar_for(
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
             .action(move || {
-                // Commit any uncommitted runs from the active block widget
-                // before changing kind — otherwise the pane rebuild will
-                // pick up the stale `current_doc` body and the user's
-                // unsaved typing in this block silently disappears.
-                if let Some(runs) = focus_pub.runs.get_untracked() {
-                    let current = runs.get_untracked();
+                // Commit current editor text before changing kind.
+                if let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get_untracked() {
+                    let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                    let spans = spans_sig.get_untracked();
+                    let rope = lapce_xi_rope::Rope::from(text.as_str());
+                    let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                     on_action_for_btn(BlockAction::EditInline {
                         block_id,
-                        new_runs: current,
+                        new_runs: new_runs,
                     });
                 }
                 on_action_for_btn(BlockAction::ChangeType {
@@ -113,7 +107,7 @@ pub fn block_toolbar_for(
         ("</>", InlineFlag::Code),
         ("Link", InlineFlag::Link),
     ] {
-        buttons.push(toggle_button(lbl, flag, focus_pub, sel_ctx.clone()).into_any());
+        buttons.push(toggle_button(lbl, flag, focus_pub).into_any());
     }
 
     buttons.push(separator().into_any());
@@ -143,21 +137,17 @@ pub fn block_toolbar_for(
     })
 }
 
-/// One inline-flag toggle button. Active when the (single-block) doc
-/// selection inside the focused block has `flag` set on every overlapping
-/// run; clicking toggles it. No-op when the selection is collapsed or the
-/// selection spans multiple blocks (Task 16 will handle multi-block).
+/// One inline-flag toggle button. Active when the current editor selection
+/// has `flag` set on every overlapping style span; clicking toggles it.
 fn toggle_button(
     lbl: &'static str,
     flag: InlineFlag,
     focus_pub: FocusPublisher,
-    sel_ctx: SelectionContext,
 ) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
-    let sel_ctx_for_label = sel_ctx.clone();
     let lbl_view = label(move || lbl_owned.clone()).style(move |s| {
-        let active = flag_active(focus_pub, flag, &sel_ctx_for_label);
+        let active = flag_active(focus_pub, flag);
         if active {
             s.background(Color::rgb8(210, 220, 240))
                 .font_weight(Weight::BOLD)
@@ -166,123 +156,51 @@ fn toggle_button(
         }
     });
 
-    let sel_ctx_for_action = sel_ctx;
     button(lbl_view)
         .action(move || {
-            let Some(runs) = focus_pub.runs.get_untracked() else {
-                return;
-            };
-            let Some(block_id) = focus_pub.block.get_untracked() else {
-                return;
-            };
-            let local = match focused_local_selection(focus_pub, &sel_ctx_for_action) {
-                Some(l) => l,
-                None => return,
-            };
-            let mut new_local = local;
-            runs.update(|r| {
-                new_local = toggle_inline(r, local, flag);
-            });
-            sel_ctx_for_action
-                .doc_selection
-                .set(crate::selection::DocSelection {
-                    anchor: DocPosition::new(
-                        block_id,
-                        new_local.anchor.run,
-                        new_local.anchor.offset,
-                    ),
-                    head: DocPosition::new(block_id, new_local.head.run, new_local.head.offset),
-                });
+            if let Some((editor_sig, spans_sig, style_rev)) =
+                focus_pub.editor_and_spans.get_untracked()
+            {
+                crate::ui::blocks::inline_editor::apply_style_toggle(
+                    editor_sig, spans_sig, style_rev, flag,
+                );
+            }
         })
         .style(|s| s.padding_horiz(6.).padding_vert(2.))
 }
 
-/// Reads the doc selection and returns it projected as a `LocalSelection` —
-/// but only when both endpoints are inside the focused block. Cross-block
-/// selections currently fall through to `None` (toolbar shortcuts no-op).
-fn focused_local_selection(
-    focus_pub: FocusPublisher,
-    sel_ctx: &SelectionContext,
-) -> Option<LocalSelection> {
-    let block_id = focus_pub.block.get_untracked()?;
-    let doc_sel = sel_ctx.doc_selection.get_untracked();
-    if doc_sel.anchor.block != block_id || doc_sel.head.block != block_id {
-        return None;
-    }
-    Some(LocalSelection {
-        anchor: Caret {
-            run: doc_sel.anchor.run,
-            offset: doc_sel.anchor.offset,
-        },
-        head: Caret {
-            run: doc_sel.head.run,
-            offset: doc_sel.head.offset,
-        },
-    })
-}
-
-/// True if every run inside the focused block's selection has `flag` set.
-/// Returns false when nothing is focused, selection is collapsed, or the
-/// selection spans multiple blocks.
-fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag, sel_ctx: &SelectionContext) -> bool {
-    // Track signals for reactivity.
-    let _ = sel_ctx.doc_selection.get();
-    let runs_opt = focus_pub.runs.get();
-    let sel = match focused_local_selection(focus_pub, sel_ctx) {
-        Some(s) => s,
-        None => return false,
+/// True if every style span inside the current editor selection has `flag` set.
+/// Returns false when nothing is focused or the selection is collapsed.
+fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
+    use floem::views::editor::core::cursor::CursorMode;
+    // Reactive read so the label updates when selection or spans change
+    let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get() else {
+        return false;
     };
-    if sel.is_collapsed() {
+    let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
+        ed.cursor.with_untracked(|c| match &c.mode {
+            CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
+            CursorMode::Normal(offset) => (*offset, *offset),
+            CursorMode::Visual { start, end, .. } => (*start.min(end), *start.max(end)),
+        })
+    });
+    if sel_start >= sel_end {
         return false;
     }
-    let runs = match runs_opt {
-        Some(r) => r,
-        None => return false,
-    };
-    runs.with(|runs| every_run_has_flag(runs, sel, flag))
-}
-
-/// Walk `runs` from the start of the block to the end, tracking the absolute
-/// character span covered by each run, and check whether the portion that
-/// overlaps `sel` has `flag` set on every contributing run. The selection
-/// must be non-empty.
-fn every_run_has_flag(runs: &[InlineRun], sel: LocalSelection, flag: InlineFlag) -> bool {
-    let (start, end) = sel.ordered();
-    let mut acc = 0usize;
-    let mut sel_lo = 0usize;
-    let mut sel_hi = 0usize;
+    let spans = spans_sig.get_untracked();
     let mut saw_any = false;
-    for (i, r) in runs.iter().enumerate() {
-        let len = r.text.chars().count();
-        if i == start.run {
-            sel_lo = acc + start.offset.min(len);
-        }
-        if i == end.run {
-            sel_hi = acc + end.offset.min(len);
-        }
-        acc += len;
-    }
-    if sel_lo >= sel_hi {
-        return false;
-    }
-    let mut acc = 0usize;
-    for r in runs.iter() {
-        let len = r.text.chars().count();
-        let run_lo = acc;
-        let run_hi = acc + len;
-        acc = run_hi;
-        // Does this run overlap the selection?
-        let overlap_lo = run_lo.max(sel_lo);
-        let overlap_hi = run_hi.min(sel_hi);
-        if overlap_lo >= overlap_hi {
+    for span in &spans {
+        let lo = span.start.max(sel_start);
+        let hi = span.end.min(sel_end);
+        if lo >= hi {
             continue;
         }
         saw_any = true;
         let has = match flag {
-            InlineFlag::Bold => r.bold,
-            InlineFlag::Italic => r.italic,
-            InlineFlag::Code => r.code,
-            InlineFlag::Link => r.link.is_some(),
+            InlineFlag::Bold => span.bold,
+            InlineFlag::Italic => span.italic,
+            InlineFlag::Code => span.code,
+            InlineFlag::Link => span.link.is_some(),
         };
         if !has {
             return false;

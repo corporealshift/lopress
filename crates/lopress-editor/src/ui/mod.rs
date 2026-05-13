@@ -1,12 +1,11 @@
 //! Root UI module. Switches between Welcome and Editing views based on `AppState`.
 
 pub mod blocks;
-pub mod clipboard;
 pub mod dnd;
 pub mod editor_pane;
 pub mod footer;
 pub mod inspector;
-pub mod sel_ctx;
+
 pub mod sidebar;
 pub mod slash_menu;
 pub mod toolbar;
@@ -24,14 +23,12 @@ use std::time::Duration;
 
 use crate::actions::{apply, BlockAction};
 use crate::model::types::{BlockId, EditorDoc};
-use crate::selection::{DocPosition, DocSelection, GeometryCache};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
 use crate::ui::footer::{footer_view, serve_url, start_build_status_poll};
 use crate::ui::inspector::inspector_view;
-use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
 use lopress_gui_host::{BuildStatus, DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
@@ -165,18 +162,6 @@ fn editing_view(
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let dnd = DndState::new();
 
-    // Doc-level selection lives here. Initial value is a synthetic caret —
-    // each block's FocusGained handler resets it to a real position when the
-    // user clicks in.
-    let doc_selection: RwSignal<DocSelection> =
-        RwSignal::new(DocSelection::caret(DocPosition::new(BlockId::new(), 0, 0)));
-    let geometry = Rc::new(RefCell::new(GeometryCache::default()));
-    let sel_ctx = SelectionContext {
-        doc_selection,
-        current_doc,
-        geometry,
-    };
-
     // ── Save-debounce signals ────────────────────────────────────────────
     // `dirty_counter` bumps on every legitimate edit; `debounce_action`
     // watches it and runs the save closure 500 ms after the last bump.
@@ -251,12 +236,6 @@ fn editing_view(
                 focus_target.set(Some(id));
             });
         }
-        // Split: also move the doc caret into the new block, otherwise the
-        // next keystroke routes back to the original block via the cross-
-        // block insert path (head.block != typing widget's block_id).
-        if let (BlockAction::Split { .. }, Some(new_id)) = (&action, post_focus) {
-            doc_selection.set(DocSelection::caret(DocPosition::new(new_id, 0, 0)));
-        }
         on_action_mark_dirty();
     });
 
@@ -290,7 +269,7 @@ fn editing_view(
                 focus_target,
                 slash_menu_open,
                 dnd,
-                sel_ctx.clone(),
+                current_doc,
             )
             .into_any(),
             None => empty().into_any(),

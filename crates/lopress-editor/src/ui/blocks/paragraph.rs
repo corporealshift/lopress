@@ -2,11 +2,10 @@
 //! the inline-runs editor widget. The read-only path (used for list items)
 //! lays out one styled `text` element per inline run in a wrapping flex row.
 
-use crate::model::types::{BlockId, InlineRun};
-use crate::ui::blocks::inline_editor::{editable_inline, ActionSink, FocusPublisher};
-use crate::ui::sel_ctx::SelectionContext;
+use crate::model::types::{BlockId, EditorDoc, InlineRun};
+use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline, ActionSink, FocusPublisher};
 use floem::peniko::Color;
-use floem::reactive::RwSignal;
+use floem::reactive::{RwSignal, Scope};
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{h_stack_from_iter, text, Decorators};
@@ -24,24 +23,16 @@ pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 /// Editable paragraph: backed by the inline-runs editor widget so the user
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
 pub fn render_paragraph_editable(
-    runs: RwSignal<Vec<InlineRun>>,
+    runs: &[InlineRun],
     block_id: BlockId,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
-    sel_ctx: SelectionContext,
+    current_doc: RwSignal<Option<EditorDoc>>,
 ) -> impl IntoView {
-    editable_inline(
-        runs,
-        BODY_FONT_SIZE,
-        false,
-        block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        true,
-        sel_ctx,
-    )
+    let cx = Scope::current();
+    let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
+    editable_inline(state, block_id, on_action, focus_target, focus_pub, current_doc, true)
 }
 
 /// Read-only render of a slice of inline runs as a wrapping flex row.

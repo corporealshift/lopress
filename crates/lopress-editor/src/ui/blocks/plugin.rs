@@ -12,11 +12,10 @@
 //!      editable widget the rest of the editor uses.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::blocks::{code, heading, list, paragraph};
 use crate::ui::dnd::DndState;
-use crate::ui::sel_ctx::SelectionContext;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -38,7 +37,7 @@ pub fn plugin_block_view(
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
-    sel_ctx: SelectionContext,
+    current_doc: RwSignal<Option<EditorDoc>>,
     _dnd: DndState,
 ) -> AnyView {
     let block_id = block.id;
@@ -65,7 +64,7 @@ pub fn plugin_block_view(
     let on_action_for_attrs = on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    let body = render_body(block, on_action.clone(), focus_target, focus_pub, sel_ctx);
+    let body = render_body(block, on_action.clone(), focus_target, focus_pub, current_doc);
 
     v_stack((header, form, body))
         .style(|s| {
@@ -282,32 +281,30 @@ fn render_body(
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
-    sel_ctx: SelectionContext,
+    current_doc: RwSignal<Option<EditorDoc>>,
 ) -> AnyView {
     let block_id = block.id;
     match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            let runs_sig = RwSignal::new(runs.clone());
             paragraph::render_paragraph_editable(
-                runs_sig,
+                runs,
                 block_id,
                 on_action,
                 focus_target,
                 focus_pub,
-                sel_ctx,
+                current_doc,
             )
             .into_any()
         }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            let runs_sig = RwSignal::new(runs.clone());
             heading::render_heading_editable(
                 *level,
-                runs_sig,
+                runs,
                 block_id,
                 on_action,
                 focus_target,
                 focus_pub,
-                sel_ctx,
+                current_doc,
             )
             .into_any()
         }

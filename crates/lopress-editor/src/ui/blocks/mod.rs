@@ -15,10 +15,9 @@ pub mod plugin;
 pub mod style_span;
 
 
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
-use crate::ui::sel_ctx::SelectionContext;
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -34,7 +33,7 @@ pub fn block_view(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     dnd: DndState,
-    sel_ctx: SelectionContext,
+    current_doc: RwSignal<Option<EditorDoc>>,
 ) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
@@ -47,7 +46,7 @@ pub fn block_view(
             on_action.clone(),
             focus_target,
             focus_pub,
-            sel_ctx.clone(),
+            current_doc,
             dnd,
         );
         // The toolbar slot still mounts above plugin blocks so kind / B / I
@@ -55,7 +54,6 @@ pub fn block_view(
         let toolbar_slot = {
             let on_action = on_action.clone();
             let kind_for_slot = kind.clone();
-            let sel_ctx_for_slot = sel_ctx.clone();
             dyn_container(
                 move || focus_pub.block.get() == Some(block_id),
                 move |is_focused| {
@@ -65,7 +63,6 @@ pub fn block_view(
                             kind_for_slot.clone(),
                             focus_pub,
                             on_action.clone(),
-                            sel_ctx_for_slot.clone(),
                         )
                         .into_any()
                     } else {
@@ -82,28 +79,26 @@ pub fn block_view(
 
     let body = match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            let runs_sig = RwSignal::new(runs.clone());
             paragraph::render_paragraph_editable(
-                runs_sig,
+                runs,
                 block.id,
                 on_action.clone(),
                 focus_target,
                 focus_pub,
-                sel_ctx.clone(),
+                current_doc,
             )
             .style(|s| s.padding_vert(6.))
             .into_any()
         }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            let runs_sig = RwSignal::new(runs.clone());
             heading::render_heading_editable(
                 *level,
-                runs_sig,
+                runs,
                 block.id,
                 on_action.clone(),
                 focus_target,
                 focus_pub,
-                sel_ctx.clone(),
+                current_doc,
             )
             .into_any()
         }
@@ -126,7 +121,6 @@ pub fn block_view(
     let toolbar_slot = {
         let on_action = on_action.clone();
         let kind_for_slot = kind.clone();
-        let sel_ctx_for_slot = sel_ctx.clone();
         dyn_container(
             move || focus_pub.block.get() == Some(block_id),
             move |is_focused| {
@@ -136,7 +130,6 @@ pub fn block_view(
                         kind_for_slot.clone(),
                         focus_pub,
                         on_action.clone(),
-                        sel_ctx_for_slot.clone(),
                     )
                     .into_any()
                 } else {

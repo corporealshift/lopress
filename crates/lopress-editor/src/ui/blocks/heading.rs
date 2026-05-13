@@ -3,11 +3,10 @@
 //! editor at the appropriate font size; the read-only path is preserved for
 //! callers that don't yet need editing.
 
-use crate::model::types::{BlockId, InlineRun};
-use crate::ui::blocks::inline_editor::{editable_inline, ActionSink, FocusPublisher};
+use crate::model::types::{BlockId, EditorDoc, InlineRun};
+use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline, ActionSink, FocusPublisher};
 use crate::ui::blocks::paragraph::render_runs_with_size;
-use crate::ui::sel_ctx::SelectionContext;
-use floem::reactive::RwSignal;
+use floem::reactive::{RwSignal, Scope};
 use floem::views::Decorators;
 use floem::IntoView;
 
@@ -25,25 +24,17 @@ fn font_size_for(level: u8) -> f32 {
 /// Editable heading: inline-runs editor at the level's font size, semibold.
 pub fn render_heading_editable(
     level: u8,
-    runs: RwSignal<Vec<InlineRun>>,
+    runs: &[InlineRun],
     block_id: BlockId,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
-    sel_ctx: SelectionContext,
+    current_doc: RwSignal<Option<EditorDoc>>,
 ) -> impl IntoView {
-    editable_inline(
-        runs,
-        font_size_for(level),
-        true,
-        block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        false,
-        sel_ctx,
-    )
-    .style(|s| s.padding_top(16.).padding_bottom(8.))
+    let cx = Scope::current();
+    let state = build_block_editor(cx, runs, font_size_for(level) as usize);
+    editable_inline(state, block_id, on_action, focus_target, focus_pub, current_doc, false)
+        .style(|s| s.padding_top(16.).padding_bottom(8.))
 }
 
 /// Read-only heading rendering, kept for any non-editable surfaces.
