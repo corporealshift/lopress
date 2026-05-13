@@ -31,7 +31,16 @@ pub fn inline_runs_to_rope_and_spans(runs: &[InlineRun]) -> (Rope, Vec<StyleSpan
 }
 
 /// Reconstruct `Vec<InlineRun>` from a `Rope` and its style spans.
+///
 /// Produces one `InlineRun` per span; `\n` in span text is preserved.
+///
+/// **Precondition:** `spans` must form a contiguous partition of `[0, rope.len())`.
+/// Bytes not covered by any span are silently dropped. This invariant is guaranteed
+/// by `inline_runs_to_rope_and_spans` and must be maintained by callers that
+/// mutate spans directly.
+///
+/// This function is designed for per-block usage. Calling it on a large rope
+/// (document-level) allocates O(N) in document size.
 pub fn rope_and_spans_to_runs(rope: &Rope, spans: &[StyleSpan]) -> Vec<InlineRun> {
     let full = String::from(rope);
     spans
