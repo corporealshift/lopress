@@ -1,4 +1,4 @@
-use lopress_editor::ui::blocks::style_span::{
+use lopress_editor::model::style_span::{
     coalesce_spans, split_span_at, toggle_inline, InlineFlag, StyleSpan,
 };
 
