@@ -1,104 +1,115 @@
-/// Byte-offset span with inline style flags. `start` is inclusive, `end`
-/// exclusive, both measured in UTF-8 bytes from the block's rope start.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StyleSpan {
-    pub start: usize,
-    pub end: usize,
-    pub bold: bool,
-    pub italic: bool,
-    pub code: bool,
-    pub link: Option<String>,
+use std::ops::Range;
+
+use floem::peniko::Color;
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
+use floem::text::{Attrs, AttrsList, FamilyOwned, Style, Weight};
+use floem::views::editor::id::EditorId;
+use floem::views::editor::layout::TextLayoutLine;
+use floem::views::editor::text::Styling;
+use floem::views::editor::EditorStyle;
+
+use crate::model::style_span::StyleSpan;
+
+const LINK_COLOR: Color = Color::rgb8(0x22, 0x7C, 0xBB);
+const MONO_FAMILY: &str = "monospace";
+
+/// Implements Floem's `Styling` trait to apply `Vec<StyleSpan>` attributes
+/// (bold/italic/code/link) to the native editor's text layout.
+///
+/// `text` is the full block text, kept in sync with the rope so
+/// `apply_attr_styles` can compute line-start byte offsets for multi-line
+/// blocks (blocks with `\n` from Shift+Enter soft breaks).
+///
+/// `rev` is bumped whenever `spans` changes, causing Floem to invalidate its
+/// text-layout cache and re-run `apply_attr_styles`.
+pub struct InlineRunStyling {
+    pub spans: RwSignal<Vec<StyleSpan>>,
+    pub text: RwSignal<String>,
+    pub rev: RwSignal<u64>,
+    pub font_size: usize,
 }
 
-impl StyleSpan {
-    pub fn plain(start: usize, end: usize) -> Self {
-        Self { start, end, bold: false, italic: false, code: false, link: None }
+impl Styling for InlineRunStyling {
+    fn id(&self) -> u64 {
+        self.rev.get_untracked()
     }
 
-    pub fn same_style(&self, other: &StyleSpan) -> bool {
-        self.bold == other.bold
-            && self.italic == other.italic
-            && self.code == other.code
-            && self.link == other.link
+    fn font_size(&self, _edid: EditorId, _line: usize) -> usize {
+        self.font_size
     }
-}
 
-/// Which inline attribute a toolbar/keyboard shortcut toggles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InlineFlag {
-    Bold,
-    Italic,
-    Code,
-    Link,
-}
+    fn apply_attr_styles(
+        &self,
+        _edid: EditorId,
+        _style: &EditorStyle,
+        line: usize,
+        default: Attrs,
+        attrs: &mut AttrsList,
+    ) {
+        let spans = self.spans.get_untracked();
+        let full_text = self.text.get_untracked();
 
-/// Split the span that straddles `abs` into two spans at that byte boundary.
-/// No-op if `abs` falls on an existing span boundary or outside all spans.
-pub fn split_span_at(spans: &mut Vec<StyleSpan>, abs: usize) {
-    let Some(i) = spans.iter().position(|s| s.start < abs && abs < s.end) else {
-        return;
-    };
-    let Some(span) = spans.get(i).cloned() else { return };
-    let left = StyleSpan { start: span.start, end: abs, ..span.clone() };
-    let right = StyleSpan { start: abs, end: span.end, ..span };
-    spans.splice(i..=i, [left, right]);
-}
+        // Compute byte offset of the start of logical line `line`.
+        // Logical lines are delimited by '\n' (inserted by Shift+Enter).
+        let line_start: usize = full_text
+            .split('\n')
+            .take(line)
+            .map(|l| l.len() + 1)  // +1 for the '\n' byte
+            .sum();
+        let line_len: usize = full_text
+            .split('\n')
+            .nth(line)
+            .map(str::len)
+            .unwrap_or(0);
+        let line_end = line_start + line_len;
 
-/// Merge adjacent spans that share the same style and are contiguous.
-pub fn coalesce_spans(spans: &mut Vec<StyleSpan>) {
-    let mut i = 0;
-    while i + 1 < spans.len() {
-        let merge = spans.get(i).zip(spans.get(i + 1))
-            .map(|(a, b)| a.end == b.start && a.same_style(b))
-            .unwrap_or(false);
-        if merge {
-            let b_end = spans.get(i + 1).map(|s| s.end).unwrap_or(0);
-            if let Some(a) = spans.get_mut(i) {
-                a.end = b_end;
+        for span in &spans {
+            // Skip spans that don't overlap this logical line.
+            if span.end <= line_start || span.start >= line_end {
+                continue;
             }
-            spans.remove(i + 1);
-        } else {
-            i += 1;
+
+            // Clip to line boundaries and convert to line-relative offsets.
+            let local_start = span.start.saturating_sub(line_start);
+            let local_end = span.end.min(line_end) - line_start;
+            if local_start >= local_end {
+                continue;
+            }
+
+            // mono_family must outlive `a` since Attrs borrows the slice.
+            let mono_family = [FamilyOwned::Name(MONO_FAMILY.into())];
+            let mut a = default.clone();
+            if span.bold {
+                a = a.weight(Weight::BOLD);
+            }
+            if span.italic {
+                a = a.style(Style::Italic);
+            }
+            if span.code {
+                a = a.family(&mono_family);
+            }
+            if span.link.is_some() {
+                a = a.color(LINK_COLOR);
+            }
+            attrs.add_span(local_start..local_end, a);
         }
     }
+
+    fn apply_layout_styles(
+        &self,
+        _edid: EditorId,
+        _style: &EditorStyle,
+        _line: usize,
+        _layout_line: &mut TextLayoutLine,
+    ) {
+        // No layout-level overrides needed for inline styling.
+    }
 }
 
-/// Toggle `flag` across `[sel_start, sel_end)` (byte offsets).
-/// If every overlapping span already has the flag, clears it; otherwise sets.
-/// A collapsed selection (`sel_start == sel_end`) is a no-op.
-pub fn toggle_inline(
-    spans: &mut Vec<StyleSpan>,
-    sel_start: usize,
-    sel_end: usize,
-    flag: InlineFlag,
-) {
-    if sel_start >= sel_end || spans.is_empty() {
-        return;
+impl InlineRunStyling {
+    /// Bump the revision counter so Floem's text-layout cache is invalidated.
+    /// Call this after mutating `spans`.
+    pub fn bump_rev(&self) {
+        self.rev.update(|r| *r = r.wrapping_add(1));
     }
-    let all_set = spans
-        .iter()
-        .filter(|s| s.start < sel_end && s.end > sel_start)
-        .all(|s| match flag {
-            InlineFlag::Bold => s.bold,
-            InlineFlag::Italic => s.italic,
-            InlineFlag::Code => s.code,
-            InlineFlag::Link => s.link.is_some(),
-        });
-    let new_value = !all_set;
-    // Split higher boundary first so the lower index stays valid.
-    split_span_at(spans, sel_end);
-    split_span_at(spans, sel_start);
-    for span in spans.iter_mut() {
-        if span.start >= sel_start && span.end <= sel_end {
-            match flag {
-                InlineFlag::Bold => span.bold = new_value,
-                InlineFlag::Italic => span.italic = new_value,
-                InlineFlag::Code => span.code = new_value,
-                InlineFlag::Link => {
-                    span.link = if new_value { Some(String::new()) } else { None };
-                }
-            }
-        }
-    }
-    coalesce_spans(spans);
 }
