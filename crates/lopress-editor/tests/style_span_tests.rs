@@ -55,7 +55,7 @@ fn test_toggle_clears_flag_when_all_set() {
 fn test_toggle_collapsed_selection_noop() {
     let mut spans = vec![plain(0, 10)];
     toggle_inline(&mut spans, 5, 5, InlineFlag::Bold);
-    assert!(!spans.get(0).unwrap().bold);
+    assert!(spans.first().map(|s| !s.bold).unwrap_or(false));
 }
 
 #[test]
@@ -63,9 +63,9 @@ fn test_toggle_partial_range() {
     let mut spans = vec![plain(0, 10)];
     toggle_inline(&mut spans, 2, 7, InlineFlag::Italic);
     assert_eq!(spans.len(), 3);
-    assert!(!spans[0].italic);
-    assert!(spans[1].italic);
-    assert!(!spans[2].italic);
+    assert!(spans.get(0).map(|s| !s.italic).unwrap_or(false));
+    assert!(spans.get(1).map(|s| s.italic).unwrap_or(false));
+    assert!(spans.get(2).map(|s| !s.italic).unwrap_or(false));
 }
 
 #[test]

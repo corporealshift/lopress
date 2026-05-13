@@ -38,7 +38,7 @@ pub fn split_span_at(spans: &mut Vec<StyleSpan>, abs: usize) {
     let Some(i) = spans.iter().position(|s| s.start < abs && abs < s.end) else {
         return;
     };
-    let span = spans[i].clone();
+    let Some(span) = spans.get(i).cloned() else { return };
     let left = StyleSpan { start: span.start, end: abs, ..span.clone() };
     let right = StyleSpan { start: abs, end: span.end, ..span };
     spans.splice(i..=i, [left, right]);
@@ -48,10 +48,14 @@ pub fn split_span_at(spans: &mut Vec<StyleSpan>, abs: usize) {
 pub fn coalesce_spans(spans: &mut Vec<StyleSpan>) {
     let mut i = 0;
     while i + 1 < spans.len() {
-        let merge = spans[i].end == spans[i + 1].start
-            && spans[i].same_style(&spans[i + 1]);
+        let merge = spans.get(i).zip(spans.get(i + 1))
+            .map(|(a, b)| a.end == b.start && a.same_style(b))
+            .unwrap_or(false);
         if merge {
-            spans[i].end = spans[i + 1].end;
+            let b_end = spans.get(i + 1).map(|s| s.end).unwrap_or(0);
+            if let Some(a) = spans.get_mut(i) {
+                a.end = b_end;
+            }
             spans.remove(i + 1);
         } else {
             i += 1;
