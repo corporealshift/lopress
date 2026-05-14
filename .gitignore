@@ -4,3 +4,4 @@
 **/*.rs.bk
 /www
 /**/www
+.qwen-delegations/

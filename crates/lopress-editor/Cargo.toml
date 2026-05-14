@@ -9,6 +9,7 @@ lopress-gui-host = { path = "../lopress-gui-host" }
 lopress-core = { path = "../lopress-core" }
 lopress-plugin = { path = "../lopress-plugin" }
 floem = { workspace = true }
+lapce-xi-rope = { workspace = true }
 pulldown-cmark = { workspace = true }
 rfd = { workspace = true }
 open = { workspace = true }
