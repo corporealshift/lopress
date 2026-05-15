@@ -272,14 +272,22 @@ fn png_header() -> tiny_http::Header {
 fn screenshot() -> Result<Vec<u8>, String> {
     use std::mem;
 
-    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
-        SRCCOPY,
+        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetClientRect};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GetClientRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
     use windows::core::PCWSTR;
+
+    // Temporarily make the window topmost so DWM composites its wgpu surface
+    // to the screen, then capture from the screen DC at the client-area origin.
+    // BitBlt from the window DC misses wgpu content when the window is in the
+    // background; the screen DC captures what's actually composited by DWM.
+    const HWND_TOPMOST: HWND = HWND(-1);
+    const HWND_NOTOPMOST: HWND = HWND(-2);
 
     unsafe {
         let title: Vec<u16> = "lopress\0".encode_utf16().collect();
@@ -296,13 +304,26 @@ fn screenshot() -> Result<Vec<u8>, String> {
             return Err("window has zero size".to_string());
         }
 
-        let hdc_src = GetDC(hwnd);
-        let hdc_dst = CreateCompatibleDC(hdc_src);
-        let hbm = CreateCompatibleBitmap(hdc_src, width, height);
+        // Bring window to the very top (TOPMOST) so its wgpu content is
+        // composited by DWM, then capture from the screen at the client origin.
+        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Find screen position of the client area origin.
+        let mut origin = POINT { x: 0, y: 0 };
+        windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut origin);
+
+        // Capture from the screen DC at the client area position.
+        let hdc_screen = GetDC(HWND(0)); // desktop DC
+        let hdc_dst = CreateCompatibleDC(hdc_screen);
+        let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
         let old = SelectObject(hdc_dst, hbm);
 
-        BitBlt(hdc_dst, 0, 0, width, height, hdc_src, 0, 0, SRCCOPY)
+        BitBlt(hdc_dst, 0, 0, width, height, hdc_screen, origin.x, origin.y, SRCCOPY)
             .map_err(|e| e.to_string())?;
+
+        // Restore to non-topmost.
+        let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
         let pixel_count =
             usize::try_from(width).unwrap_or(0) * usize::try_from(height).unwrap_or(0);
@@ -334,7 +355,7 @@ fn screenshot() -> Result<Vec<u8>, String> {
         SelectObject(hdc_dst, old);
         DeleteObject(hbm);
         DeleteDC(hdc_dst);
-        ReleaseDC(hwnd, hdc_src);
+        ReleaseDC(HWND(0), hdc_screen);
 
         // BGRA → RGBA
         for chunk in pixels.chunks_exact_mut(4) {
