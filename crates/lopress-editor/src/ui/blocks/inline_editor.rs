@@ -11,9 +11,10 @@ use floem::views::editor::gutter::GutterClass;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::text_document::TextDocument;
+use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::view::editor_container_view;
 use floem::views::editor::Editor;
-use floem::views::Decorators;
+use floem::views::{stack, Decorators};
 use floem::IntoView;
 use floem::views::editor::core::cursor::CursorAffinity;
 use lapce_xi_rope::Rope;
@@ -105,14 +106,24 @@ pub fn editable_inline(
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
+    let text_sig = state.text_sig;
 
     let on_action_for_key = on_action;
 
+    // Build the default command handler once; it handles arrow navigation,
+    // backspace deletion, etc. via the editor's built-in keymap.
+    // We call it explicitly because editor_container_view discards the return
+    // value of our closure (see view.rs:1172 — semicolon), so returning
+    // CommandExecuted::No does NOT automatically fall through to any default.
+    let default_kp_handler = default_key_handler(editor_sig);
+
     let view = editor_container_view(
         editor_sig,
-        |_| true,
+        // Only show the cursor for the block that actually has keyboard focus.
+        // Passing |_| true causes every block to paint a cursor permanently.
+        move |_| editor_sig.with_untracked(|ed| ed.active.get()),
         move |kp, ms| {
-            handle_key(
+            let result = handle_key(
                 kp,
                 ms,
                 editor_sig,
@@ -122,7 +133,15 @@ pub fn editable_inline(
                 &on_action_for_key,
                 focus_target,
                 current_doc,
-            )
+            );
+            // If we consumed the key (block-level action), stop here.
+            // Otherwise delegate to the editor's built-in command dispatch
+            // so that arrow keys, backspace, etc. work normally.
+            if result == CommandExecuted::Yes {
+                result
+            } else {
+                default_kp_handler(kp, ms)
+            }
         },
     );
 
@@ -150,9 +169,20 @@ pub fn editable_inline(
         }
     });
 
-    // Hide the line-number gutter via Style::class override on the container.
-    view.into_any()
-        .style(|s| s.class(GutterClass, |s| s.hide()).width_full())
+    // `editor_container_view` returns a stack with `.absolute().size_pct(100%)`
+    // baked in.  `AnyView = Box<dyn View>` delegates its ViewId to the inner
+    // view, so `.into_any().style()` modifies the inner absolute stack in-place
+    // — leaving it out of normal flow and contributing zero height to the block
+    // list.  Wrapping with `stack((view,))` creates a NEW layout node that IS
+    // in normal flow; the inner absolute stack then fills it via size_pct(100%).
+    let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
+    stack((view,))
+        .style(move |s| {
+            let lines = text_sig.get().split('\n').count().max(1) as f32;
+            s.class(GutterClass, |s| s.hide())
+                .width_full()
+                .height(lines * line_height)
+        })
 }
 
 // ── Key handler ──────────────────────────────────────────────────────────────
