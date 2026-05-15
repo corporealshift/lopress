@@ -62,7 +62,7 @@ pub struct ListItem {
     pub runs: Vec<InlineRun>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct InlineRun {
     pub text: String,
     pub bold: bool,

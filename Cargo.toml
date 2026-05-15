@@ -20,7 +20,7 @@ license = "TBD"
 repository = "https://github.com/kdiedrick/lopress"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 unreachable_pub = "warn"
 
 [workspace.lints.clippy]

@@ -41,7 +41,14 @@ const MAX_RECENTS: usize = 5;
 /// `settings_signal` is pre-created by the caller so the window-close handler
 /// in `lib.rs` can read the latest settings (recents + geometry) for
 /// persistence.
-pub fn root_view(ctx: AppContext, settings_signal: RwSignal<Settings>) -> impl IntoView {
+pub(crate) fn root_view(
+    ctx: AppContext,
+    settings_signal: RwSignal<Settings>,
+    #[cfg(debug_assertions)] ctrl_handle: crate::ctrl::CtrlHandle,
+    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlAction,
+    >,
+) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
 
@@ -90,13 +97,35 @@ pub fn root_view(ctx: AppContext, settings_signal: RwSignal<Settings>) -> impl I
 
     let editing_for_view = Rc::clone(&editing);
 
+    #[cfg(debug_assertions)]
+    let ctrl_once: Rc<
+        std::cell::RefCell<
+            Option<(
+                crate::ctrl::CtrlHandle,
+                crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+            )>,
+        >,
+    > = Rc::new(std::cell::RefCell::new(Some((ctrl_handle, ctrl_action_rx))));
+    #[cfg(debug_assertions)]
+    let ctrl_once_for_view = Rc::clone(&ctrl_once);
+
     dyn_container(
         move || state_tag.get(),
         move |tag| match tag {
             StateTag::Welcome => {
                 welcome::welcome_view(welcome_signal, settings_signal, on_open.clone()).into_any()
             }
-            StateTag::Editing => editing_view(Rc::clone(&editing_for_view), current_doc).into_any(),
+            StateTag::Editing => {
+                #[cfg(debug_assertions)]
+                let ctrl = ctrl_once_for_view.borrow_mut().take();
+                editing_view(
+                    Rc::clone(&editing_for_view),
+                    current_doc,
+                    #[cfg(debug_assertions)]
+                    ctrl,
+                )
+                .into_any()
+            }
         },
     )
     .style(|s| s.width_full().height_full())
@@ -107,6 +136,10 @@ pub fn root_view(ctx: AppContext, settings_signal: RwSignal<Settings>) -> impl I
 fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    #[cfg(debug_assertions)] ctrl: Option<(
+        crate::ctrl::CtrlHandle,
+        crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+    )>,
 ) -> impl IntoView {
     // Snapshot the workspace once at view-build time. Sidebar actions
     // (new post / new page) call `session.rescan()` and then update this
@@ -343,6 +376,37 @@ fn editing_view(
         current_doc,
         serve_url_str,
     );
+
+    // ── Debug ctrl wiring ────────────────────────────────────────────────────
+    #[cfg(debug_assertions)]
+    if let Some((ctrl_handle, ctrl_action_rx)) = ctrl {
+        use floem::ext_event::create_signal_from_channel;
+        use floem::reactive::create_effect;
+
+        let snap = ctrl_handle.snapshot.clone();
+        create_effect(move |_| {
+            let json = current_doc.with(|maybe| {
+                crate::ctrl::serialize_state(
+                    maybe.as_ref(),
+                    current_path.get_untracked().as_deref(),
+                )
+            });
+            *snap.lock().unwrap_or_else(|e| e.into_inner()) = json;
+        });
+
+        let action_read = create_signal_from_channel(ctrl_action_rx);
+        create_effect(move |_| {
+            if let Some(action) = action_read.get() {
+                current_doc.update(|maybe| {
+                    if let Some(doc) = maybe {
+                        if let Some(block_action) = action.into_block_action(doc) {
+                            crate::actions::apply(doc, block_action);
+                        }
+                    }
+                });
+            }
+        });
+    }
 
     let columns = h_stack((sidebar, editor, inspector)).style(|s| s.width_full().flex_grow(1.0));
 

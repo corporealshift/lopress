@@ -1,4 +1,6 @@
 pub mod actions;
+#[cfg(debug_assertions)]
+pub(crate) mod ctrl;
 pub mod model;
 pub mod recents;
 pub mod settings;
@@ -48,6 +50,9 @@ pub fn run() -> Result<(), AppError> {
     let settings_signal: RwSignal<Settings> = RwSignal::new(Settings::default());
     let settings_for_close = settings_signal;
 
+    #[cfg(debug_assertions)]
+    let (ctrl_handle, ctrl_action_rx) = ctrl::start();
+
     Application::new()
         .on_event(move |event| {
             // WillTerminate fires just before the event loop exits.
@@ -61,7 +66,14 @@ pub fn run() -> Result<(), AppError> {
         })
         .window(
             move |window_id| {
-                let view = ui::root_view(ctx, settings_signal);
+                let view = ui::root_view(
+                    ctx,
+                    settings_signal,
+                    #[cfg(debug_assertions)]
+                    ctrl_handle,
+                    #[cfg(debug_assertions)]
+                    ctrl_action_rx,
+                );
 
                 // On window close: capture current geometry and persist.
                 view.on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
