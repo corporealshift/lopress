@@ -6,6 +6,7 @@ pub mod recents;
 pub mod settings;
 pub mod state;
 pub mod ui;
+pub mod undo;
 
 use floem::event::{Event, EventListener};
 use floem::kurbo::{Point, Size};
