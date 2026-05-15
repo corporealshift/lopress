@@ -163,6 +163,7 @@ pub fn editable_inline(
             editor_sig.with_untracked(|ed| {
                 if let Some(view_id) = ed.editor_view_id.get_untracked() {
                     view_id.request_focus();
+                    view_id.scroll_to(None);
                 }
             });
             focus_target.set(None);
