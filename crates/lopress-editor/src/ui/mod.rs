@@ -272,6 +272,11 @@ fn editing_view(
         on_action_mark_dirty();
     });
 
+    // Cloned for the debug ctrl wiring near the end of this function;
+    // `on_action` itself is moved into the dyn_container view closure.
+    #[cfg(debug_assertions)]
+    let on_action_for_ctrl = on_action.clone();
+
     // Key the editor-pane rebuild on the *shape* of the doc — block id
     // sequence + per-block kind tag + plugin presence — not the full
     // content. Within-block text edits (which fire EditInline →
@@ -396,14 +401,12 @@ fn editing_view(
 
         let action_read = create_signal_from_channel(ctrl_action_rx);
         create_effect(move |_| {
-            if let Some(action) = action_read.get() {
-                current_doc.update(|maybe| {
-                    if let Some(doc) = maybe {
-                        if let Some(block_action) = action.into_block_action(doc) {
-                            crate::actions::apply(doc, block_action);
-                        }
-                    }
-                });
+            if let Some(ctrl_action) = action_read.get() {
+                let block_action = current_doc
+                    .with_untracked(|d| ctrl_action.into_block_action(d.as_ref()?));
+                if let Some(action) = block_action {
+                    on_action_for_ctrl(action);
+                }
             }
         });
     }
