@@ -84,6 +84,13 @@ not occluded.
 
 ## Could not verify through the control harness
 
+> **Resolved 2026-05-16.** The harness input injection was rewritten to use
+> `SendInput` (real Windows input pipeline) with foreground activation, in
+> place of `PostMessage`. Live-verified: `/input` text now types into the
+> editor and `ctrl+…` chords register (e.g. `ctrl+a` selects all). `parse_key`
+> gained `pageup`/`pagedown` and layout-aware single-character keys. The
+> limitations below stood at the time of the original run.
+
 The harness's input injection has gaps that blocked live testing of several
 Phase 3 keyboard features. These are **harness limitations**, not confirmed
 editor bugs — the affected features should be exercised by hand, and the

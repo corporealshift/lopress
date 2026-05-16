@@ -72,7 +72,9 @@ Invoke-RestMethod -Uri http://127.0.0.1:7878/action -Method Post -Body $body
 ```
 `/click` body: `{"x":400,"y":300}` — client-area coords, top-left = 0,0.
 
-Modifiers: `ctrl`, `shift`, `alt`. Keys: `a`–`z`, `0`–`9`, `enter`, `backspace`, `delete`, `tab`, `escape`, `up`/`down`/`left`/`right`, `home`, `end`, `f1`–`f12`.
+Modifiers: `ctrl`, `shift`, `alt`. Keys: `enter`, `backspace`, `delete`, `tab`, `escape`, `space`, `up`/`down`/`left`/`right`, `home`, `end`, `pageup`/`pagedown`, `f1`–`f12`, and any single printable character (resolved against the active keyboard layout, so `/`, `?`, etc. work).
+
+Input goes through `SendInput` (the real Windows input pipeline), so winit sees correct key text and modifier state. `/input` first brings the lopress window to the foreground; if it cannot, it returns `400` rather than injecting keystrokes into another app.
 
 ## Screenshot workflow
 
@@ -86,25 +88,20 @@ Then `Read` the PNG to view it. Capturing briefly raises the window to topmost (
 1. `cargo run` in background → `/ping` until `ok`.
 2. `/state` → record current block ids (they change after every structural action).
 3. Apply a change: `/action` for doc edits, `/input`/`/click` for input-path testing.
-4. `/state` again to confirm the effect — **re-fetch, never reuse stale ids**.
-5. `/screenshot` for visual confirmation.
+4. Confirm the effect: `/state` for `/action` changes (**re-fetch, never reuse stale ids**); `/screenshot` for `/input`-typed text (see below).
 
-## Known limitations
+## `/input` vs `/state` — committed vs buffered edits
 
-The control harness has gaps (documented in `docs/superpowers/plans/2026-05-16-control-verification-findings.md`). Treat input-injection failures as *harness* limits, not editor bugs, until verified by hand:
+`/input`-typed text lands in the **inline editor's live buffer** and is visible immediately in `/screenshot`, but it does **not** appear in `/state` until the edit is committed to the document model (the editor commits on structural actions; a plain blur may not). So:
 
-| Limitation | Impact |
-|---|---|
-| `/input` text/keys go via `PostMessage` (`WM_CHAR`/`WM_KEYDOWN`); winit may not register them — especially modified chords | Free-text typing and `ctrl+…` shortcuts may silently no-op |
-| `parse_key` has no `pageup`/`pagedown` | Cannot test Page Up/Down via `/keys` |
-| `parse_key` maps any 1-char string to the uppercased char's VK | Non-letter keys like `/` are wrong |
-
-When `/input` fails to take effect, fall back to `/action` (reliable) or note the feature needs manual testing. Do **not** report an editor bug based solely on a non-responsive `/input` call.
+- After `/input` text/keys, verify with `/screenshot`, not `/state`.
+- Use `/action` when you need a change reflected in `/state` and persisted to disk.
 
 ## Common mistakes
 
 - **Running `--release`** — the server is `#[cfg(debug_assertions)]`; nothing binds. Use `cargo run`.
 - **Reusing block ids** after a `Split`/`Delete`/`Merge`/`Move` — always re-`/state` first.
 - **Acting before a doc is open** — `/action` is a silent no-op when `doc_open` is false.
-- **Concluding a bug from a dead `/input`** — verify against the harness limitations above first.
-- **Forgetting the editor blocks the foreground** — `/screenshot` and `/click` briefly reorder windows; that flicker is expected.
+- **Checking `/state` after `/input` typing** — buffered edits show in `/screenshot`, not `/state`, until committed.
+- **Typing into an unfocused block** — `/click` the target block first; `/input` types wherever the caret is.
+- **Forgetting the editor blocks the foreground** — `/screenshot`, `/click`, and `/input` briefly reorder/activate the window; that flicker is expected.
