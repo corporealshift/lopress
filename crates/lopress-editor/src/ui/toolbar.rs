@@ -86,10 +86,7 @@ pub fn block_toolbar_for(
                     let spans = spans_sig.get_untracked();
                     let rope = lapce_xi_rope::Rope::from(text.as_str());
                     let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                    on_action_for_btn(BlockAction::EditInline {
-                        block_id,
-                        new_runs: new_runs,
-                    });
+                    on_action_for_btn(BlockAction::EditInline { block_id, new_runs });
                 }
                 on_action_for_btn(BlockAction::ChangeType {
                     block_id,
@@ -205,7 +202,7 @@ pub fn block_toolbar_for(
                             }
                         })
                         .style(|s| s.flex_grow(1.0).font_size(13.)),
-                    button(label(|| "Remove".to_string())).action(move || remove()),
+                    button(label(|| "Remove".to_string())).action(remove),
                 ))
                 .style(|s| s.gap(4.).width_full().padding_horiz(6.).padding_vert(4.))
                 .into_any()

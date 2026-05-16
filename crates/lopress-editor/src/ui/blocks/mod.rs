@@ -27,6 +27,7 @@ use std::rc::Rc;
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
 /// other kinds remain read-only for now.
+#[allow(clippy::too_many_arguments)]
 pub fn block_view(
     block: &EditorBlock,
     on_action: ActionSink,

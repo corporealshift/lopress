@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 
 use lopress_editor::actions::BlockAction;
 use lopress_editor::model::types::{BlockKind, EditorBlock, EditorDoc, InlineRun};

@@ -24,19 +24,22 @@ use std::rc::Rc;
 /// through the `actions::apply` chokepoint.
 pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
+/// The focused block's editor signal, style-span signal, style-revision
+/// counter, and link-URL signal — published so the toolbar can reach the
+/// active editor.
+pub type EditorHandles = (
+    RwSignal<Editor>,
+    RwSignal<Vec<StyleSpan>>,
+    RwSignal<u64>,
+    RwSignal<Option<String>>,
+);
+
 /// Pane-level slot that the focused block publishes to so the toolbar
 /// can reach the focused block's editor and style-span signals.
 #[derive(Clone, Copy)]
 pub struct FocusPublisher {
     pub block: RwSignal<Option<BlockId>>,
-    pub editor_and_spans: RwSignal<
-        Option<(
-            RwSignal<Editor>,
-            RwSignal<Vec<StyleSpan>>,
-            RwSignal<u64>,
-            RwSignal<Option<String>>,
-        )>,
-    >,
+    pub editor_and_spans: RwSignal<Option<EditorHandles>>,
 }
 
 /// All reactive state owned by one inline block's native editor.
@@ -105,6 +108,8 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 ///   cross-block ↑/↓ navigation.
 /// `slash_eligible`: when true, typing `/` on an empty block opens the slash
 ///   command menu instead of inserting the character (paragraphs only).
+// Line counts are tiny, so the usize->f32 height math cannot lose precision.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
 pub fn editable_inline(
     state: BlockEditorState,
     block_id: BlockId,
@@ -205,6 +210,7 @@ pub fn editable_inline(
 
 // ── Key handler ──────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn handle_key(
     kp: &KeyPress,
     ms: floem::keyboard::Modifiers,
@@ -289,7 +295,7 @@ fn handle_key(
     if !shift {
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             if s.as_str() == "/" && slash_eligible {
-                let is_empty = editor_sig.with_untracked(|ed| ed.doc().text().len() == 0);
+                let is_empty = editor_sig.with_untracked(|ed| ed.doc().text().is_empty());
                 if is_empty {
                     on_action(BlockAction::OpenSlashMenu { block_id });
                     return CommandExecuted::Yes;

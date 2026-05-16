@@ -77,7 +77,7 @@ fn test_toggle_partial_range() {
     let mut spans = vec![plain(0, 10)];
     toggle_inline(&mut spans, 2, 7, InlineFlag::Italic);
     assert_eq!(spans.len(), 3);
-    assert!(spans.get(0).map(|s| !s.italic).unwrap_or(false));
+    assert!(spans.first().map(|s| !s.italic).unwrap_or(false));
     assert!(spans.get(1).map(|s| s.italic).unwrap_or(false));
     assert!(spans.get(2).map(|s| !s.italic).unwrap_or(false));
 }

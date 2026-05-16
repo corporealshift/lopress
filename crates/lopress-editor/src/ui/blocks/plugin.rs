@@ -33,6 +33,7 @@ const FORM_BG: Color = Color::rgb8(250, 250, 252);
 const BORDER: Color = Color::rgb8(220, 215, 235);
 
 /// Build the full plugin block view.
+#[allow(clippy::too_many_arguments)]
 pub fn plugin_block_view(
     block: &EditorBlock,
     on_action: ActionSink,

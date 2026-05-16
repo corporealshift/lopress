@@ -25,6 +25,13 @@ pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 
 /// Editable paragraph: backed by the inline-runs editor widget so the user
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
+// `BODY_FONT_SIZE` is a small positive integer-valued constant, so the
+// f32->usize conversion is exact. The argument count mirrors the plumbing.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn render_paragraph_editable(
     runs: &[InlineRun],
     block_id: BlockId,

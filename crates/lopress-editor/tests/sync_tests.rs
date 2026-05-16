@@ -73,8 +73,8 @@ fn test_unicode_roundtrip() {
 fn test_spans_cover_full_byte_range() {
     let runs = vec![plain_run("abc"), bold_run("def")];
     let (_, spans) = inline_runs_to_rope_and_spans(&runs);
-    assert_eq!(spans.get(0).map(|s| s.start), Some(0));
-    assert_eq!(spans.get(0).map(|s| s.end), Some(3));
+    assert_eq!(spans.first().map(|s| s.start), Some(0));
+    assert_eq!(spans.first().map(|s| s.end), Some(3));
     assert_eq!(spans.get(1).map(|s| s.start), Some(3));
     assert_eq!(spans.get(1).map(|s| s.end), Some(6));
 }

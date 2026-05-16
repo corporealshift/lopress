@@ -25,6 +25,13 @@ fn font_size_for(level: u8) -> f32 {
 }
 
 /// Editable heading: inline-runs editor at the level's font size, semibold.
+// Font sizes are small positive integer-valued constants, so the f32->usize
+// conversion is exact. The argument count mirrors the block-render plumbing.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn render_heading_editable(
     level: u8,
     runs: &[InlineRun],

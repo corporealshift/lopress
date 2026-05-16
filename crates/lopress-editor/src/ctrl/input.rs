@@ -1,4 +1,13 @@
 #![allow(unsafe_code)]
+// Debug-only input injection: the Win32 SendInput / scan-code / screen-
+// coordinate math inherently needs casts and integer division that the
+// workspace lints forbid in production code.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_lossless,
+    clippy::integer_division
+)]
 
 use serde::Deserialize;
 

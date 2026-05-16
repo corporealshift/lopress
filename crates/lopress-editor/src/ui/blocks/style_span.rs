@@ -72,7 +72,7 @@ impl Styling for InlineRunStyling {
                 continue;
             }
 
-            let mut a = default.clone();
+            let mut a = default;
             if span.bold {
                 a = a.weight(Weight::BOLD);
             }

@@ -96,6 +96,7 @@ pub(crate) fn root_view(
     let editing_for_view = Rc::clone(&editing);
 
     #[cfg(debug_assertions)]
+    #[allow(clippy::type_complexity)]
     let ctrl_once: Rc<
         std::cell::RefCell<
             Option<(

@@ -24,6 +24,7 @@ use std::rc::Rc;
 /// `slash_menu_open` is the pane-level signal that the slash command menu
 /// consults; when `Some(block_id)` the menu is rendered as an overlay and a
 /// selection emits `BlockAction::ChangeType` against that block.
+#[allow(clippy::too_many_arguments)]
 pub fn editor_pane(
     doc: &EditorDoc,
     on_action: ActionSink,

@@ -1,5 +1,8 @@
 #![allow(unsafe_code)]
 #![cfg(debug_assertions)]
+// Debug-only control server: the Win32 screenshot path and static header
+// parsing inherently need casts / `expect` that the workspace lints forbid.
+#![allow(clippy::cast_possible_truncation, clippy::expect_used)]
 
 pub(crate) mod input;
 
