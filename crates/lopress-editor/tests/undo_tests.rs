@@ -2,7 +2,7 @@
 
 use lopress_editor::actions::BlockAction;
 use lopress_editor::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun,
+    BlockKind, EditorBlock, EditorDoc, InlineRun,
 };
 use lopress_editor::undo::compute_inverse;
 

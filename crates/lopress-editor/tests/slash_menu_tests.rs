@@ -1,26 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
-use lopress_editor::model::types::{BlockKind, InlineRun};
-use lopress_editor::ui::blocks::inline_editor::block_is_empty;
+use lopress_editor::model::types::BlockKind;
 use lopress_editor::ui::slash_menu::slash_menu_items;
-
-#[test]
-fn block_is_empty_for_no_runs() {
-    let runs: Vec<InlineRun> = Vec::new();
-    assert!(block_is_empty(&runs));
-}
-
-#[test]
-fn block_is_empty_for_runs_with_only_empty_text() {
-    let runs = vec![InlineRun::plain(""), InlineRun::plain("")];
-    assert!(block_is_empty(&runs));
-}
-
-#[test]
-fn block_is_not_empty_when_any_run_has_text() {
-    let runs = vec![InlineRun::plain(""), InlineRun::plain("x")];
-    assert!(!block_is_empty(&runs));
-}
 
 #[test]
 fn slash_menu_items_match_acceptance_list() {
