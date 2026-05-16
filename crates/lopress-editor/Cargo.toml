@@ -7,8 +7,10 @@ rust-version.workspace = true
 [dependencies]
 lopress-gui-host = { path = "../lopress-gui-host" }
 lopress-core = { path = "../lopress-core" }
-eframe = { workspace = true }
-egui = { workspace = true }
+lopress-plugin = { path = "../lopress-plugin" }
+floem = { workspace = true }
+lapce-xi-rope = { workspace = true }
+pulldown-cmark = { workspace = true }
 rfd = { workspace = true }
 open = { workspace = true }
 directories = { workspace = true }
@@ -16,6 +18,18 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+# Debug control server
+tiny_http = "0.12"
+image = { workspace = true }
+crossbeam-channel = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

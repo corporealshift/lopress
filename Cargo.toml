@@ -20,7 +20,7 @@ license = "TBD"
 repository = "https://github.com/kdiedrick/lopress"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 unreachable_pub = "warn"
 
 [workspace.lints.clippy]
@@ -51,6 +51,7 @@ missing_errors_doc = "allow"
 
 [workspace.dependencies]
 anyhow = "1"
+lapce-xi-rope = "0.4"
 blake3 = "1.5"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
@@ -69,8 +70,7 @@ thiserror = "1"
 toml = "0.8"
 walkdir = "2"
 webp = "0.3"
-eframe = "0.31"
-egui = "0.31"
+floem = "0.2"
 rfd = "0.15"
 open = "5"
 directories = "6"
@@ -87,9 +87,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-eframe = { workspace = true }
-egui = { workspace = true }
-rfd = { workspace = true }
 lopress-build = { path = "crates/lopress-build" }
 lopress-serve = { path = "crates/lopress-serve" }
 lopress-editor = { path = "crates/lopress-editor" }

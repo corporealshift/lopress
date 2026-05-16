@@ -1,77 +1,112 @@
-use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
+//! App state. Adds the live `EditorDoc` slot to `EditingState` (Task 7).
 
+use crate::model::from_core::doc_from_core;
+use crate::model::to_core::doc_to_core;
+use crate::model::types::EditorDoc;
+use crate::settings::Settings;
+use lopress_core::Document;
+use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
+use lopress_plugin::PluginRegistry;
+
+/// Top-level application state, discriminated by which screen is active.
 pub enum AppState {
     Welcome(WelcomeState),
     Editing(Box<EditingState>),
 }
 
-#[derive(Default)]
+/// State for the Welcome screen.
+#[derive(Default, Clone)]
 pub struct WelcomeState {
-    /// Non-empty when the previous Open attempt failed.
+    /// Error message to display above the action buttons, if any.
     pub error: Option<String>,
 }
 
+/// State for the Editing screen.
 pub struct EditingState {
     pub session: Session,
-    /// The currently open document, if any.
-    pub current_doc: Option<LoadedDocument>,
-    /// The DocumentRef for the currently open document.
+    /// Plugin registry loaded from the workspace at session-open time.
+    /// Used by `from_core` to classify plugin-declared block types and by
+    /// the plugin block view to render attr forms.
+    pub plugin_registry: PluginRegistry,
+    /// The currently active document, if one has been opened.
+    pub current_doc: Option<EditorDoc>,
     pub current_ref: Option<DocumentRef>,
-    /// Non-empty when the parse-error fallback view is active.
-    pub parse_error_raw: Option<String>,
-    pub parse_error_msg: Option<String>,
-    /// Which block index is focused in the editor.
-    pub focused_block: Option<usize>,
+    /// Last error encountered while editing.
+    pub last_error: Option<String>,
 }
 
 impl EditingState {
+    /// Create a new `EditingState` wrapping the given `session`.
     pub fn new(session: Session) -> Self {
+        let plugin_registry = session.plugin_registry();
         Self {
             session,
+            plugin_registry,
             current_doc: None,
             current_ref: None,
-            parse_error_raw: None,
-            parse_error_msg: None,
-            focused_block: None,
+            last_error: None,
         }
     }
 
-    /// Switch to a new document, flushing any pending save first.
+    /// Save the given `EditorDoc` to the path of the currently open document.
+    /// Returns the error message on failure.
+    ///
+    /// Takes the doc to save by reference rather than reading
+    /// `self.current_doc` because the live edit state lives in a UI signal,
+    /// not in `EditingState` (which only stores the doc as opened).
+    pub fn save_doc(&self, doc: &EditorDoc) -> Result<(), String> {
+        let path = self
+            .current_ref
+            .as_ref()
+            .map(|r| r.path.clone())
+            .ok_or_else(|| "no document open".to_string())?;
+        let core = doc_to_core(doc);
+        let loaded = LoadedDocument {
+            path,
+            front_matter: core.front_matter,
+            blocks: core.blocks,
+            dirty: false,
+            dirty_at: None,
+            last_written: None,
+            last_save_error: None,
+        };
+        self.session.save(&loaded).map_err(|e| e.to_string())
+    }
+
+    /// Load and parse the document at `doc_ref.path`, replacing `current_doc`.
+    /// On failure, clears `current_doc` and stores the error message.
     pub fn open_document(&mut self, doc_ref: &DocumentRef) {
-        self.flush_current();
         match self.session.load_document(&doc_ref.path) {
-            Ok(doc) => {
-                self.current_doc = Some(doc);
+            Ok(loaded) => {
+                let core_doc = Document {
+                    front_matter: loaded.front_matter,
+                    blocks: loaded.blocks,
+                };
+                self.current_doc = Some(doc_from_core(&core_doc, &self.plugin_registry));
                 self.current_ref = Some(doc_ref.clone());
-                self.parse_error_raw = None;
-                self.parse_error_msg = None;
-            }
-            Err(lopress_gui_host::LoadError::Parse { raw, message, .. }) => {
-                self.current_doc = None;
-                self.current_ref = Some(doc_ref.clone());
-                self.parse_error_raw = Some(raw);
-                self.parse_error_msg = Some(message);
+                self.last_error = None;
             }
             Err(e) => {
                 self.current_doc = None;
                 self.current_ref = Some(doc_ref.clone());
-                self.parse_error_raw = None;
-                self.parse_error_msg = Some(e.to_string());
+                self.last_error = Some(e.to_string());
             }
         }
     }
+}
 
-    /// Flush the current document synchronously if dirty.
-    pub fn flush_current(&mut self) {
-        let Some(doc) = &mut self.current_doc else {
-            return;
-        };
-        if !doc.dirty {
-            return;
-        }
-        match self.session.save(doc) {
-            Ok(()) => doc.mark_clean(),
-            Err(e) => doc.last_save_error = Some(e.to_string()),
+/// Shared context threaded through the entire application.
+pub struct AppContext {
+    pub settings: Settings,
+    pub state: AppState,
+}
+
+impl AppContext {
+    /// Create a new `AppContext` with the given settings, starting in the Welcome state.
+    pub fn new(settings: Settings) -> Self {
+        Self {
+            settings,
+            state: AppState::Welcome(WelcomeState::default()),
         }
     }
 }

@@ -1,0 +1,11 @@
+name = "codehighlight"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:codehighlight"
+template = "blocks/codehighlight.html"
+editor   = "code"
+
+[blocks.attrs]
+lang  = { type = "string", required = true,  ui = "select", options = ["rust", "ts", "py"] }
+theme = { type = "string", required = false, ui = "select", options = ["light", "dark"] }

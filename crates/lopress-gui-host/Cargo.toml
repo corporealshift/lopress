@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 lopress-build = { path = "../lopress-build" }
+lopress-plugin = { path = "../lopress-plugin" }
 lopress-watch = { path = "../lopress-watch" }
 lopress-serve = { path = "../lopress-serve" }
 lopress-core = { path = "../lopress-core" }

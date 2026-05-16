@@ -1,0 +1,14 @@
+# Force LF line endings for all text files so Windows checkouts don't
+# silently convert source to CRLF — round-trip tests in lopress-editor
+# embed literal markdown in source and compare to the serializer's LF
+# output, which fails when Git autocrlf rewrites the literal.
+* text=auto eol=lf
+
+# Binary types — never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary

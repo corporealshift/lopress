@@ -200,6 +200,69 @@ impl Session {
         Ok(())
     }
 
+    /// Posts directory for this workspace. Sidebar uses this to write
+    /// new-post stubs.
+    pub fn posts_dir(&self) -> PathBuf {
+        self.workspace.posts_dir()
+    }
+
+    /// Pages directory for this workspace.
+    pub fn pages_dir(&self) -> PathBuf {
+        self.workspace.pages_dir()
+    }
+
+    /// Re-scan the workspace's posts and pages directories and update the
+    /// cached summary. Call this after creating a new file so the next
+    /// `workspace()` call reflects it without waiting for the watcher.
+    pub fn rescan(&self) -> WorkspaceSummary {
+        let new_summary = scan_workspace(&self.workspace);
+        *lock(&self.summary) = new_summary.clone();
+        new_summary
+    }
+
+    /// Load the plugin registry for this workspace. Recomputes on each call —
+    /// callers that want to cache should hold onto the returned value (e.g.
+    /// `EditingState` does this once at session-open time).
+    pub fn plugin_registry(&self) -> lopress_plugin::PluginRegistry {
+        let plugins_dir = self.workspace.plugins_dir();
+        let enabled = if self.workspace.config.plugins.enabled.is_empty() {
+            None
+        } else {
+            Some(self.workspace.config.plugins.enabled.as_slice())
+        };
+        lopress_plugin::load_dir(&plugins_dir, enabled).unwrap_or_default()
+    }
+
+    /// Trigger a rebuild and SSE broadcast on a background thread.
+    /// Safe to call even if a watcher-triggered rebuild is already in flight —
+    /// the worst case is two sequential builds.
+    pub fn rebuild(&self) {
+        let build_status = Arc::clone(&self.build_status);
+        let workspace_root = self.workspace.root.clone();
+        let server = self._server.clone();
+        std::thread::spawn(move || {
+            *lock(&build_status) = BuildStatus::Building;
+            let t0 = std::time::Instant::now();
+            match lopress_build::build(&workspace_root) {
+                Ok(r) => {
+                    *lock(&build_status) = BuildStatus::Ok {
+                        pages_rendered: r.pages_rendered,
+                        pages_skipped: r.pages_skipped,
+                        duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    };
+                    if let Some(srv) = server {
+                        srv.broadcast_reload();
+                    }
+                }
+                Err(e) => {
+                    *lock(&build_status) = BuildStatus::Failed {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        });
+    }
+
     /// Current build status.
     pub fn build_status(&self) -> BuildStatus {
         lock(&self.build_status).clone()
