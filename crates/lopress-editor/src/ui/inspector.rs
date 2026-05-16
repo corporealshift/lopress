@@ -11,10 +11,13 @@
 
 use chrono::NaiveDate;
 use floem::peniko::Color;
-use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{
+    create_effect, create_memo, RwSignal, SignalGet, SignalUpdate, SignalWith,
+};
 use floem::text::Weight;
 use floem::views::{
-    dyn_container, empty, label, scroll, text_input, v_stack, Checkbox, Decorators,
+    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, Checkbox,
+    Decorators,
 };
 use floem::{AnyView, IntoView};
 use std::path::PathBuf;
@@ -75,6 +78,8 @@ fn form(
     let tags_buf: RwSignal<String> = RwSignal::new(fm.tags.join(", "));
     let draft_sig: RwSignal<bool> = RwSignal::new(fm.draft);
     let date_invalid: RwSignal<bool> = RwSignal::new(false);
+    let desc_buf: RwSignal<String> =
+        RwSignal::new(fm.description.clone().unwrap_or_default());
 
     // Slug placeholder: file stem of the current path. Avoids forcing
     // authors to type the slug for the common "filename is the slug" case.
@@ -210,6 +215,27 @@ fn form(
             md();
         }
     });
+    let md = mark_dirty.clone();
+    create_effect(move |_| {
+        let new_desc = desc_buf.get();
+        let mut changed = false;
+        current_doc.update(|maybe| {
+            if let Some(d) = maybe {
+                let next = if new_desc.is_empty() {
+                    None
+                } else {
+                    Some(new_desc.clone())
+                };
+                if d.front_matter.description != next {
+                    d.front_matter.description = next;
+                    changed = true;
+                }
+            }
+        });
+        if changed {
+            md();
+        }
+    });
 
     // ── Field widgets ────────────────────────────────────────────────────
     let title_field = field_row("Title", text_input(title_buf).style(input_style).into_any());
@@ -241,6 +267,73 @@ fn form(
     );
     let draft_field = field_row("Draft", Checkbox::new_rw(draft_sig).into_any());
 
+    // ── Title / H1 divergence warning ────────────────────────────────────
+    let h1_text = create_memo(move |_| {
+        current_doc.with(|maybe| {
+            let d = maybe.as_ref()?;
+            let h1 = d
+                .blocks
+                .iter()
+                .find(|b| b.kind == crate::model::types::BlockKind::Heading(1))?;
+            match &h1.body {
+                crate::model::types::BlockBody::Inline(runs) => {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                }
+                _ => None,
+            }
+        })
+    });
+    let title_h1_mismatch = create_memo(move |_| {
+        let title =
+            current_doc.with(|d| d.as_ref().and_then(|d| d.front_matter.title.clone()));
+        let h1 = h1_text.get();
+        matches!((title, h1), (Some(t), Some(h)) if t != h)
+    });
+
+    let warning_row = {
+        let mark_dirty_for_sync = mark_dirty.clone();
+        dyn_container(
+            move || title_h1_mismatch.get(),
+            move |mismatch| {
+                if !mismatch {
+                    return empty().into_any();
+                }
+                let mark_dirty = mark_dirty_for_sync.clone();
+                let on_sync = move || {
+                    if let Some(text) = h1_text.get_untracked() {
+                        title_buf.set(text.clone());
+                        current_doc.update(|maybe| {
+                            if let Some(d) = maybe {
+                                d.front_matter.title = Some(text.clone());
+                            }
+                        });
+                        mark_dirty();
+                    }
+                };
+                h_stack((
+                    label(|| "\u{26a0} Title differs from H1".to_string())
+                        .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0)),
+                    button(label(|| "Sync from H1".to_string()))
+                        .action(on_sync)
+                        .style(|s| {
+                            s.font_size(11.).padding_horiz(6.).padding_vert(2.)
+                        }),
+                ))
+                .style(|s| s.gap(4.).width_full())
+                .into_any()
+            },
+        )
+        .style(|s| s.width_full())
+    };
+
+    let desc_field = field_row(
+        "Description",
+        text_input(desc_buf)
+            .placeholder("Short excerpt or summary")
+            .style(input_style)
+            .into_any(),
+    );
+
     v_stack((
         label(|| "Front matter".to_string()).style(|s| {
             s.font_size(12.)
@@ -249,10 +342,12 @@ fn form(
                 .padding_bottom(8.)
         }),
         title_field,
+        warning_row,
         slug_field,
         date_field,
         tags_field,
         draft_field,
+        desc_field,
     ))
     .style(|s| s.padding(12.).gap(10.).width_full())
     .into_any()
