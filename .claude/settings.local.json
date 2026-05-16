@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(cargo check *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\corpo\\\\Documents\\\\projects\\\\lopress\\\\crates\\\\lopress-editor\\\\src\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(xargs grep -l \"editor_container_view\")",
+      "Bash(xargs grep -l \"LineHeight\\\\|line_height_value\")",
+      "mcp__llama-mcp__delegate_to_llama",
+      "Skill(superpowers:brainstorming)",
+      "Skill(superpowers:writing-plans)",
+      "Skill(superpowers:using-superpowers)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(cargo test *)",
+      "Bash(Select-Object -Last 8)",
+      "PowerShell(cargo test *)"
+    ]
+  }
+}
