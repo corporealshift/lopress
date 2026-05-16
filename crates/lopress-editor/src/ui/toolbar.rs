@@ -11,13 +11,19 @@
 //!   - inline-flag toggles applied via `apply_style_toggle`
 
 use crate::actions::BlockAction;
-use crate::model::style_span::InlineFlag;
+use crate::model::style_span::{InlineFlag, StyleSpan};
 use crate::model::types::{BlockId, BlockKind};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
+use floem::event::{Event, EventListener};
+use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalWith};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
-use floem::views::{button, h_stack_from_iter, label, Decorators};
+use floem::views::editor::Editor;
+use floem::views::{
+    button, dyn_container, empty, h_stack, h_stack_from_iter, label, text_input, v_stack,
+    Decorators,
+};
 use floem::{AnyView, IntoView};
 
 /// Pre-snapshotted view of the toolbar's inputs at one moment in time.
@@ -70,7 +76,9 @@ pub fn block_toolbar_for(
         let btn = button(label(move || lbl_str.clone()))
             .action(move || {
                 // Commit current editor text before changing kind.
-                if let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get_untracked() {
+                if let Some((editor_sig, spans_sig, _, _)) =
+                    focus_pub.editor_and_spans.get_untracked()
+                {
                     let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
                     let spans = spans_sig.get_untracked();
                     let rope = lapce_xi_rope::Rope::from(text.as_str());
@@ -125,7 +133,7 @@ pub fn block_toolbar_for(
         });
     buttons.push(del_btn.into_any());
 
-    h_stack_from_iter(buttons).style(|s| {
+    let button_row = h_stack_from_iter(buttons).style(|s| {
         s.padding_horiz(6.)
             .padding_vert(4.)
             .gap(4.)
@@ -134,7 +142,83 @@ pub fn block_toolbar_for(
             .border_color(Color::rgb8(220, 220, 226))
             .border_radius(4.)
             .margin_bottom(4.)
-    })
+    });
+
+    let on_action_for_url = on_action.clone();
+    let url_row = dyn_container(
+        move || {
+            focus_pub
+                .editor_and_spans
+                .get()
+                .and_then(|(_, _, _, url)| url.get())
+        },
+        move |maybe_url| match maybe_url {
+            None => empty().into_any(),
+            Some(current_url) => {
+                let url_buf: RwSignal<String> = RwSignal::new(current_url);
+                let on_action_commit = on_action_for_url.clone();
+                let commit = move || {
+                    if let Some((editor_sig, spans_sig, _, url_sig)) =
+                        focus_pub.editor_and_spans.get_untracked()
+                    {
+                        let url = url_buf.get_untracked();
+                        write_url_to_selection(editor_sig, spans_sig, &url);
+                        let text =
+                            editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                        let spans = spans_sig.get_untracked();
+                        let rope = lapce_xi_rope::Rope::from(text.as_str());
+                        let new_runs =
+                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        on_action_commit(BlockAction::EditInline { block_id, new_runs });
+                        url_sig.set(None);
+                    }
+                };
+                let commit_for_key = commit.clone();
+                let on_action_remove = on_action_for_url.clone();
+                let remove = move || {
+                    if let Some((editor_sig, spans_sig, style_rev, url_sig)) =
+                        focus_pub.editor_and_spans.get_untracked()
+                    {
+                        crate::ui::blocks::inline_editor::apply_style_toggle(
+                            editor_sig,
+                            spans_sig,
+                            style_rev,
+                            InlineFlag::Link,
+                        );
+                        url_sig.set(None);
+                        let text =
+                            editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                        let spans = spans_sig.get_untracked();
+                        let rope = lapce_xi_rope::Rope::from(text.as_str());
+                        let new_runs =
+                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        on_action_remove(BlockAction::EditInline { block_id, new_runs });
+                    }
+                };
+                h_stack((
+                    text_input(url_buf)
+                        .placeholder("https://…")
+                        .on_event_stop(EventListener::KeyDown, move |e: &Event| {
+                            if let Event::KeyDown(k) = e {
+                                if matches!(
+                                    k.key.logical_key,
+                                    Key::Named(NamedKey::Enter)
+                                ) {
+                                    commit_for_key();
+                                }
+                            }
+                        })
+                        .style(|s| s.flex_grow(1.0).font_size(13.)),
+                    button(label(|| "Remove".to_string())).action(move || remove()),
+                ))
+                .style(|s| s.gap(4.).width_full().padding_horiz(6.).padding_vert(4.))
+                .into_any()
+            }
+        },
+    )
+    .style(|s| s.width_full());
+
+    v_stack((button_row, url_row)).style(|s| s.width_full())
 }
 
 /// One inline-flag toggle button. Active when the current editor selection
@@ -158,7 +242,7 @@ fn toggle_button(
 
     button(lbl_view)
         .action(move || {
-            if let Some((editor_sig, spans_sig, style_rev)) =
+            if let Some((editor_sig, spans_sig, style_rev, _)) =
                 focus_pub.editor_and_spans.get_untracked()
             {
                 crate::ui::blocks::inline_editor::apply_style_toggle(
@@ -174,7 +258,7 @@ fn toggle_button(
 fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
     use floem::views::editor::core::cursor::CursorMode;
     // Reactive read so the label updates when selection or spans change
-    let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get() else {
+    let Some((editor_sig, spans_sig, _, _)) = focus_pub.editor_and_spans.get() else {
         return false;
     };
     let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
@@ -228,4 +312,31 @@ fn separator() -> impl IntoView {
             .margin_horiz(4.)
             .background(Color::rgb8(210, 210, 215))
     })
+}
+
+/// Write `url` into every link-bearing style span that overlaps the editor's
+/// current selection.
+fn write_url_to_selection(
+    editor_sig: RwSignal<Editor>,
+    spans_sig: RwSignal<Vec<StyleSpan>>,
+    url: &str,
+) {
+    use floem::views::editor::core::cursor::CursorMode;
+    let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
+        ed.cursor.with_untracked(|c| match &c.mode {
+            CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
+            CursorMode::Normal(o) => (*o, *o),
+            CursorMode::Visual { start, end, .. } => (*start.min(end), *start.max(end)),
+        })
+    });
+    let url_owned = url.to_owned();
+    spans_sig.update(|spans| {
+        for span in spans.iter_mut() {
+            let lo = span.start.max(sel_start);
+            let hi = span.end.min(sel_end);
+            if lo < hi && span.link.is_some() {
+                span.link = Some(url_owned.clone());
+            }
+        }
+    });
 }

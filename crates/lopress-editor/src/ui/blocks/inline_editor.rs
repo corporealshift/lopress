@@ -29,8 +29,14 @@ pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 #[derive(Clone, Copy)]
 pub struct FocusPublisher {
     pub block: RwSignal<Option<BlockId>>,
-    pub editor_and_spans:
-        RwSignal<Option<(RwSignal<Editor>, RwSignal<Vec<StyleSpan>>, RwSignal<u64>)>>,
+    pub editor_and_spans: RwSignal<
+        Option<(
+            RwSignal<Editor>,
+            RwSignal<Vec<StyleSpan>>,
+            RwSignal<u64>,
+            RwSignal<Option<String>>,
+        )>,
+    >,
 }
 
 /// All reactive state owned by one inline block's native editor.
@@ -43,6 +49,9 @@ pub struct BlockEditorState {
     pub style_rev: RwSignal<u64>,
     /// Full block text, kept in sync with the rope via `TextDocument::add_on_update`.
     pub text_sig: RwSignal<String>,
+    /// When `Some`, the link-URL input row is shown; holds the editing buffer
+    /// seed. `None` hides the row.
+    pub link_url_sig: RwSignal<Option<String>>,
 }
 
 /// Build a `BlockEditorState` for an inline block, initialised from `runs`.
@@ -56,6 +65,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
     let spans_sig = cx.create_rw_signal(spans);
     let style_rev = cx.create_rw_signal(0u64);
     let text_sig = cx.create_rw_signal(initial_text.clone());
+    let link_url_sig = cx.create_rw_signal(None::<String>);
 
     let styling = Rc::new(InlineRunStyling {
         spans: spans_sig,
@@ -84,6 +94,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
         spans_sig,
         style_rev,
         text_sig,
+        link_url_sig,
     }
 }
 
@@ -109,6 +120,7 @@ pub fn editable_inline(
     let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
     let text_sig = state.text_sig;
+    let link_url_sig = state.link_url_sig;
 
     let on_action_for_key = on_action;
 
@@ -138,6 +150,7 @@ pub fn editable_inline(
                 &on_undo,
                 &on_redo,
                 slash_eligible,
+                link_url_sig,
             );
             // If we consumed the key (block-level action), stop here.
             // Otherwise delegate to the editor's built-in command dispatch
@@ -157,7 +170,7 @@ pub fn editable_inline(
             focus_pub.block.set(Some(block_id));
             focus_pub
                 .editor_and_spans
-                .set(Some((editor_sig, spans_sig, style_rev)));
+                .set(Some((editor_sig, spans_sig, style_rev, link_url_sig)));
         }
     });
 
@@ -206,6 +219,7 @@ fn handle_key(
     on_undo: &Rc<dyn Fn()>,
     on_redo: &Rc<dyn Fn()>,
     slash_eligible: bool,
+    link_url_sig: RwSignal<Option<String>>,
 ) -> CommandExecuted {
     use floem::keyboard::{Key, NamedKey};
 
@@ -242,6 +256,10 @@ fn handle_key(
                 }
                 "k" | "K" => {
                     apply_style_toggle(editor_sig, spans_sig, style_rev, InlineFlag::Link);
+                    // Opening the URL row only makes sense when a link span is
+                    // now active in the selection.
+                    let has_link = selection_has_link(editor_sig, spans_sig);
+                    link_url_sig.set(if has_link { Some(String::new()) } else { None });
                     return CommandExecuted::Yes;
                 }
                 _ => {}
@@ -342,6 +360,29 @@ fn handle_key(
 
         _ => CommandExecuted::No,
     }
+}
+
+/// True if any style span overlapping the current editor selection carries a
+/// link. Used to decide whether the URL input row should open after Ctrl+K.
+fn selection_has_link(
+    editor_sig: RwSignal<Editor>,
+    spans_sig: RwSignal<Vec<StyleSpan>>,
+) -> bool {
+    use floem::views::editor::core::cursor::CursorMode;
+    let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
+        ed.cursor.with_untracked(|c| match &c.mode {
+            CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
+            CursorMode::Normal(o) => (*o, *o),
+            CursorMode::Visual { start, end, .. } => (*start.min(end), *start.max(end)),
+        })
+    });
+    spans_sig.with_untracked(|spans| {
+        spans.iter().any(|s| {
+            let lo = s.start.max(sel_start);
+            let hi = s.end.min(sel_end);
+            lo < hi && s.link.is_some()
+        })
+    })
 }
 
 /// Read the current selection byte range from the editor and apply a style
