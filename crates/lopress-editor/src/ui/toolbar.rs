@@ -65,6 +65,9 @@ pub fn block_toolbar_for(
         ),
         ("UL", BlockKind::List { ordered: false }),
         ("OL", BlockKind::List { ordered: true }),
+        ("H4", BlockKind::Heading(4)),
+        ("H5", BlockKind::Heading(5)),
+        ("H6", BlockKind::Heading(6)),
     ];
 
     let mut buttons: Vec<AnyView> = Vec::with_capacity(kinds.len() + 5);
