@@ -9,6 +9,7 @@ use crate::ui::slash_menu::slash_menu;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, scroll, stack, v_stack_from_iter, Decorators};
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Render the editor pane: vertical scroll container, max content width 720
 /// logical px, centered, with one block view per `EditorBlock`. `on_action`
@@ -30,6 +31,8 @@ pub fn editor_pane(
     slash_menu_open: RwSignal<Option<BlockId>>,
     dnd: DndState,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> impl IntoView {
     let focus_pub = FocusPublisher {
         block: RwSignal::new(None),
@@ -48,6 +51,8 @@ pub fn editor_pane(
             focus_pub,
             dnd,
             current_doc,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
         ));
     }
     rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());

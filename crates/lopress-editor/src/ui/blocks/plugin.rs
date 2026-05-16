@@ -23,6 +23,7 @@ use floem::views::{
     checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators,
 };
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 use lopress_plugin::{AttrDecl, AttrType};
 use serde_json::Value;
 
@@ -39,6 +40,8 @@ pub fn plugin_block_view(
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
     _dnd: DndState,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let block_id = block.id;
     let Some(meta) = block.plugin.clone() else {
@@ -64,7 +67,7 @@ pub fn plugin_block_view(
     let on_action_for_attrs = on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    let body = render_body(block, on_action.clone(), focus_target, focus_pub, current_doc);
+    let body = render_body(block, on_action.clone(), focus_target, focus_pub, current_doc, on_undo, on_redo);
 
     v_stack((header, form, body))
         .style(|s| {
@@ -282,6 +285,8 @@ fn render_body(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let block_id = block.id;
     match (&block.kind, &block.body) {
@@ -293,6 +298,8 @@ fn render_body(
                 focus_target,
                 focus_pub,
                 current_doc,
+                on_undo,
+                on_redo,
             )
             .into_any()
         }
@@ -305,6 +312,8 @@ fn render_body(
                 focus_target,
                 focus_pub,
                 current_doc,
+                on_undo,
+                on_redo,
             )
             .into_any()
         }

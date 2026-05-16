@@ -131,6 +131,22 @@ pub(crate) fn root_view(
     .style(|s| s.width_full().height_full())
 }
 
+/// The block a just-applied undo/redo action should restore focus to.
+fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
+    match action {
+        BlockAction::EditInline { block_id, .. }
+        | BlockAction::EditCode { block_id, .. }
+        | BlockAction::Split { block_id, .. }
+        | BlockAction::MergeWithPrev { block_id }
+        | BlockAction::ChangeType { block_id, .. }
+        | BlockAction::EditAttrs { block_id, .. }
+        | BlockAction::Move { block_id, .. } => Some(*block_id),
+        BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
+        BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
+    }
+}
+
+
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
 /// with a footer pinned at the bottom.
 fn editing_view(
@@ -157,6 +173,9 @@ fn editing_view(
     let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
     let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
 
+    let undo_stack: RwSignal<crate::undo::UndoStack> =
+        RwSignal::new(crate::undo::UndoStack::new());
+
     let editing_for_open = Rc::clone(&editing);
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
         let mut guard = editing_for_open.borrow_mut();
@@ -166,6 +185,7 @@ fn editing_view(
         state.open_document(&doc_ref);
         current_doc.set(state.current_doc.clone());
         current_path.set(Some(doc_ref.path));
+        undo_stack.update(|s| *s = crate::undo::UndoStack::new());
     });
 
     let on_new_post = make_new_doc_action(
@@ -213,17 +233,20 @@ fn editing_view(
     // lookups derive the block to focus after structural actions.
     let on_action_mark_dirty = Rc::clone(&mark_dirty);
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
-        // UI-only action: hand off to the slash-menu signal and skip the
-        // model. Doing this before `apply` keeps the chokepoint single-entry
-        // for block widgets while letting non-mutating actions piggyback.
         if let BlockAction::OpenSlashMenu { block_id } = action {
             slash_menu_open.set(Some(block_id));
             return;
         }
-        // Any block-tree mutation closes an open slash menu.
         if slash_menu_open.get_untracked().is_some() {
             slash_menu_open.set(None);
         }
+
+        // Push to undo stack before apply (using pre-state).
+        let pre_doc_snapshot = current_doc.with_untracked(|d| d.clone());
+        if let Some(ref doc) = pre_doc_snapshot {
+            undo_stack.update(|s| s.push_before_apply(doc, &action));
+        }
+
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
                 .blocks
@@ -240,6 +263,19 @@ fn editing_view(
                 apply(d, action_for_apply);
             }
         });
+
+        // Fix Split inverse now that post-state has the new block id.
+        if let BlockAction::Split { block_id, .. } = &action {
+            let new_id = current_doc.with_untracked(|maybe| {
+                let d = maybe.as_ref()?;
+                let i = d.blocks.iter().position(|b| b.id == *block_id)?;
+                d.blocks.get(i + 1).map(|b| b.id)
+            });
+            if let Some(new_id) = new_id {
+                undo_stack.update(|s| s.fix_split_inverse(new_id));
+            }
+        }
+
         let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::Split { block_id, .. }, Some(d)) => d
                 .blocks
@@ -249,28 +285,92 @@ fn editing_view(
                 .map(|b| b.id),
             _ => None,
         });
-        // ChangeType swaps the per-block widget (paragraph ↔ heading ↔ …),
-        // so we must re-focus the rebuilt block; otherwise the toolbar's
-        // P/H1/H2 buttons feel inert because the widget vanishes underfoot.
         let change_type_focus = match &action {
             BlockAction::ChangeType { block_id, .. } => Some(*block_id),
             _ => None,
         };
         if let Some(id) = pre_focus.or(post_focus).or(change_type_focus) {
-            // Defer focus_target.set to the next event-loop tick so that the
-            // pane rebuild triggered by `current_doc.update` above has a
-            // chance to mount the new block widget *before* we ask it to
-            // take focus. Setting synchronously fires the OLD widget's
-            // create_effect, which clears focus_target as a side-effect, so
-            // the NEW widget mounts with focus_target already None and never
-            // requests focus — that's the "Enter creates a block but doesn't
-            // focus into it" / "ChangeType silently changes kind" symptom.
             floem::action::exec_after(Duration::from_millis(0), move |_| {
                 focus_target.set(Some(id));
             });
         }
         on_action_mark_dirty();
     });
+
+    let on_undo: Rc<dyn Fn()> = {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        Rc::new(move || {
+            let mut popped = None;
+            undo_stack.update(|s| {
+                popped = s.pop_undo();
+            });
+            if let Some(action) = popped {
+                let focus_id = focus_block_for(&action);
+                let action_for_apply = action.clone();
+                current_doc.update(|maybe| {
+                    if let Some(d) = maybe {
+                        apply(d, action_for_apply);
+                    }
+                });
+                // Undoing a MergeWithPrev re-applies a Split, which mints a
+                // fresh BlockId for the recreated block. Point the redo
+                // entry's MergeWithPrev at that new id.
+                if let BlockAction::Split { block_id, .. } = &action {
+                    let new_id = current_doc.with_untracked(|maybe| {
+                        let d = maybe.as_ref()?;
+                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
+                        d.blocks.get(i + 1).map(|b| b.id)
+                    });
+                    if let Some(new_id) = new_id {
+                        undo_stack.update(|s| s.fix_merge_redo(new_id));
+                    }
+                }
+                if let Some(id) = focus_id {
+                    floem::action::exec_after(Duration::from_millis(0), move |_| {
+                        focus_target.set(Some(id));
+                    });
+                }
+                mark_dirty();
+            }
+        })
+    };
+
+    let on_redo: Rc<dyn Fn()> = {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        Rc::new(move || {
+            let mut popped = None;
+            undo_stack.update(|s| {
+                popped = s.pop_redo();
+            });
+            if let Some(action) = popped {
+                let focus_id = focus_block_for(&action);
+                let action_for_apply = action.clone();
+                current_doc.update(|maybe| {
+                    if let Some(d) = maybe {
+                        apply(d, action_for_apply);
+                    }
+                });
+                // Redoing a Split mints a fresh BlockId; refresh the undo
+                // entry's MergeWithPrev inverse to target it.
+                if let BlockAction::Split { block_id, .. } = &action {
+                    let new_id = current_doc.with_untracked(|maybe| {
+                        let d = maybe.as_ref()?;
+                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
+                        d.blocks.get(i + 1).map(|b| b.id)
+                    });
+                    if let Some(new_id) = new_id {
+                        undo_stack.update(|s| s.fix_split_inverse(new_id));
+                    }
+                }
+                if let Some(id) = focus_id {
+                    floem::action::exec_after(Duration::from_millis(0), move |_| {
+                        focus_target.set(Some(id));
+                    });
+                }
+                mark_dirty();
+            }
+        })
+    };
 
     // Cloned for the debug ctrl wiring near the end of this function;
     // `on_action` itself is moved into the dyn_container view closure.
@@ -308,6 +408,8 @@ fn editing_view(
                 slash_menu_open,
                 dnd,
                 current_doc,
+                on_undo.clone(),
+                on_redo.clone(),
             )
             .into_any(),
             None => empty().into_any(),

@@ -102,6 +102,8 @@ pub fn editable_inline(
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
     _slash_eligible: bool,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> impl IntoView {
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
@@ -133,6 +135,8 @@ pub fn editable_inline(
                 &on_action_for_key,
                 focus_target,
                 current_doc,
+                &on_undo,
+                &on_redo,
             );
             // If we consumed the key (block-level action), stop here.
             // Otherwise delegate to the editor's built-in command dispatch
@@ -198,6 +202,8 @@ fn handle_key(
     on_action: &ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: &Rc<dyn Fn()>,
+    on_redo: &Rc<dyn Fn()>,
 ) -> CommandExecuted {
     use floem::keyboard::{Key, NamedKey};
 
@@ -208,6 +214,18 @@ fn handle_key(
     if ctrl_or_cmd {
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             match s.as_str() {
+                "z" | "Z" => {
+                    if ms.shift() {
+                        on_redo();
+                    } else {
+                        on_undo();
+                    }
+                    return CommandExecuted::Yes;
+                }
+                "y" | "Y" => {
+                    on_redo();
+                    return CommandExecuted::Yes;
+                }
                 "b" | "B" => {
                     apply_style_toggle(editor_sig, spans_sig, style_rev, InlineFlag::Bold);
                     return CommandExecuted::Yes;

@@ -23,6 +23,7 @@ use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
@@ -34,6 +35,8 @@ pub fn block_view(
     focus_pub: FocusPublisher,
     dnd: DndState,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
@@ -48,6 +51,8 @@ pub fn block_view(
             focus_pub,
             current_doc,
             dnd,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
         );
         // The toolbar slot still mounts above plugin blocks so kind / B / I
         // toggles still work on the body editor.
@@ -86,6 +91,8 @@ pub fn block_view(
                 focus_target,
                 focus_pub,
                 current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
             )
             .style(|s| s.padding_vert(6.))
             .into_any()
@@ -99,6 +106,8 @@ pub fn block_view(
                 focus_target,
                 focus_pub,
                 current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
             )
             .into_any()
         }

@@ -51,7 +51,10 @@ impl UndoStack {
         {
             let now = Instant::now();
             if let Some((last_id, last_t)) = self.last_inline_edit {
-                if last_id == *block_id && now.duration_since(last_t) < COALESCE_WINDOW {
+                if last_id == *block_id
+                    && now.duration_since(last_t) < COALESCE_WINDOW
+                    && self.redo.is_empty()
+                {
                     // Coalesce: keep the oldest old_runs (already stored in the
                     // existing entry's inverse), update the action to the latest.
                     if let Some(entry) = self.undo.back_mut() {
@@ -76,6 +79,18 @@ impl UndoStack {
         if let Some(entry) = self.undo.back_mut() {
             if matches!(entry.action, BlockAction::Split { .. }) {
                 entry.inverse = BlockAction::MergeWithPrev { block_id: new_block_id };
+            }
+        }
+    }
+
+    /// After an undo recreates a block via `Split` (undoing a
+    /// `MergeWithPrev`), the recreated block has a fresh `BlockId`. Update
+    /// the matching redo entry's `MergeWithPrev` action to target it, so a
+    /// subsequent redo merges the right block.
+    pub fn fix_merge_redo(&mut self, new_block_id: BlockId) {
+        if let Some(entry) = self.redo.last_mut() {
+            if let BlockAction::MergeWithPrev { block_id } = &mut entry.action {
+                *block_id = new_block_id;
             }
         }
     }

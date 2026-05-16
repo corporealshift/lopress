@@ -4,6 +4,7 @@
 //! callers that don't yet need editing.
 
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
+use std::rc::Rc;
 use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline, ActionSink, FocusPublisher};
 use crate::ui::blocks::paragraph::render_runs_with_size;
 use floem::reactive::{RwSignal, Scope};
@@ -30,10 +31,12 @@ pub fn render_heading_editable(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> impl IntoView {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, font_size_for(level) as usize);
-    editable_inline(state, block_id, on_action, focus_target, focus_pub, current_doc, false)
+    editable_inline(state, block_id, on_action, focus_target, focus_pub, current_doc, false, on_undo, on_redo)
         .style(|s| s.padding_top(16.).padding_bottom(8.))
 }
 
