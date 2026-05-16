@@ -3,14 +3,16 @@
 //! lays out one styled `text` element per inline run in a wrapping flex row.
 
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
-use std::rc::Rc;
-use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline, ActionSink, FocusPublisher};
+use crate::ui::blocks::inline_editor::{
+    build_block_editor, editable_inline, ActionSink, FocusPublisher,
+};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope};
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{container, h_stack_from_iter, text, Decorators};
 use floem::IntoView;
+use std::rc::Rc;
 
 /// Body font size (logical px) for paragraphs and list items.
 pub const BODY_FONT_SIZE: f32 = 15.0;
@@ -39,7 +41,15 @@ pub fn render_paragraph_editable(
     // goes on an outer container so it cannot squeeze the editor's content
     // box (which would let the text overflow into the next block).
     container(editable_inline(
-        state, block_id, on_action, focus_target, focus_pub, current_doc, true, on_undo, on_redo,
+        state,
+        block_id,
+        on_action,
+        focus_target,
+        focus_pub,
+        current_doc,
+        true,
+        on_undo,
+        on_redo,
     ))
     .style(|s| s.width_full().padding_vert(6.))
 }

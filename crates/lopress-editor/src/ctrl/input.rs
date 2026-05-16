@@ -43,20 +43,20 @@ pub(crate) fn handle_click(body: &str) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 mod platform {
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
     use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_TYPE, MAPVK_VK_TO_VSC, MOUSE_EVENT_FLAGS,
+        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_TYPE, MAPVK_VK_TO_VSC,
         MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE,
-        MOUSEINPUT, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10,
-        VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME,
-        VK_LEFT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
+        MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
+        VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
+        VK_HOME, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, GetSystemMetrics, PostMessageW, SetWindowPos, SM_CXSCREEN, SM_CYSCREEN,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
     };
-    use windows::core::PCWSTR;
 
     // HWND(0) = HWND_TOP (place at top of Z-order, below TOPMOST windows)
     const HWND_TOP: HWND = HWND(0);
@@ -135,9 +135,7 @@ mod platform {
                             dy: ay,
                             mouseData: 0,
                             dwFlags: MOUSE_EVENT_FLAGS(
-                                MOUSEEVENTF_ABSOLUTE.0
-                                    | MOUSEEVENTF_MOVE.0
-                                    | MOUSEEVENTF_LEFTUP.0,
+                                MOUSEEVENTF_ABSOLUTE.0 | MOUSEEVENTF_MOVE.0 | MOUSEEVENTF_LEFTUP.0,
                             ),
                             time: 0,
                             dwExtraInfo: 0,
@@ -189,16 +187,19 @@ mod platform {
             // so the modifier is seen as active when the main key is processed.
             for &m in &mods {
                 let scan = MapVirtualKeyW(u32::from(m.0), MAPVK_VK_TO_VSC) as u16;
-                let _ =
-                    PostMessageW(hwnd, WM_KEYDOWN, WPARAM(m.0 as usize), lparam_keydown(scan));
+                let _ = PostMessageW(hwnd, WM_KEYDOWN, WPARAM(m.0 as usize), lparam_keydown(scan));
             }
             let scan = MapVirtualKeyW(u32::from(vk.0), MAPVK_VK_TO_VSC) as u16;
-            let _ = PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk.0 as usize), lparam_keydown(scan));
+            let _ = PostMessageW(
+                hwnd,
+                WM_KEYDOWN,
+                WPARAM(vk.0 as usize),
+                lparam_keydown(scan),
+            );
             let _ = PostMessageW(hwnd, WM_KEYUP, WPARAM(vk.0 as usize), lparam_keyup(scan));
             for &m in mods.iter().rev() {
                 let scan = MapVirtualKeyW(u32::from(m.0), MAPVK_VK_TO_VSC) as u16;
-                let _ =
-                    PostMessageW(hwnd, WM_KEYUP, WPARAM(m.0 as usize), lparam_keyup(scan));
+                let _ = PostMessageW(hwnd, WM_KEYUP, WPARAM(m.0 as usize), lparam_keyup(scan));
             }
         }
         Ok(())

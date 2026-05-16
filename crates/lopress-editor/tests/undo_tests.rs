@@ -1,13 +1,14 @@
 #![allow(clippy::unwrap_used)]
 
 use lopress_editor::actions::BlockAction;
-use lopress_editor::model::types::{
-    BlockKind, EditorBlock, EditorDoc, InlineRun,
-};
+use lopress_editor::model::types::{BlockKind, EditorBlock, EditorDoc, InlineRun};
 use lopress_editor::undo::compute_inverse;
 
 fn doc_with(blocks: Vec<EditorBlock>) -> EditorDoc {
-    EditorDoc { blocks, front_matter: lopress_core::FrontMatter::default() }
+    EditorDoc {
+        blocks,
+        front_matter: lopress_core::FrontMatter::default(),
+    }
 }
 
 fn para(text: &str) -> EditorBlock {
@@ -43,7 +44,10 @@ fn inverse_of_merge_with_prev_is_split_at_join_point() {
     // "hello " is 6 bytes
     let inv = compute_inverse(&doc, &BlockAction::MergeWithPrev { block_id: cur_id }).unwrap();
     match inv {
-        BlockAction::Split { block_id, byte_offset } => {
+        BlockAction::Split {
+            block_id,
+            byte_offset,
+        } => {
             assert_eq!(block_id, prev_id);
             assert_eq!(byte_offset, 6);
         }
@@ -58,7 +62,10 @@ fn inverse_of_change_type_is_change_type_with_old_kind() {
     let doc = doc_with(vec![b]);
     let inv = compute_inverse(
         &doc,
-        &BlockAction::ChangeType { block_id: id, new_kind: BlockKind::Heading(2) },
+        &BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(2),
+        },
     )
     .unwrap();
     match inv {
@@ -77,7 +84,13 @@ fn inverse_of_delete_is_insert_after_with_predecessor() {
     let anchor_id = a.id;
     let victim_id = b.id;
     let doc = doc_with(vec![a, b]);
-    let inv = compute_inverse(&doc, &BlockAction::Delete { block_id: victim_id }).unwrap();
+    let inv = compute_inverse(
+        &doc,
+        &BlockAction::Delete {
+            block_id: victim_id,
+        },
+    )
+    .unwrap();
     match inv {
         BlockAction::InsertAfter { anchor, new_block } => {
             assert_eq!(anchor, anchor_id);
@@ -96,7 +109,10 @@ fn inverse_of_insert_after_is_delete_new_block() {
     let doc = doc_with(vec![a]);
     let inv = compute_inverse(
         &doc,
-        &BlockAction::InsertAfter { anchor: anchor_id, new_block: new_b },
+        &BlockAction::InsertAfter {
+            anchor: anchor_id,
+            new_block: new_b,
+        },
     )
     .unwrap();
     match inv {
@@ -162,11 +178,17 @@ fn edit_inline_within_one_second_coalesces() {
     let mut doc = doc_with(vec![a]);
     let mut stack = UndoStack::new();
 
-    let a1 = BlockAction::EditInline { block_id: id, new_runs: vec![InlineRun::plain("ab")] };
+    let a1 = BlockAction::EditInline {
+        block_id: id,
+        new_runs: vec![InlineRun::plain("ab")],
+    };
     stack.push_before_apply(&doc, &a1);
     lopress_editor::actions::apply(&mut doc, a1);
 
-    let a2 = BlockAction::EditInline { block_id: id, new_runs: vec![InlineRun::plain("abc")] };
+    let a2 = BlockAction::EditInline {
+        block_id: id,
+        new_runs: vec![InlineRun::plain("abc")],
+    };
     stack.push_before_apply(&doc, &a2);
     lopress_editor::actions::apply(&mut doc, a2);
 

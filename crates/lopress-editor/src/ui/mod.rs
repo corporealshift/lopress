@@ -45,9 +45,7 @@ pub(crate) fn root_view(
     ctx: AppContext,
     settings_signal: RwSignal<Settings>,
     #[cfg(debug_assertions)] ctrl_handle: crate::ctrl::CtrlHandle,
-    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<
-        crate::ctrl::CtrlAction,
-    >,
+    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
 ) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
@@ -146,7 +144,6 @@ fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
     }
 }
 
-
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
 /// with a footer pinned at the bottom.
 fn editing_view(
@@ -173,8 +170,7 @@ fn editing_view(
     let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
     let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
 
-    let undo_stack: RwSignal<crate::undo::UndoStack> =
-        RwSignal::new(crate::undo::UndoStack::new());
+    let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
 
     let editing_for_open = Rc::clone(&editing);
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
@@ -504,8 +500,8 @@ fn editing_view(
         let action_read = create_signal_from_channel(ctrl_action_rx);
         create_effect(move |_| {
             if let Some(ctrl_action) = action_read.get() {
-                let block_action = current_doc
-                    .with_untracked(|d| ctrl_action.into_block_action(d.as_ref()?));
+                let block_action =
+                    current_doc.with_untracked(|d| ctrl_action.into_block_action(d.as_ref()?));
                 if let Some(action) = block_action {
                     on_action_for_ctrl(action);
                 }

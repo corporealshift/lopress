@@ -2,10 +2,22 @@ use lopress_editor::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_
 use lopress_editor::model::types::InlineRun;
 
 fn plain_run(text: &str) -> InlineRun {
-    InlineRun { text: text.into(), bold: false, italic: false, code: false, link: None }
+    InlineRun {
+        text: text.into(),
+        bold: false,
+        italic: false,
+        code: false,
+        link: None,
+    }
 }
 fn bold_run(text: &str) -> InlineRun {
-    InlineRun { text: text.into(), bold: true, italic: false, code: false, link: None }
+    InlineRun {
+        text: text.into(),
+        bold: true,
+        italic: false,
+        code: false,
+        link: None,
+    }
 }
 
 #[test]

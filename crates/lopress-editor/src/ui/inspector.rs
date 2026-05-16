@@ -11,13 +11,10 @@
 
 use chrono::NaiveDate;
 use floem::peniko::Color;
-use floem::reactive::{
-    create_effect, create_memo, RwSignal, SignalGet, SignalUpdate, SignalWith,
-};
+use floem::reactive::{create_effect, create_memo, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::{
-    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, Checkbox,
-    Decorators,
+    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, Checkbox, Decorators,
 };
 use floem::{AnyView, IntoView};
 use std::path::PathBuf;
@@ -78,8 +75,7 @@ fn form(
     let tags_buf: RwSignal<String> = RwSignal::new(fm.tags.join(", "));
     let draft_sig: RwSignal<bool> = RwSignal::new(fm.draft);
     let date_invalid: RwSignal<bool> = RwSignal::new(false);
-    let desc_buf: RwSignal<String> =
-        RwSignal::new(fm.description.clone().unwrap_or_default());
+    let desc_buf: RwSignal<String> = RwSignal::new(fm.description.clone().unwrap_or_default());
 
     // Slug placeholder: file stem of the current path. Avoids forcing
     // authors to type the slug for the common "filename is the slug" case.
@@ -284,8 +280,7 @@ fn form(
         })
     });
     let title_h1_mismatch = create_memo(move |_| {
-        let title =
-            current_doc.with(|d| d.as_ref().and_then(|d| d.front_matter.title.clone()));
+        let title = current_doc.with(|d| d.as_ref().and_then(|d| d.front_matter.title.clone()));
         let h1 = h1_text.get();
         matches!((title, h1), (Some(t), Some(h)) if t != h)
     });
@@ -315,9 +310,7 @@ fn form(
                         .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0)),
                     button(label(|| "Sync from H1".to_string()))
                         .action(on_sync)
-                        .style(|s| {
-                            s.font_size(11.).padding_horiz(6.).padding_vert(2.)
-                        }),
+                        .style(|s| s.font_size(11.).padding_horiz(6.).padding_vert(2.)),
                 ))
                 .style(|s| s.gap(4.).width_full())
                 .into_any()

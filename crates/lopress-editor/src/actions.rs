@@ -73,7 +73,10 @@ pub enum BlockAction {
 /// Apply one `BlockAction` to the document. Unknown block ids are no-ops.
 pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
     match action {
-        BlockAction::Split { block_id, byte_offset } => apply_split(doc, block_id, byte_offset),
+        BlockAction::Split {
+            block_id,
+            byte_offset,
+        } => apply_split(doc, block_id, byte_offset),
         BlockAction::MergeWithPrev { block_id } => apply_merge(doc, block_id),
         BlockAction::InsertAfter { anchor, new_block } => {
             apply_insert_after(doc, anchor, new_block)
@@ -89,9 +92,10 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
         BlockAction::EditCode { block_id, new_text } => apply_edit_code(doc, block_id, new_text),
         // UI-only — handled by the editor pane's action sink, not the model.
         BlockAction::OpenSlashMenu { .. } => {}
-        BlockAction::EditAttrs { block_id, new_attrs } => {
-            apply_edit_attrs(doc, block_id, new_attrs)
-        }
+        BlockAction::EditAttrs {
+            block_id,
+            new_attrs,
+        } => apply_edit_attrs(doc, block_id, new_attrs),
     }
 }
 
@@ -115,7 +119,9 @@ fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
 
 fn apply_split(doc: &mut EditorDoc, id: BlockId, byte_offset: usize) {
     let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get(idx) else { return };
+    let Some(block) = doc.blocks.get(idx) else {
+        return;
+    };
     let kind = block.kind.clone();
     let body = block.body.clone();
 
@@ -252,4 +258,3 @@ fn apply_edit_code(doc: &mut EditorDoc, id: BlockId, new_text: String) {
         block.body = BlockBody::Code(new_text);
     }
 }
-

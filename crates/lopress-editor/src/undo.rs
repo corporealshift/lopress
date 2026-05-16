@@ -8,8 +8,8 @@ const MAX_UNDO: usize = 100;
 const COALESCE_WINDOW: Duration = Duration::from_secs(1);
 
 struct UndoEntry {
-    action: BlockAction,   // original (for redo)
-    inverse: BlockAction,  // computed at push-time (for undo)
+    action: BlockAction,  // original (for redo)
+    inverse: BlockAction, // computed at push-time (for undo)
 }
 
 pub struct UndoStack {
@@ -20,7 +20,11 @@ pub struct UndoStack {
 
 impl UndoStack {
     pub fn new() -> Self {
-        Self { undo: VecDeque::new(), redo: Vec::new(), last_inline_edit: None }
+        Self {
+            undo: VecDeque::new(),
+            redo: Vec::new(),
+            last_inline_edit: None,
+        }
     }
 
     /// Push an action onto the undo stack before it is applied.
@@ -39,14 +43,20 @@ impl UndoStack {
                     block_id: BlockId::new(), // replaced by fix_split_inverse
                 };
                 self.redo.clear();
-                self.push_entry(UndoEntry { action: action.clone(), inverse: placeholder });
+                self.push_entry(UndoEntry {
+                    action: action.clone(),
+                    inverse: placeholder,
+                });
             }
             return;
         };
 
         if let (
             BlockAction::EditInline { block_id, .. },
-            BlockAction::EditInline { block_id: _inv_id, new_runs: _old_runs },
+            BlockAction::EditInline {
+                block_id: _inv_id,
+                new_runs: _old_runs,
+            },
         ) = (action, &inverse)
         {
             let now = Instant::now();
@@ -70,7 +80,10 @@ impl UndoStack {
         }
 
         self.redo.clear();
-        self.push_entry(UndoEntry { action: action.clone(), inverse });
+        self.push_entry(UndoEntry {
+            action: action.clone(),
+            inverse,
+        });
     }
 
     /// Replace the placeholder inverse for the most recent Split entry with
@@ -78,7 +91,9 @@ impl UndoStack {
     pub fn fix_split_inverse(&mut self, new_block_id: BlockId) {
         if let Some(entry) = self.undo.back_mut() {
             if matches!(entry.action, BlockAction::Split { .. }) {
-                entry.inverse = BlockAction::MergeWithPrev { block_id: new_block_id };
+                entry.inverse = BlockAction::MergeWithPrev {
+                    block_id: new_block_id,
+                };
             }
         }
     }
@@ -140,7 +155,10 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
                 BlockBody::Inline(runs) => runs.clone(),
                 _ => return None,
             };
-            Some(BlockAction::EditInline { block_id: *block_id, new_runs: old_runs })
+            Some(BlockAction::EditInline {
+                block_id: *block_id,
+                new_runs: old_runs,
+            })
         }
         BlockAction::EditCode { block_id, .. } => {
             let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
@@ -148,7 +166,10 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
                 BlockBody::Code(t) => t.clone(),
                 _ => return None,
             };
-            Some(BlockAction::EditCode { block_id: *block_id, new_text: old_text })
+            Some(BlockAction::EditCode {
+                block_id: *block_id,
+                new_text: old_text,
+            })
         }
         BlockAction::Split { .. } => None, // post-state required; handled separately
         BlockAction::MergeWithPrev { block_id } => {
@@ -161,7 +182,10 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
                 BlockBody::Inline(runs) => runs.iter().map(|r| r.text.len()).sum(),
                 _ => return None,
             };
-            Some(BlockAction::Split { block_id: prev.id, byte_offset: split_offset })
+            Some(BlockAction::Split {
+                block_id: prev.id,
+                byte_offset: split_offset,
+            })
         }
         BlockAction::Delete { block_id } => {
             let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
@@ -170,11 +194,14 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             }
             let anchor = doc.blocks[idx - 1].id;
             let full_block = doc.blocks[idx].clone();
-            Some(BlockAction::InsertAfter { anchor, new_block: full_block })
+            Some(BlockAction::InsertAfter {
+                anchor,
+                new_block: full_block,
+            })
         }
-        BlockAction::InsertAfter { new_block, .. } => {
-            Some(BlockAction::Delete { block_id: new_block.id })
-        }
+        BlockAction::InsertAfter { new_block, .. } => Some(BlockAction::Delete {
+            block_id: new_block.id,
+        }),
         BlockAction::Move { block_id, to_index } => {
             let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
             // `apply_move` reads `to_index` as a gap in pre-removal
@@ -182,17 +209,26 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             // a forward move (original to_index > idx) undoes with gap
             // `idx`; a backward move undoes with gap `idx + 1`.
             let inverse_to = if *to_index > idx { idx } else { idx + 1 };
-            Some(BlockAction::Move { block_id: *block_id, to_index: inverse_to })
+            Some(BlockAction::Move {
+                block_id: *block_id,
+                to_index: inverse_to,
+            })
         }
         BlockAction::ChangeType { block_id, .. } => {
             let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
             let old_kind = doc.blocks[idx].kind.clone();
-            Some(BlockAction::ChangeType { block_id: *block_id, new_kind: old_kind })
+            Some(BlockAction::ChangeType {
+                block_id: *block_id,
+                new_kind: old_kind,
+            })
         }
         BlockAction::EditAttrs { block_id, .. } => {
             let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
             let old_attrs = doc.blocks[idx].plugin.as_ref()?.attrs.clone();
-            Some(BlockAction::EditAttrs { block_id: *block_id, new_attrs: old_attrs })
+            Some(BlockAction::EditAttrs {
+                block_id: *block_id,
+                new_attrs: old_attrs,
+            })
         }
         BlockAction::OpenSlashMenu { .. } => None,
     }

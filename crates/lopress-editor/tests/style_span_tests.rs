@@ -3,10 +3,24 @@ use lopress_editor::model::style_span::{
 };
 
 fn plain(start: usize, end: usize) -> StyleSpan {
-    StyleSpan { start, end, bold: false, italic: false, code: false, link: None }
+    StyleSpan {
+        start,
+        end,
+        bold: false,
+        italic: false,
+        code: false,
+        link: None,
+    }
 }
 fn bold(start: usize, end: usize) -> StyleSpan {
-    StyleSpan { start, end, bold: true, italic: false, code: false, link: None }
+    StyleSpan {
+        start,
+        end,
+        bold: true,
+        italic: false,
+        code: false,
+        link: None,
+    }
 }
 
 #[test]

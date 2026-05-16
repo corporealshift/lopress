@@ -14,7 +14,6 @@ pub mod paragraph;
 pub mod plugin;
 pub mod style_span;
 
-
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
@@ -83,33 +82,29 @@ pub fn block_view(
     }
 
     let body = match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            paragraph::render_paragraph_editable(
-                runs,
-                block.id,
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
-            )
-            .into_any()
-        }
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading_editable(
-                *level,
-                runs,
-                block.id,
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
-            )
-            .into_any()
-        }
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
+            runs,
+            block.id,
+            on_action.clone(),
+            focus_target,
+            focus_pub,
+            current_doc,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
+        )
+        .into_any(),
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
+            *level,
+            runs,
+            block.id,
+            on_action.clone(),
+            focus_target,
+            focus_pub,
+            current_doc,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
+        )
+        .into_any(),
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
         }

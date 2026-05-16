@@ -12,7 +12,14 @@ pub struct StyleSpan {
 
 impl StyleSpan {
     pub fn plain(start: usize, end: usize) -> Self {
-        Self { start, end, bold: false, italic: false, code: false, link: None }
+        Self {
+            start,
+            end,
+            bold: false,
+            italic: false,
+            code: false,
+            link: None,
+        }
     }
 
     pub fn same_style(&self, other: &StyleSpan) -> bool {
@@ -38,9 +45,25 @@ pub fn split_span_at(spans: &mut Vec<StyleSpan>, abs: usize) {
     let Some(i) = spans.iter().position(|s| s.start < abs && abs < s.end) else {
         return;
     };
-    let Some(span) = spans.get(i).cloned() else { return };
-    let left = StyleSpan { start: span.start, end: abs, bold: span.bold, italic: span.italic, code: span.code, link: span.link.clone() };
-    let right = StyleSpan { start: abs, end: span.end, bold: span.bold, italic: span.italic, code: span.code, link: span.link };
+    let Some(span) = spans.get(i).cloned() else {
+        return;
+    };
+    let left = StyleSpan {
+        start: span.start,
+        end: abs,
+        bold: span.bold,
+        italic: span.italic,
+        code: span.code,
+        link: span.link.clone(),
+    };
+    let right = StyleSpan {
+        start: abs,
+        end: span.end,
+        bold: span.bold,
+        italic: span.italic,
+        code: span.code,
+        link: span.link,
+    };
     spans.splice(i..=i, [left, right]);
 }
 
@@ -48,7 +71,9 @@ pub fn split_span_at(spans: &mut Vec<StyleSpan>, abs: usize) {
 pub fn coalesce_spans(spans: &mut Vec<StyleSpan>) {
     let mut i = 0;
     while i + 1 < spans.len() {
-        let merge = spans.get(i).zip(spans.get(i + 1))
+        let merge = spans
+            .get(i)
+            .zip(spans.get(i + 1))
             .map(|(a, b)| a.end == b.start && a.same_style(b))
             .unwrap_or(false);
         if merge {

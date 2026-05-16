@@ -4,12 +4,14 @@
 //! callers that don't yet need editing.
 
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
-use std::rc::Rc;
-use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline, ActionSink, FocusPublisher};
+use crate::ui::blocks::inline_editor::{
+    build_block_editor, editable_inline, ActionSink, FocusPublisher,
+};
 use crate::ui::blocks::paragraph::render_runs_with_size;
 use floem::reactive::{RwSignal, Scope};
 use floem::views::{container, Decorators};
 use floem::IntoView;
+use std::rc::Rc;
 
 fn font_size_for(level: u8) -> f32 {
     match level {
@@ -40,7 +42,15 @@ pub fn render_heading_editable(
     // padding goes on an outer container so it cannot squeeze the editor's
     // content box and let the text overflow into the adjacent block.
     container(editable_inline(
-        state, block_id, on_action, focus_target, focus_pub, current_doc, false, on_undo, on_redo,
+        state,
+        block_id,
+        on_action,
+        focus_target,
+        focus_pub,
+        current_doc,
+        false,
+        on_undo,
+        on_redo,
     ))
     .style(|s| s.width_full().padding_top(16.).padding_bottom(8.))
 }

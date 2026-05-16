@@ -23,9 +23,9 @@ use floem::views::{
     checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators,
 };
 use floem::{AnyView, IntoView};
-use std::rc::Rc;
 use lopress_plugin::{AttrDecl, AttrType};
 use serde_json::Value;
+use std::rc::Rc;
 
 const HEADER_BG: Color = Color::rgb8(238, 234, 250);
 const HEADER_FG: Color = Color::rgb8(80, 60, 130);
@@ -67,7 +67,15 @@ pub fn plugin_block_view(
     let on_action_for_attrs = on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    let body = render_body(block, on_action.clone(), focus_target, focus_pub, current_doc, on_undo, on_redo);
+    let body = render_body(
+        block,
+        on_action.clone(),
+        focus_target,
+        focus_pub,
+        current_doc,
+        on_undo,
+        on_redo,
+    );
 
     v_stack((header, form, body))
         .style(|s| {
@@ -290,33 +298,29 @@ fn render_body(
 ) -> AnyView {
     let block_id = block.id;
     match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            paragraph::render_paragraph_editable(
-                runs,
-                block_id,
-                on_action,
-                focus_target,
-                focus_pub,
-                current_doc,
-                on_undo,
-                on_redo,
-            )
-            .into_any()
-        }
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading_editable(
-                *level,
-                runs,
-                block_id,
-                on_action,
-                focus_target,
-                focus_pub,
-                current_doc,
-                on_undo,
-                on_redo,
-            )
-            .into_any()
-        }
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
+            runs,
+            block_id,
+            on_action,
+            focus_target,
+            focus_pub,
+            current_doc,
+            on_undo,
+            on_redo,
+        )
+        .into_any(),
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
+            *level,
+            runs,
+            block_id,
+            on_action,
+            focus_target,
+            focus_pub,
+            current_doc,
+            on_undo,
+            on_redo,
+        )
+        .into_any(),
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
         }

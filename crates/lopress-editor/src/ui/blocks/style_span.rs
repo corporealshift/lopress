@@ -52,13 +52,9 @@ impl Styling for InlineRunStyling {
         let line_start: usize = full_text
             .split('\n')
             .take(line)
-            .map(|l| l.len() + 1)  // +1 for the '\n' byte
+            .map(|l| l.len() + 1) // +1 for the '\n' byte
             .sum();
-        let line_len: usize = full_text
-            .split('\n')
-            .nth(line)
-            .map(str::len)
-            .unwrap_or(0);
+        let line_len: usize = full_text.split('\n').nth(line).map(str::len).unwrap_or(0);
         let line_end = line_start + line_len;
         // Allocated once per apply_attr_styles call, not once per span.
         let mono_family = [FamilyOwned::Name(MONO_FAMILY.into())];

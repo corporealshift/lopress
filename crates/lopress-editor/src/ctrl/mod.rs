@@ -22,14 +22,36 @@ pub(crate) struct CtrlHandle {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum CtrlAction {
-    Split { block_id: u64, byte_offset: usize },
-    MergeWithPrev { block_id: u64 },
-    Delete { block_id: u64 },
-    Move { block_id: u64, to_index: usize },
-    ChangeType { block_id: u64, new_kind: CtrlBlockKind },
-    EditInline { block_id: u64, new_runs: Vec<InlineRun> },
-    EditCode { block_id: u64, new_text: String },
-    EditAttrs { block_id: u64, new_attrs: serde_json::Map<String, serde_json::Value> },
+    Split {
+        block_id: u64,
+        byte_offset: usize,
+    },
+    MergeWithPrev {
+        block_id: u64,
+    },
+    Delete {
+        block_id: u64,
+    },
+    Move {
+        block_id: u64,
+        to_index: usize,
+    },
+    ChangeType {
+        block_id: u64,
+        new_kind: CtrlBlockKind,
+    },
+    EditInline {
+        block_id: u64,
+        new_runs: Vec<InlineRun>,
+    },
+    EditCode {
+        block_id: u64,
+        new_text: String,
+    },
+    EditAttrs {
+        block_id: u64,
+        new_attrs: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,19 +69,23 @@ impl CtrlAction {
             doc.blocks.iter().find(|b| b.id.raw() == raw).map(|b| b.id)
         }
         Some(match self {
-            CtrlAction::Split { block_id, byte_offset } => BlockAction::Split {
+            CtrlAction::Split {
+                block_id,
+                byte_offset,
+            } => BlockAction::Split {
                 block_id: find(doc, block_id)?,
                 byte_offset,
             },
-            CtrlAction::MergeWithPrev { block_id } => {
-                BlockAction::MergeWithPrev { block_id: find(doc, block_id)? }
-            }
-            CtrlAction::Delete { block_id } => {
-                BlockAction::Delete { block_id: find(doc, block_id)? }
-            }
-            CtrlAction::Move { block_id, to_index } => {
-                BlockAction::Move { block_id: find(doc, block_id)?, to_index }
-            }
+            CtrlAction::MergeWithPrev { block_id } => BlockAction::MergeWithPrev {
+                block_id: find(doc, block_id)?,
+            },
+            CtrlAction::Delete { block_id } => BlockAction::Delete {
+                block_id: find(doc, block_id)?,
+            },
+            CtrlAction::Move { block_id, to_index } => BlockAction::Move {
+                block_id: find(doc, block_id)?,
+                to_index,
+            },
             CtrlAction::ChangeType { block_id, new_kind } => BlockAction::ChangeType {
                 block_id: find(doc, block_id)?,
                 new_kind: match new_kind {
@@ -73,12 +99,17 @@ impl CtrlAction {
                 block_id: find(doc, block_id)?,
                 new_runs,
             },
-            CtrlAction::EditCode { block_id, new_text } => {
-                BlockAction::EditCode { block_id: find(doc, block_id)?, new_text }
-            }
-            CtrlAction::EditAttrs { block_id, new_attrs } => {
-                BlockAction::EditAttrs { block_id: find(doc, block_id)?, new_attrs }
-            }
+            CtrlAction::EditCode { block_id, new_text } => BlockAction::EditCode {
+                block_id: find(doc, block_id)?,
+                new_text,
+            },
+            CtrlAction::EditAttrs {
+                block_id,
+                new_attrs,
+            } => BlockAction::EditAttrs {
+                block_id: find(doc, block_id)?,
+                new_attrs,
+            },
         })
     }
 }
@@ -118,7 +149,10 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                     let text = items
                         .iter()
                         .map(|item| {
-                            item.runs.iter().map(|r| r.text.as_str()).collect::<String>()
+                            item.runs
+                                .iter()
+                                .map(|r| r.text.as_str())
+                                .collect::<String>()
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -155,7 +189,9 @@ pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlAction>) {
     ));
     let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlAction>();
 
-    let handle = CtrlHandle { snapshot: Arc::clone(&snapshot) };
+    let handle = CtrlHandle {
+        snapshot: Arc::clone(&snapshot),
+    };
 
     let server_snapshot = Arc::clone(&snapshot);
     std::thread::spawn(move || {
@@ -272,6 +308,7 @@ fn png_header() -> tiny_http::Header {
 fn screenshot() -> Result<Vec<u8>, String> {
     use std::mem;
 
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::{HWND, POINT, RECT};
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
@@ -280,7 +317,6 @@ fn screenshot() -> Result<Vec<u8>, String> {
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, GetClientRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
-    use windows::core::PCWSTR;
 
     // Temporarily make the window topmost so DWM composites its wgpu surface
     // to the screen, then capture from the screen DC at the client-area origin.
@@ -306,7 +342,15 @@ fn screenshot() -> Result<Vec<u8>, String> {
 
         // Bring window to the very top (TOPMOST) so its wgpu content is
         // composited by DWM, then capture from the screen at the client origin.
-        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         // Find screen position of the client area origin.
@@ -319,11 +363,21 @@ fn screenshot() -> Result<Vec<u8>, String> {
         let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
         let old = SelectObject(hdc_dst, hbm);
 
-        BitBlt(hdc_dst, 0, 0, width, height, hdc_screen, origin.x, origin.y, SRCCOPY)
-            .map_err(|e| e.to_string())?;
+        BitBlt(
+            hdc_dst, 0, 0, width, height, hdc_screen, origin.x, origin.y, SRCCOPY,
+        )
+        .map_err(|e| e.to_string())?;
 
         // Restore to non-topmost.
-        let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
 
         let pixel_count =
             usize::try_from(width).unwrap_or(0) * usize::try_from(height).unwrap_or(0);

@@ -166,12 +166,10 @@ pub fn block_toolbar_for(
                     {
                         let url = url_buf.get_untracked();
                         write_url_to_selection(editor_sig, spans_sig, &url);
-                        let text =
-                            editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                        let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
                         let spans = spans_sig.get_untracked();
                         let rope = lapce_xi_rope::Rope::from(text.as_str());
-                        let new_runs =
-                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_commit(BlockAction::EditInline { block_id, new_runs });
                         url_sig.set(None);
                     }
@@ -189,12 +187,10 @@ pub fn block_toolbar_for(
                             InlineFlag::Link,
                         );
                         url_sig.set(None);
-                        let text =
-                            editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                        let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
                         let spans = spans_sig.get_untracked();
                         let rope = lapce_xi_rope::Rope::from(text.as_str());
-                        let new_runs =
-                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_remove(BlockAction::EditInline { block_id, new_runs });
                     }
                 };
@@ -203,10 +199,7 @@ pub fn block_toolbar_for(
                         .placeholder("https://…")
                         .on_event_stop(EventListener::KeyDown, move |e: &Event| {
                             if let Event::KeyDown(k) = e {
-                                if matches!(
-                                    k.key.logical_key,
-                                    Key::Named(NamedKey::Enter)
-                                ) {
+                                if matches!(k.key.logical_key, Key::Named(NamedKey::Enter)) {
                                     commit_for_key();
                                 }
                             }
@@ -226,11 +219,7 @@ pub fn block_toolbar_for(
 
 /// One inline-flag toggle button. Active when the current editor selection
 /// has `flag` set on every overlapping style span; clicking toggles it.
-fn toggle_button(
-    lbl: &'static str,
-    flag: InlineFlag,
-    focus_pub: FocusPublisher,
-) -> impl IntoView {
+fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
     let lbl_view = label(move || lbl_owned.clone()).style(move |s| {

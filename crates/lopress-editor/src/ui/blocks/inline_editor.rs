@@ -7,16 +7,16 @@ use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::style_span::InlineRunStyling;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::core::cursor::CursorAffinity;
 use floem::views::editor::gutter::GutterClass;
+use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::text_document::TextDocument;
-use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::view::editor_container_view;
 use floem::views::editor::Editor;
 use floem::views::{stack, Decorators};
 use floem::IntoView;
-use floem::views::editor::core::cursor::CursorAffinity;
 use lapce_xi_rope::Rope;
 use std::rc::Rc;
 
@@ -195,13 +195,12 @@ pub fn editable_inline(
     // list.  Wrapping with `stack((view,))` creates a NEW layout node that IS
     // in normal flow; the inner absolute stack then fills it via size_pct(100%).
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
-    stack((view,))
-        .style(move |s| {
-            let lines = text_sig.get().split('\n').count().max(1) as f32;
-            s.class(GutterClass, |s| s.hide())
-                .width_full()
-                .height(lines * line_height)
-        })
+    stack((view,)).style(move |s| {
+        let lines = text_sig.get().split('\n').count().max(1) as f32;
+        s.class(GutterClass, |s| s.hide())
+            .width_full()
+            .height(lines * line_height)
+    })
 }
 
 // ── Key handler ──────────────────────────────────────────────────────────────
@@ -268,8 +267,7 @@ fn handle_key(
         // Ctrl+Home / Ctrl+End jump focus to the first / last block.
         if let KeyInput::Keyboard(Key::Named(NamedKey::Home), _) = kp.key {
             commit_from_editor(editor_sig, spans_sig, block_id, on_action);
-            let first_id =
-                current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
+            let first_id = current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
             if let Some(id) = first_id {
                 focus_target.set(Some(id));
             }
@@ -277,8 +275,7 @@ fn handle_key(
         }
         if let KeyInput::Keyboard(Key::Named(NamedKey::End), _) = kp.key {
             commit_from_editor(editor_sig, spans_sig, block_id, on_action);
-            let last_id =
-                current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
+            let last_id = current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
             if let Some(id) = last_id {
                 focus_target.set(Some(id));
             }
@@ -292,8 +289,7 @@ fn handle_key(
     if !shift {
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             if s.as_str() == "/" && slash_eligible {
-                let is_empty =
-                    editor_sig.with_untracked(|ed| ed.doc().text().len() == 0);
+                let is_empty = editor_sig.with_untracked(|ed| ed.doc().text().len() == 0);
                 if is_empty {
                     on_action(BlockAction::OpenSlashMenu { block_id });
                     return CommandExecuted::Yes;
@@ -316,14 +312,16 @@ fn handle_key(
             let byte_offset =
                 editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
             commit_from_editor(editor_sig, spans_sig, block_id, on_action);
-            on_action(BlockAction::Split { block_id, byte_offset });
+            on_action(BlockAction::Split {
+                block_id,
+                byte_offset,
+            });
             CommandExecuted::Yes
         }
 
         // Backspace at offset 0 — merge with the previous block.
         KeyInput::Keyboard(Key::Named(NamedKey::Backspace), _) => {
-            let offset =
-                editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
+            let offset = editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
             if offset == 0 {
                 commit_from_editor(editor_sig, spans_sig, block_id, on_action);
                 on_action(BlockAction::MergeWithPrev { block_id });
@@ -413,10 +411,7 @@ fn handle_key(
 
 /// True if any style span overlapping the current editor selection carries a
 /// link. Used to decide whether the URL input row should open after Ctrl+K.
-fn selection_has_link(
-    editor_sig: RwSignal<Editor>,
-    spans_sig: RwSignal<Vec<StyleSpan>>,
-) -> bool {
+fn selection_has_link(editor_sig: RwSignal<Editor>, spans_sig: RwSignal<Vec<StyleSpan>>) -> bool {
     use floem::views::editor::core::cursor::CursorMode;
     let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
         ed.cursor.with_untracked(|c| match &c.mode {
