@@ -9,7 +9,7 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope};
 use floem::style::FlexWrap;
 use floem::text::Weight;
-use floem::views::{h_stack_from_iter, text, Decorators};
+use floem::views::{container, h_stack_from_iter, text, Decorators};
 use floem::IntoView;
 
 /// Body font size (logical px) for paragraphs and list items.
@@ -35,7 +35,13 @@ pub fn render_paragraph_editable(
 ) -> impl IntoView {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
-    editable_inline(state, block_id, on_action, focus_target, focus_pub, current_doc, true, on_undo, on_redo)
+    // The inner editor carries a rigid `height`; the block's vertical padding
+    // goes on an outer container so it cannot squeeze the editor's content
+    // box (which would let the text overflow into the next block).
+    container(editable_inline(
+        state, block_id, on_action, focus_target, focus_pub, current_doc, true, on_undo, on_redo,
+    ))
+    .style(|s| s.width_full().padding_vert(6.))
 }
 
 /// Read-only render of a slice of inline runs as a wrapping flex row.

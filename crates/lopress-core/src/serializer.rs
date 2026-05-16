@@ -55,7 +55,11 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
             }
             out.push(' ');
             if let Some(t) = &b.text {
-                out.push_str(t);
+                // A Markdown heading is a single line: only the first line
+                // carries the `#` prefix. Collapse any soft line breaks to
+                // spaces so a continuation does not reparse as a separate
+                // paragraph (which would break round-tripping).
+                out.push_str(&t.replace('\n', " "));
             }
             out.push('\n');
         }
@@ -212,6 +216,22 @@ mod tests {
         let s = serialize(&d);
         let d2 = parse(&s).unwrap();
         assert_eq!(d, d2);
+    }
+
+    #[test]
+    fn heading_with_soft_newline_stays_a_single_heading() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block::heading(2, "line one\nline two".to_string())],
+        };
+        let s = serialize(&doc);
+        // The continuation must not be emitted as a bare (prefix-less) line.
+        let parsed = parse(&s).unwrap();
+        assert_eq!(parsed.blocks.len(), 1);
+        assert_eq!(parsed.blocks[0].r#type, "heading");
+        assert_eq!(parsed.blocks[0].text.as_deref(), Some("line one line two"));
+        // Re-serializing the parsed doc is stable.
+        assert_eq!(serialize(&parsed), s);
     }
 
     #[test]

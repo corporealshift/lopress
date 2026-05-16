@@ -13,19 +13,19 @@ pub struct Document {
 /// read them without the core having to know about them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct FrontMatter {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slug: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date: Option<NaiveDate>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default)]
     pub draft: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, Value>,

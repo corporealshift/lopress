@@ -94,7 +94,6 @@ pub fn block_view(
                 Rc::clone(&on_undo),
                 Rc::clone(&on_redo),
             )
-            .style(|s| s.padding_vert(6.))
             .into_any()
         }
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
