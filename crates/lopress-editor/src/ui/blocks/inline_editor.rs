@@ -92,8 +92,8 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 /// `focus_target`: when set to `block_id`, this block requests Floem focus.
 /// `current_doc`: needed by the key handler to find adjacent blocks for
 ///   cross-block ↑/↓ navigation.
-/// `slash_eligible`: reserved for the slash command menu; not yet intercepted
-///   via the native key handler (planned follow-up).
+/// `slash_eligible`: when true, typing `/` on an empty block opens the slash
+///   command menu instead of inserting the character (paragraphs only).
 pub fn editable_inline(
     state: BlockEditorState,
     block_id: BlockId,
@@ -101,7 +101,7 @@ pub fn editable_inline(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
-    _slash_eligible: bool,
+    slash_eligible: bool,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
 ) -> impl IntoView {
@@ -137,6 +137,7 @@ pub fn editable_inline(
                 current_doc,
                 &on_undo,
                 &on_redo,
+                slash_eligible,
             );
             // If we consumed the key (block-level action), stop here.
             // Otherwise delegate to the editor's built-in command dispatch
@@ -204,6 +205,7 @@ fn handle_key(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: &Rc<dyn Fn()>,
     on_redo: &Rc<dyn Fn()>,
+    slash_eligible: bool,
 ) -> CommandExecuted {
     use floem::keyboard::{Key, NamedKey};
 
@@ -246,6 +248,21 @@ fn handle_key(
             }
         }
         return CommandExecuted::No;
+    }
+
+    // Slash command trigger: `/` typed on an empty Paragraph block opens
+    // the slash menu instead of inserting the character.
+    if !shift {
+        if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
+            if s.as_str() == "/" && slash_eligible {
+                let is_empty =
+                    editor_sig.with_untracked(|ed| ed.doc().text().len() == 0);
+                if is_empty {
+                    on_action(BlockAction::OpenSlashMenu { block_id });
+                    return CommandExecuted::Yes;
+                }
+            }
+        }
     }
 
     match &kp.key {
