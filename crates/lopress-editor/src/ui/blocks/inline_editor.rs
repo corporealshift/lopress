@@ -265,6 +265,25 @@ fn handle_key(
                 _ => {}
             }
         }
+        // Ctrl+Home / Ctrl+End jump focus to the first / last block.
+        if let KeyInput::Keyboard(Key::Named(NamedKey::Home), _) = kp.key {
+            commit_from_editor(editor_sig, spans_sig, block_id, on_action);
+            let first_id =
+                current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
+            if let Some(id) = first_id {
+                focus_target.set(Some(id));
+            }
+            return CommandExecuted::Yes;
+        }
+        if let KeyInput::Keyboard(Key::Named(NamedKey::End), _) = kp.key {
+            commit_from_editor(editor_sig, spans_sig, block_id, on_action);
+            let last_id =
+                current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
+            if let Some(id) = last_id {
+                focus_target.set(Some(id));
+            }
+            return CommandExecuted::Yes;
+        }
         return CommandExecuted::No;
     }
 
@@ -356,6 +375,36 @@ fn handle_key(
             } else {
                 CommandExecuted::No
             }
+        }
+
+        // Page Up — jump 10 blocks back (clamped to the first block).
+        KeyInput::Keyboard(Key::Named(NamedKey::PageUp), _) => {
+            let target_id = current_doc.with_untracked(|maybe| {
+                let d = maybe.as_ref()?;
+                let i = d.blocks.iter().position(|b| b.id == block_id)?;
+                let j = i.saturating_sub(10);
+                d.blocks.get(j).map(|b| b.id)
+            });
+            if let Some(id) = target_id {
+                commit_from_editor(editor_sig, spans_sig, block_id, on_action);
+                focus_target.set(Some(id));
+            }
+            CommandExecuted::Yes
+        }
+
+        // Page Down — jump 10 blocks forward (clamped to the last block).
+        KeyInput::Keyboard(Key::Named(NamedKey::PageDown), _) => {
+            let target_id = current_doc.with_untracked(|maybe| {
+                let d = maybe.as_ref()?;
+                let i = d.blocks.iter().position(|b| b.id == block_id)?;
+                let j = (i + 10).min(d.blocks.len().saturating_sub(1));
+                d.blocks.get(j).map(|b| b.id)
+            });
+            if let Some(id) = target_id {
+                commit_from_editor(editor_sig, spans_sig, block_id, on_action);
+                focus_target.set(Some(id));
+            }
+            CommandExecuted::Yes
         }
 
         _ => CommandExecuted::No,
