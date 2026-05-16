@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 3a4db9c597fc2ad52626d35ef569b5eaf43c5eb01ea551e15bc92aa2ec4e10aa # shrinks to doc = Document { front_matter: FrontMatter { title: None, slug: None, date: None, tags: [], draft: false, description: None, image: None, extra: {} }, blocks: [Block { type: "paragraph", attrs: Object {}, children: [], text: Some(". ") }] }
+cc 386708a869b71d3290d2b4fe90aecff6450382b7fc952f0d8592b339da682628 # shrinks to doc = Document { front_matter: FrontMatter { title: None, slug: None, date: None, tags: [], draft: false, description: None, image: None, extra: {} }, blocks: [Block { type: "paragraph", attrs: Object {}, children: [], text: Some("0.") }, Block { type: "paragraph", attrs: Object {}, children: [], text: Some("?") }] }

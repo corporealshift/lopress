@@ -104,16 +104,24 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
                     "- ".to_string()
                 };
                 let text = inner.trim_end_matches('\n');
-                let mut first = true;
-                for line in text.lines() {
-                    if first {
-                        out.push_str(&marker);
-                        first = false;
-                    } else {
-                        out.push_str("  ");
-                    }
-                    out.push_str(line);
+                if text.is_empty() {
+                    // An item with no content lines must still emit its
+                    // marker; otherwise the list block vanishes on
+                    // re-serialization and the round-trip is unstable.
+                    out.push_str(marker.trim_end());
                     out.push('\n');
+                } else {
+                    let mut first = true;
+                    for line in text.lines() {
+                        if first {
+                            out.push_str(&marker);
+                            first = false;
+                        } else {
+                            out.push_str("  ");
+                        }
+                        out.push_str(line);
+                        out.push('\n');
+                    }
                 }
             }
         }
@@ -232,6 +240,16 @@ mod tests {
         assert_eq!(parsed.blocks[0].text.as_deref(), Some("line one line two"));
         // Re-serializing the parsed doc is stable.
         assert_eq!(serialize(&parsed), s);
+    }
+
+    #[test]
+    fn empty_list_item_survives_roundtrip() {
+        // `0.` parses as an ordered list with a single empty item. The
+        // serializer must still emit a marker so the list does not vanish.
+        let canonical = parse("0.\n\n?\n").unwrap();
+        let once = serialize(&canonical);
+        let twice = serialize(&parse(&once).unwrap());
+        assert_eq!(once, twice);
     }
 
     #[test]
