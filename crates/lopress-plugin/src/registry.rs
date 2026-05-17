@@ -1,5 +1,5 @@
 use crate::error::PluginError;
-use crate::manifest::{BlockDecl, PluginManifest};
+use crate::manifest::{parse_manifest_str, BlockDecl, PluginManifest};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -42,5 +42,38 @@ impl PluginRegistry {
     pub fn theme(&self, name: &str) -> Option<&LoadedPlugin> {
         let pi = *self.theme_index.get(name)?;
         self.plugins.get(pi)
+    }
+
+    /// Register the built-in ("base") plugins shipped in the core codebase.
+    /// Their manifests are embedded at compile time, so they are present
+    /// regardless of the workspace's `plugins/` directory and cannot be
+    /// removed by the user. Call this before loading user plugins so base
+    /// blocks win any name collision.
+    pub fn load_base_plugins(&mut self) -> Result<(), PluginError> {
+        const LIST_MANIFEST: &str =
+            include_str!("../../../base_plugins/list/manifest.toml");
+        for src in [LIST_MANIFEST] {
+            let manifest = parse_manifest_str(src)?;
+            self.insert(LoadedPlugin {
+                root: PathBuf::new(),
+                manifest,
+            })?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_base_plugins_registers_the_list_block() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_, decl) = reg.block("list").expect("list block registered");
+        assert!(decl.builtin);
+        assert_eq!(decl.editor.as_deref(), Some("list"));
+        assert!(decl.attrs.contains_key("ordered"));
     }
 }

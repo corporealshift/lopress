@@ -1,0 +1,12 @@
+# Built-in "base" plugin: the list block, dogfooding the plugin infrastructure.
+# Embedded at compile time via include_str! — see PluginRegistry::load_base_plugins.
+name    = "lopress-list"
+version = "0.1.0"
+
+[[blocks]]
+name    = "list"
+editor  = "list"
+builtin = true
+
+[blocks.attrs]
+ordered = { type = "bool", ui = "hidden" }
