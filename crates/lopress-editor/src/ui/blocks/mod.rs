@@ -6,6 +6,7 @@
 //! will fold edits back into the document model.
 
 pub mod code;
+pub mod editor_registry;
 pub mod heading;
 pub mod inline_editor;
 pub mod list;
