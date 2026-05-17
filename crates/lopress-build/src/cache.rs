@@ -160,7 +160,10 @@ pub fn hash_plugins(registry: &PluginRegistry) -> Result<String, BuildError> {
         let manifest_bytes = std::fs::read(plugin.root.join("plugin.toml"))?;
         items.push((format!("{name}/plugin.toml"), manifest_bytes));
         for block in &plugin.manifest.blocks {
-            let tpl_rel = &block.template;
+            // Base (built-in) blocks ship no HTML template — nothing to hash.
+            let Some(tpl_rel) = &block.template else {
+                continue;
+            };
             let tpl_bytes = std::fs::read(plugin.root.join(tpl_rel))?;
             items.push((format!("{name}/{tpl_rel}"), tpl_bytes));
         }
