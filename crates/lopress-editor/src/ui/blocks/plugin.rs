@@ -50,6 +50,22 @@ pub fn plugin_block_view(
         return label(|| "(missing plugin meta)".to_string()).into_any();
     };
 
+    let body = render_body(
+        block,
+        on_action.clone(),
+        focus_target,
+        focus_pub,
+        current_doc,
+        on_undo,
+        on_redo,
+    );
+
+    // Builtin (base-plugin) blocks suppress plugin chrome: no header strip,
+    // no attr form — they render as plain editable blocks.
+    if meta.builtin {
+        return v_stack((body,)).style(|s| s.width_full()).into_any();
+    }
+
     let header = label({
         let name = meta.block_type_name.clone();
         move || name.clone()
@@ -67,16 +83,6 @@ pub fn plugin_block_view(
     let attrs_sig: RwSignal<serde_json::Map<String, Value>> = RwSignal::new(meta.attrs.clone());
     let on_action_for_attrs = on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
-
-    let body = render_body(
-        block,
-        on_action.clone(),
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
-    );
 
     v_stack((header, form, body))
         .style(|s| {
