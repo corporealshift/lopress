@@ -53,14 +53,18 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
             let text = b.text.clone().unwrap_or_default();
             EditorBlock::code(lang, text)
         }
-        "list" => list_from_core(b, registry),
-        other => match registry.block(other) {
-            Some((_plugin, decl)) => plugin_block_from_core(b, decl),
-            None => EditorBlock::opaque(
-                other.to_string(),
-                serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
-            ),
-        },
+        other => {
+            if let Some((_plugin, decl)) = registry.native_block(other) {
+                native_block_from_core(b, decl)
+            } else if let Some((_plugin, decl)) = registry.block(other) {
+                plugin_block_from_core(b, decl)
+            } else {
+                EditorBlock::opaque(
+                    other.to_string(),
+                    serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+                )
+            }
+        }
     }
 }
 
@@ -148,16 +152,32 @@ fn list_items_from_block(b: &Block) -> Vec<ListItem> {
         .collect()
 }
 
-fn list_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
+/// Build an `EditorBlock` for a block type that claims a native markdown
+/// construct. Dispatches on the editor key's implied body shape. `list` is
+/// the only native type migrated so far; any other native editor key is
+/// unreachable today and degrades to `Opaque` for a verbatim round-trip.
+fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    match decl.editor.as_deref() {
+        Some("list") => native_list_from_core(b, decl),
+        _ => EditorBlock::opaque(
+            b.r#type.clone(),
+            serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+        ),
+    }
+}
+
+/// Native-list body parser. A list is convertible only if every `list_item`
+/// child holds exactly one `paragraph` child with no further nesting;
+/// otherwise the whole list becomes `Opaque` so its structure round-trips
+/// verbatim. Convertible lists are stamped with `PluginMeta` so they route
+/// through the plugin view and serialize back via `to_core`'s native branch.
+fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let ordered = b
         .attrs
         .get("ordered")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    // A list is convertible only if every list_item child contains exactly one
-    // paragraph child with no further nesting. Otherwise the whole list becomes
-    // Opaque so its structure round-trips verbatim.
     let items: Option<Vec<ListItem>> = if b.children.is_empty() {
         None
     } else {
@@ -183,10 +203,16 @@ fn list_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
     match items {
         Some(items) => {
             let mut block = EditorBlock::list(ordered, items);
-            // When the base list plugin is registered, route the block
-            // through the plugin block view by stamping `PluginMeta`.
-            // `BlockKind::List` is retained for serialization (see to_core).
-            block.plugin = list_plugin_meta(registry, ordered);
+            let mut attrs = Map::new();
+            attrs.insert("ordered".to_string(), Value::Bool(ordered));
+            block.plugin = Some(PluginMeta {
+                block_type_name: decl.name.clone(),
+                attrs,
+                attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+                builtin: decl.builtin,
+                editor: decl.editor.clone(),
+                native: decl.native.clone(),
+            });
             block
         }
         None => EditorBlock::opaque(
@@ -194,21 +220,4 @@ fn list_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
         ),
     }
-}
-
-/// Build `PluginMeta` for a list block from the registered base list plugin.
-/// Returns `None` when no `"list"` block is registered (e.g. in tests that
-/// build a bare registry) so lists degrade to the built-in dispatch.
-fn list_plugin_meta(registry: &PluginRegistry, ordered: bool) -> Option<PluginMeta> {
-    let (_, decl) = registry.block("list")?;
-    let mut attrs = Map::new();
-    attrs.insert("ordered".to_string(), Value::Bool(ordered));
-    Some(PluginMeta {
-        block_type_name: "list".to_string(),
-        attrs,
-        attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
-        builtin: decl.builtin,
-        editor: decl.editor.clone(),
-        native: decl.native.clone(),
-    })
 }
