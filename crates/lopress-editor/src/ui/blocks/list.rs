@@ -141,9 +141,13 @@ fn list_item_editor(
         }
     });
 
-    // Programmatic focus when `focus_target` names this item.
+    // Programmatic focus when `focus_target` names this item. Item 0 also
+    // answers to the list *block* id, so navigation that lands on the list
+    // as a whole (Ctrl+Home/End, Page keys, cross-block arrows) puts the
+    // cursor in the first item instead of dropping it.
     create_effect(move |_| {
-        if focus_target.get() == Some(item_id) {
+        let target = focus_target.get();
+        if target == Some(item_id) || (item_index == 0 && target == Some(block_id)) {
             editor_sig.with_untracked(|ed| {
                 if let Some(view_id) = ed.editor_view_id.get_untracked() {
                     view_id.request_focus();

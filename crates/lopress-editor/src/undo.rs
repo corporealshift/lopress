@@ -137,6 +137,18 @@ impl UndoStack {
         }
     }
 
+    /// After an undo recreates a list item via `SplitListItem` (undoing a
+    /// `MergeListItemWithPrev`), the recreated item has a fresh `BlockId`.
+    /// Update the matching redo entry's `MergeListItemWithPrev` action so a
+    /// subsequent redo merges the right item.
+    pub fn fix_merge_list_item_redo(&mut self, new_item_id: BlockId) {
+        if let Some(entry) = self.redo.last_mut() {
+            if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.action {
+                *item_id = new_item_id;
+            }
+        }
+    }
+
     /// Pop the top undo entry's inverse action (to apply as undo).
     /// Pushes the original onto the redo stack.
     pub fn pop_undo(&mut self) -> Option<BlockAction> {
