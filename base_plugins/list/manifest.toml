@@ -6,6 +6,7 @@ version = "0.1.0"
 [[blocks]]
 name    = "list"
 editor  = "list"
+native  = "list"
 builtin = true
 
 [blocks.attrs]

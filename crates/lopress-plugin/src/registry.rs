@@ -90,7 +90,10 @@ mod tests {
         let (_, decl) = reg.block("list").expect("list block registered");
         assert!(decl.builtin);
         assert_eq!(decl.editor.as_deref(), Some("list"));
+        assert_eq!(decl.native.as_deref(), Some("list"));
         assert!(decl.attrs.contains_key("ordered"));
+        let (_, native_decl) = reg.native_block("list").expect("list claims native list");
+        assert_eq!(native_decl.name, "list");
     }
 
     #[test]
