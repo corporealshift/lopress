@@ -118,9 +118,7 @@ impl UndoStack {
     pub fn fix_split_list_item_inverse(&mut self, new_item_id: BlockId) {
         if let Some(entry) = self.undo.back_mut() {
             if matches!(entry.action, BlockAction::SplitListItem { .. }) {
-                if let BlockAction::MergeListItemWithPrev { item_id, .. } =
-                    &mut entry.inverse
-                {
+                if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.inverse {
                     *item_id = new_item_id;
                 }
             }
@@ -263,9 +261,7 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             })
         }
         BlockAction::EditListItem {
-            block_id,
-            item_id,
-            ..
+            block_id, item_id, ..
         } => {
             let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
             let BlockBody::List(items) = &block.body else {
@@ -286,8 +282,7 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             };
             let pos = items.iter().position(|it| it.id == *item_id)?;
             let prev = items.get(pos.checked_sub(1)?)?;
-            let split_offset: usize =
-                prev.runs.iter().map(|r| r.text.len()).sum();
+            let split_offset: usize = prev.runs.iter().map(|r| r.text.len()).sum();
             Some(BlockAction::SplitListItem {
                 block_id: *block_id,
                 item_id: prev.id,

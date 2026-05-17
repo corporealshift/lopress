@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
 use lopress_editor::actions::BlockAction;
 use lopress_editor::model::types::{BlockKind, EditorBlock, EditorDoc, InlineRun};
@@ -204,11 +204,13 @@ fn edit_inline_within_one_second_coalesces() {
     }
 }
 
-
 use lopress_editor::model::types::{BlockBody, BlockId, ListItem};
 
 fn list_item(text: &str) -> ListItem {
-    ListItem { id: BlockId::new(), runs: vec![InlineRun::plain(text)] }
+    ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain(text)],
+    }
 }
 
 #[test]
@@ -246,11 +248,18 @@ fn inverse_of_merge_list_item_is_split_at_join_point() {
     let doc = doc_with(vec![list]);
     let inv = compute_inverse(
         &doc,
-        &BlockAction::MergeListItemWithPrev { block_id, item_id: cur_id },
+        &BlockAction::MergeListItemWithPrev {
+            block_id,
+            item_id: cur_id,
+        },
     )
     .unwrap();
     match inv {
-        BlockAction::SplitListItem { item_id, byte_offset, .. } => {
+        BlockAction::SplitListItem {
+            item_id,
+            byte_offset,
+            ..
+        } => {
             assert_eq!(item_id, prev_id);
             assert_eq!(byte_offset, 3);
         }
@@ -268,7 +277,11 @@ fn split_list_item_pushes_placeholder_then_fixes_it() {
     let mut doc = doc_with(vec![list]);
     let mut stack = UndoStack::new();
 
-    let action = BlockAction::SplitListItem { block_id, item_id, byte_offset: 6 };
+    let action = BlockAction::SplitListItem {
+        block_id,
+        item_id,
+        byte_offset: 6,
+    };
     stack.push_before_apply(&doc, &action);
     lopress_editor::actions::apply(&mut doc, action);
     assert_eq!(stack.undo_depth(), 1);

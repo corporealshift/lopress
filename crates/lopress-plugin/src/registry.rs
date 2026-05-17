@@ -50,9 +50,8 @@ impl PluginRegistry {
     /// removed by the user. Call this before loading user plugins so base
     /// blocks win any name collision.
     pub fn load_base_plugins(&mut self) -> Result<(), PluginError> {
-        const LIST_MANIFEST: &str =
-            include_str!("../../../base_plugins/list/manifest.toml");
-        for src in [LIST_MANIFEST] {
+        const BASE_MANIFESTS: &[&str] = &[include_str!("../../../base_plugins/list/manifest.toml")];
+        for src in BASE_MANIFESTS {
             let manifest = parse_manifest_str(src)?;
             self.insert(LoadedPlugin {
                 root: PathBuf::new(),

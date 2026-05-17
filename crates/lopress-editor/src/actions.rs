@@ -318,8 +318,12 @@ fn apply_edit_list_item(
     item_id: BlockId,
     new_runs: Vec<InlineRun>,
 ) {
-    let Some(idx) = find_idx(doc, block_id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    let Some(idx) = find_idx(doc, block_id) else {
+        return;
+    };
+    let Some(block) = doc.blocks.get_mut(idx) else {
+        return;
+    };
     if let BlockBody::List(items) = &mut block.body {
         if let Some(item) = items.iter_mut().find(|it| it.id == item_id) {
             item.runs = new_runs;
@@ -333,8 +337,12 @@ fn apply_split_list_item(
     item_id: BlockId,
     byte_offset: usize,
 ) {
-    let Some(idx) = find_idx(doc, block_id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    let Some(idx) = find_idx(doc, block_id) else {
+        return;
+    };
+    let Some(block) = doc.blocks.get_mut(idx) else {
+        return;
+    };
     if let BlockBody::List(items) = &mut block.body {
         if let Some(pos) = items.iter().position(|it| it.id == item_id) {
             split_item_at(items, pos, byte_offset);
@@ -343,8 +351,12 @@ fn apply_split_list_item(
 }
 
 fn apply_merge_list_item(doc: &mut EditorDoc, block_id: BlockId, item_id: BlockId) {
-    let Some(idx) = find_idx(doc, block_id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    let Some(idx) = find_idx(doc, block_id) else {
+        return;
+    };
+    let Some(block) = doc.blocks.get_mut(idx) else {
+        return;
+    };
     if let BlockBody::List(items) = &mut block.body {
         let Some(pos) = items.iter().position(|it| it.id == item_id) else {
             return;

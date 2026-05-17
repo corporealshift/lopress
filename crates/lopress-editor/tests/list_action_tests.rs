@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::types::{
@@ -6,7 +6,10 @@ use lopress_editor::model::types::{
 };
 
 fn item(text: &str) -> ListItem {
-    ListItem { id: BlockId::new(), runs: vec![InlineRun::plain(text)] }
+    ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain(text)],
+    }
 }
 
 fn list_doc(items: Vec<ListItem>) -> EditorDoc {
@@ -51,7 +54,11 @@ fn split_list_item_inserts_new_item_after() {
     let block_id = doc.blocks[0].id;
     apply(
         &mut doc,
-        BlockAction::SplitListItem { block_id, item_id, byte_offset: 6 },
+        BlockAction::SplitListItem {
+            block_id,
+            item_id,
+            byte_offset: 6,
+        },
     );
     assert_eq!(items_of(&doc), vec!["hello ", "world"]);
 }
@@ -63,7 +70,10 @@ fn merge_list_item_with_prev_joins_into_predecessor() {
     let item_id = it1.id;
     let mut doc = list_doc(vec![it0, it1]);
     let block_id = doc.blocks[0].id;
-    apply(&mut doc, BlockAction::MergeListItemWithPrev { block_id, item_id });
+    apply(
+        &mut doc,
+        BlockAction::MergeListItemWithPrev { block_id, item_id },
+    );
     assert_eq!(items_of(&doc), vec!["foobar"]);
 }
 
@@ -73,7 +83,10 @@ fn merge_first_list_item_is_a_no_op() {
     let item_id = it0.id;
     let mut doc = list_doc(vec![it0]);
     let block_id = doc.blocks[0].id;
-    apply(&mut doc, BlockAction::MergeListItemWithPrev { block_id, item_id });
+    apply(
+        &mut doc,
+        BlockAction::MergeListItemWithPrev { block_id, item_id },
+    );
     assert_eq!(items_of(&doc), vec!["only"]);
 }
 
@@ -81,6 +94,12 @@ fn merge_first_list_item_is_a_no_op() {
 fn split_on_a_list_block_splits_the_containing_item() {
     let mut doc = list_doc(vec![item("ab"), item("cd")]);
     let block_id = doc.blocks[0].id;
-    apply(&mut doc, BlockAction::Split { block_id, byte_offset: 4 });
+    apply(
+        &mut doc,
+        BlockAction::Split {
+            block_id,
+            byte_offset: 4,
+        },
+    );
     assert_eq!(items_of(&doc), vec!["ab", "c", "d"]);
 }

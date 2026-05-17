@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use lopress_core::{Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
@@ -43,7 +43,10 @@ fn list_block_gets_plugin_meta_when_base_plugin_registered() {
     let meta = block.plugin.as_ref().expect("list block has plugin meta");
     assert_eq!(meta.block_type_name, "list");
     assert!(meta.builtin);
-    assert_eq!(meta.attrs.get("ordered"), Some(&serde_json::Value::Bool(true)));
+    assert_eq!(
+        meta.attrs.get("ordered"),
+        Some(&serde_json::Value::Bool(true))
+    );
 }
 
 #[test]

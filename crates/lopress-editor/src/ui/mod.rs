@@ -287,7 +287,10 @@ fn editing_view(
         }
 
         // Fix SplitListItem inverse now that the new item id exists.
-        if let BlockAction::SplitListItem { block_id, item_id, .. } = &action {
+        if let BlockAction::SplitListItem {
+            block_id, item_id, ..
+        } = &action
+        {
             let new_item_id = current_doc
                 .with_untracked(|maybe| list_item_after(maybe.as_ref()?, *block_id, *item_id));
             if let Some(new_item_id) = new_item_id {
@@ -302,9 +305,12 @@ fn editing_view(
                 .position(|b| b.id == *block_id)
                 .and_then(|i| d.blocks.get(i + 1))
                 .map(|b| b.id),
-            (BlockAction::SplitListItem { block_id, item_id, .. }, Some(d)) => {
-                list_item_after(d, *block_id, *item_id)
-            }
+            (
+                BlockAction::SplitListItem {
+                    block_id, item_id, ..
+                },
+                Some(d),
+            ) => list_item_after(d, *block_id, *item_id),
             _ => None,
         });
         let change_type_focus = match &action {
