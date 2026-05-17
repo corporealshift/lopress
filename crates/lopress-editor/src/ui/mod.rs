@@ -142,6 +142,9 @@ fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         | BlockAction::Move { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
         BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
+        BlockAction::EditListItem { block_id, .. }
+        | BlockAction::SplitListItem { block_id, .. }
+        | BlockAction::MergeListItemWithPrev { block_id, .. } => Some(*block_id),
     }
 }
 

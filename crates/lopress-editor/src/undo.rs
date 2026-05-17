@@ -233,6 +233,6 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
                 new_attrs: old_attrs,
             })
         }
-        BlockAction::OpenSlashMenu { .. } => None,
+        BlockAction::OpenSlashMenu { .. } | BlockAction::EditListItem { .. } | BlockAction::SplitListItem { .. } | BlockAction::MergeListItemWithPrev { .. } => None,
     }
 }

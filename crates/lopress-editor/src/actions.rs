@@ -56,6 +56,25 @@ pub enum BlockAction {
         block_id: BlockId,
         new_text: String,
     },
+    /// Replace the runs of a single list item. No-op when the block isn't a
+    /// list or the item id is unknown.
+    EditListItem {
+        block_id: BlockId,
+        item_id: BlockId,
+        new_runs: Vec<InlineRun>,
+    },
+    /// Split a list item at `byte_offset` into the item's flat text. The
+    /// trailing portion becomes a new `ListItem` directly after it.
+    SplitListItem {
+        block_id: BlockId,
+        item_id: BlockId,
+        byte_offset: usize,
+    },
+    /// Merge a list item into its predecessor item. No-op for the first item.
+    MergeListItemWithPrev {
+        block_id: BlockId,
+        item_id: BlockId,
+    },
     /// UI-only action: request the slash command menu for `block_id`. Handled
     /// by the editor pane's action sink (which sets a reactive flag); the
     /// document model is unchanged, so `apply` is a no-op for this variant.
@@ -90,6 +109,19 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             apply_edit_inline(doc, block_id, new_runs)
         }
         BlockAction::EditCode { block_id, new_text } => apply_edit_code(doc, block_id, new_text),
+        BlockAction::EditListItem {
+            block_id,
+            item_id,
+            new_runs,
+        } => apply_edit_list_item(doc, block_id, item_id, new_runs),
+        BlockAction::SplitListItem {
+            block_id,
+            item_id,
+            byte_offset,
+        } => apply_split_list_item(doc, block_id, item_id, byte_offset),
+        BlockAction::MergeListItemWithPrev { block_id, item_id } => {
+            apply_merge_list_item(doc, block_id, item_id)
+        }
         // UI-only — handled by the editor pane's action sink, not the model.
         BlockAction::OpenSlashMenu { .. } => {}
         BlockAction::EditAttrs {
@@ -154,7 +186,28 @@ fn apply_split(doc: &mut EditorDoc, id: BlockId, byte_offset: usize) {
             };
             doc.blocks.insert(idx + 1, tail_block);
         }
-        _ => {}
+        BlockBody::List(items) => {
+            // The ctrl API's `Split` command treats a list as the flat text
+            // of its items joined by '\n'. Walk cumulative byte offsets to
+            // find the item containing `byte_offset` and split it there.
+            let mut cumulative = 0usize;
+            let mut target: Option<(usize, usize)> = None;
+            for (i, it) in items.iter().enumerate() {
+                let item_len: usize = it.runs.iter().map(|r| r.text.len()).sum();
+                if byte_offset <= cumulative + item_len {
+                    target = Some((i, byte_offset - cumulative));
+                    break;
+                }
+                cumulative += item_len + 1; // +1 for the joining '\n'
+            }
+            let (pos, local) = target.unwrap_or((items.len().saturating_sub(1), 0));
+            if let Some(b) = doc.blocks.get_mut(idx) {
+                if let BlockBody::List(list) = &mut b.body {
+                    split_item_at(list, pos, local);
+                }
+            }
+        }
+        BlockBody::Opaque(_) => {}
     }
 }
 
@@ -257,4 +310,78 @@ fn apply_edit_code(doc: &mut EditorDoc, id: BlockId, new_text: String) {
     if matches!(block.body, BlockBody::Code(_)) {
         block.body = BlockBody::Code(new_text);
     }
+}
+
+fn apply_edit_list_item(
+    doc: &mut EditorDoc,
+    block_id: BlockId,
+    item_id: BlockId,
+    new_runs: Vec<InlineRun>,
+) {
+    let Some(idx) = find_idx(doc, block_id) else { return };
+    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    if let BlockBody::List(items) = &mut block.body {
+        if let Some(item) = items.iter_mut().find(|it| it.id == item_id) {
+            item.runs = new_runs;
+        }
+    }
+}
+
+fn apply_split_list_item(
+    doc: &mut EditorDoc,
+    block_id: BlockId,
+    item_id: BlockId,
+    byte_offset: usize,
+) {
+    let Some(idx) = find_idx(doc, block_id) else { return };
+    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    if let BlockBody::List(items) = &mut block.body {
+        if let Some(pos) = items.iter().position(|it| it.id == item_id) {
+            split_item_at(items, pos, byte_offset);
+        }
+    }
+}
+
+fn apply_merge_list_item(doc: &mut EditorDoc, block_id: BlockId, item_id: BlockId) {
+    let Some(idx) = find_idx(doc, block_id) else { return };
+    let Some(block) = doc.blocks.get_mut(idx) else { return };
+    if let BlockBody::List(items) = &mut block.body {
+        let Some(pos) = items.iter().position(|it| it.id == item_id) else {
+            return;
+        };
+        if pos == 0 {
+            return;
+        }
+        let cur = items.remove(pos);
+        if let Some(prev) = items.get_mut(pos - 1) {
+            prev.runs.extend(cur.runs);
+        }
+    }
+}
+
+/// Split `items[pos]` at `byte_offset` into its flat text. The head stays in
+/// place; the tail becomes a fresh `ListItem` inserted at `pos + 1`. Styling
+/// is dropped on both sides (the split produces plain runs), matching the
+/// behaviour of `apply_split` for paragraphs.
+fn split_item_at(items: &mut Vec<ListItem>, pos: usize, byte_offset: usize) {
+    let Some(item) = items.get(pos) else { return };
+    let flat: String = item.runs.iter().map(|r| r.text.as_str()).collect();
+    let safe_offset = flat
+        .char_indices()
+        .map(|(b, _)| b)
+        .chain(std::iter::once(flat.len()))
+        .find(|&b| b >= byte_offset)
+        .unwrap_or(flat.len());
+    let head = flat.get(..safe_offset).unwrap_or("").to_owned();
+    let tail = flat.get(safe_offset..).unwrap_or("").to_owned();
+    if let Some(item) = items.get_mut(pos) {
+        item.runs = vec![InlineRun::plain(head)];
+    }
+    items.insert(
+        pos + 1,
+        ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain(tail)],
+        },
+    );
 }
