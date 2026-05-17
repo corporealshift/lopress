@@ -74,6 +74,8 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         attrs: block_attrs_as_object(&b.attrs),
         attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
         builtin: decl.builtin,
+        editor: decl.editor.clone(),
+        native: decl.native.clone(),
     };
 
     let editor = decl.editor.as_deref().unwrap_or("paragraph");
@@ -206,5 +208,7 @@ fn list_plugin_meta(registry: &PluginRegistry, ordered: bool) -> Option<PluginMe
         attrs,
         attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
         builtin: decl.builtin,
+        editor: decl.editor.clone(),
+        native: decl.native.clone(),
     })
 }

@@ -88,6 +88,13 @@ pub struct PluginMeta {
     /// True when this block is owned by a built-in base plugin. The plugin
     /// block view suppresses chrome (header strip, attr form) when set.
     pub builtin: bool,
+    /// The block's editor key (manifest `editor` field). Drives `render_body`
+    /// dispatch via the editor registry. `None` → generic attr-form editor.
+    pub editor: Option<String>,
+    /// The native core type this block claims (manifest `native` field).
+    /// `Some` → `to_core` serializes it as bare native markdown of this type.
+    /// `None` → `to_core` uses the comment container.
+    pub native: Option<String>,
 }
 
 impl EditorBlock {
