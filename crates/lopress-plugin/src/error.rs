@@ -14,4 +14,6 @@ pub enum PluginError {
     MissingTemplate { name: String, template: String },
     #[error("duplicate block name `{0}` across plugins")]
     DuplicateBlock(String),
+    #[error("duplicate native claim `{0}` — two plugins claim the same core type")]
+    DuplicateNative(String),
 }
