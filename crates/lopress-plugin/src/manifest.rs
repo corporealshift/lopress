@@ -30,6 +30,19 @@ pub struct BlockDecl {
     /// suppresses plugin chrome (header strip, attr form) for builtin blocks.
     #[serde(default)]
     pub builtin: bool,
+    /// Capability #2 — Transform. When set, this block IS a native markdown
+    /// construct identified by this `lopress_core` Block type. The value is an
+    /// exclusive claim (see `PluginRegistry`). Absent → comment-container form.
+    #[serde(default)]
+    pub native: Option<String>,
+    /// Capability #3 — Assets. CSS files this block contributes to the page
+    /// `<head>`. Parsed and exposed; build-side injection is a follow-up.
+    #[serde(default)]
+    pub css: Vec<String>,
+    /// Capability #3 — Assets. JS files this block contributes to the page
+    /// `<head>`. Parsed and exposed; build-side injection is a follow-up.
+    #[serde(default)]
+    pub js: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -180,5 +193,43 @@ template = "blocks/video.html"
         let m = parse_manifest_str(src).unwrap();
         assert!(!m.blocks[0].builtin);
         assert_eq!(m.blocks[0].template.as_deref(), Some("blocks/video.html"));
+    }
+
+    #[test]
+    fn parses_native_and_asset_fields() {
+        let src = r#"
+name = "lopress-list"
+version = "0.1.0"
+
+[[blocks]]
+name    = "list"
+editor  = "list"
+native  = "list"
+builtin = true
+css     = ["assets/list.css"]
+js      = ["assets/list.js"]
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        let b = &m.blocks[0];
+        assert_eq!(b.native.as_deref(), Some("list"));
+        assert_eq!(b.css, vec!["assets/list.css".to_string()]);
+        assert_eq!(b.js, vec!["assets/list.js".to_string()]);
+    }
+
+    #[test]
+    fn native_and_assets_default_to_empty() {
+        let src = r#"
+name = "video"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:video"
+template = "blocks/video.html"
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        let b = &m.blocks[0];
+        assert!(b.native.is_none());
+        assert!(b.css.is_empty());
+        assert!(b.js.is_empty());
     }
 }
