@@ -85,6 +85,9 @@ pub struct PluginMeta {
     pub block_type_name: String,
     pub attrs: serde_json::Map<String, Value>,
     pub attr_decls: Vec<AttrDecl>,
+    /// True when this block is owned by a built-in base plugin. The plugin
+    /// block view suppresses chrome (header strip, attr form) when set.
+    pub builtin: bool,
 }
 
 impl EditorBlock {

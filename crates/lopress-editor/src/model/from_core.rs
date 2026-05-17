@@ -53,7 +53,7 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
             let text = b.text.clone().unwrap_or_default();
             EditorBlock::code(lang, text)
         }
-        "list" => list_from_core(b),
+        "list" => list_from_core(b, registry),
         other => match registry.block(other) {
             Some((_plugin, decl)) => plugin_block_from_core(b, decl),
             None => EditorBlock::opaque(
@@ -73,6 +73,7 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         block_type_name: b.r#type.clone(),
         attrs: block_attrs_as_object(&b.attrs),
         attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+        builtin: decl.builtin,
     };
 
     let editor = decl.editor.as_deref().unwrap_or("paragraph");
@@ -145,7 +146,7 @@ fn list_items_from_block(b: &Block) -> Vec<ListItem> {
         .collect()
 }
 
-fn list_from_core(b: &Block) -> EditorBlock {
+fn list_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
     let ordered = b
         .attrs
         .get("ordered")
@@ -178,10 +179,32 @@ fn list_from_core(b: &Block) -> EditorBlock {
     };
 
     match items {
-        Some(items) => EditorBlock::list(ordered, items),
+        Some(items) => {
+            let mut block = EditorBlock::list(ordered, items);
+            // When the base list plugin is registered, route the block
+            // through the plugin block view by stamping `PluginMeta`.
+            // `BlockKind::List` is retained for serialization (see to_core).
+            block.plugin = list_plugin_meta(registry, ordered);
+            block
+        }
         None => EditorBlock::opaque(
             "list".to_string(),
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
         ),
     }
+}
+
+/// Build `PluginMeta` for a list block from the registered base list plugin.
+/// Returns `None` when no `"list"` block is registered (e.g. in tests that
+/// build a bare registry) so lists degrade to the built-in dispatch.
+fn list_plugin_meta(registry: &PluginRegistry, ordered: bool) -> Option<PluginMeta> {
+    let (_, decl) = registry.block("list")?;
+    let mut attrs = Map::new();
+    attrs.insert("ordered".to_string(), Value::Bool(ordered));
+    Some(PluginMeta {
+        block_type_name: "list".to_string(),
+        attrs,
+        attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+        builtin: decl.builtin,
+    })
 }

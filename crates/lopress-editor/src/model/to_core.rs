@@ -16,8 +16,13 @@ pub fn doc_to_core(doc: &EditorDoc) -> Document {
 }
 
 fn block_to_core(b: &EditorBlock) -> Block {
+    // List blocks carry `PluginMeta` purely for editor routing; they still
+    // serialize as core "list" blocks via the match arm below. Every other
+    // plugin-flagged block reconstructs through `plugin_block_to_core`.
     if let Some(meta) = &b.plugin {
-        return plugin_block_to_core(b, meta);
+        if !matches!(b.kind, BlockKind::List { .. }) {
+            return plugin_block_to_core(b, meta);
+        }
     }
     match (&b.kind, &b.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => Block {
