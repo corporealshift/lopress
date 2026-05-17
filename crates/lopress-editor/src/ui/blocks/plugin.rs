@@ -303,6 +303,26 @@ fn render_body(
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
+    use crate::ui::blocks::editor_registry::{editor_for, EditorContext};
+
+    // Registry path: a manifest `editor` key with a registered widget wins.
+    if let Some(key) = block.plugin.as_ref().and_then(|m| m.editor.as_deref()) {
+        if let Some(widget) = editor_for(key) {
+            let ctx = EditorContext {
+                block,
+                on_action: on_action.clone(),
+                focus_target,
+                focus_pub,
+                current_doc,
+                on_undo: Rc::clone(&on_undo),
+                on_redo: Rc::clone(&on_redo),
+            };
+            return widget(&ctx);
+        }
+    }
+
+    // Fallback: editor keys not yet migrated to the registry (paragraph,
+    // heading, code) still dispatch on the Rust `BlockKind` enum.
     let block_id = block.id;
     match (&block.kind, &block.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
