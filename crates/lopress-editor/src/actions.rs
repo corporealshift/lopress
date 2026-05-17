@@ -216,6 +216,35 @@ fn apply_merge(doc: &mut EditorDoc, id: BlockId) {
     if idx == 0 {
         return;
     }
+    // A list block merges only its *first item* into the previous block; the
+    // remaining items stay as a list. Merging the whole list away would
+    // silently drop every item — this fires on Backspace at the start of the
+    // first list item.
+    if matches!(
+        doc.blocks.get(idx).map(|b| &b.body),
+        Some(BlockBody::List(_))
+    ) {
+        let first_runs = match doc.blocks.get_mut(idx).map(|b| &mut b.body) {
+            Some(BlockBody::List(items)) if !items.is_empty() => Some(items.remove(0).runs),
+            _ => None,
+        };
+        if let Some(runs) = first_runs {
+            if let Some(BlockBody::Inline(prev_runs)) =
+                doc.blocks.get_mut(idx - 1).map(|b| &mut b.body)
+            {
+                prev_runs.extend(runs);
+            }
+        }
+        // Drop the list block once it has no items left.
+        let empty = matches!(
+            doc.blocks.get(idx).map(|b| &b.body),
+            Some(BlockBody::List(items)) if items.is_empty()
+        );
+        if empty {
+            doc.blocks.remove(idx);
+        }
+        return;
+    }
     let cur = doc.blocks.remove(idx);
     let Some(prev) = doc.blocks.get_mut(idx - 1) else {
         doc.blocks.insert(idx, cur);

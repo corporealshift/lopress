@@ -103,3 +103,57 @@ fn split_on_a_list_block_splits_the_containing_item() {
     );
     assert_eq!(items_of(&doc), vec!["ab", "c", "d"]);
 }
+
+#[test]
+fn merge_with_prev_on_a_list_lifts_first_item_and_keeps_the_rest() {
+    // Backspace at the start of the first list item emits MergeWithPrev on
+    // the list block — it must not delete the whole list.
+    let mut doc = EditorDoc {
+        blocks: vec![
+            EditorBlock::paragraph(vec![InlineRun::plain("before ")]),
+            EditorBlock::list(false, vec![item("First"), item("Second")]),
+        ],
+        front_matter: lopress_core::FrontMatter::default(),
+    };
+    let list_id = doc.blocks[1].id;
+    apply(&mut doc, BlockAction::MergeWithPrev { block_id: list_id });
+    assert_eq!(doc.blocks.len(), 2, "list block must survive the merge");
+    match &doc.blocks[0].body {
+        BlockBody::Inline(runs) => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            assert_eq!(text, "before First");
+        }
+        _ => panic!("previous block should stay an inline paragraph"),
+    }
+    match &doc.blocks[1].body {
+        BlockBody::List(items) => {
+            let texts: Vec<String> = items
+                .iter()
+                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect())
+                .collect();
+            assert_eq!(texts, vec!["Second"]);
+        }
+        _ => panic!("remaining items should stay a list"),
+    }
+}
+
+#[test]
+fn merge_with_prev_on_a_single_item_list_drops_the_emptied_list() {
+    let mut doc = EditorDoc {
+        blocks: vec![
+            EditorBlock::paragraph(vec![InlineRun::plain("p ")]),
+            EditorBlock::list(false, vec![item("only")]),
+        ],
+        front_matter: lopress_core::FrontMatter::default(),
+    };
+    let list_id = doc.blocks[1].id;
+    apply(&mut doc, BlockAction::MergeWithPrev { block_id: list_id });
+    assert_eq!(doc.blocks.len(), 1);
+    match &doc.blocks[0].body {
+        BlockBody::Inline(runs) => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            assert_eq!(text, "p only");
+        }
+        _ => panic!("expected merged paragraph"),
+    }
+}
