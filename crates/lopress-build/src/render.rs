@@ -197,6 +197,9 @@ mod tests {
                     renderer: None,
                     editor: None,
                     builtin: false,
+                    native: None,
+                    css: Vec::new(),
+                    js: Vec::new(),
                 }],
             },
         })

@@ -62,10 +62,15 @@ fn list_block_serializes_back_to_core_list_type() {
     assert_eq!(core.blocks[0].children[0].r#type, "list_item");
 }
 
+/// Without the base list plugin registered, a core `list` block has no
+/// native handler, so it degrades to `Opaque` (structure preserved verbatim)
+/// rather than becoming an editable `List` block.
 #[test]
-fn list_without_registered_base_plugin_has_no_plugin_meta() {
+fn list_without_registered_base_plugin_degrades_to_opaque() {
     let editor_doc = doc_from_core(&list_doc(), &PluginRegistry::default());
-    assert!(editor_doc.blocks[0].plugin.is_none());
+    let block = &editor_doc.blocks[0];
+    assert!(block.plugin.is_none());
+    assert!(matches!(block.kind, BlockKind::Opaque { .. }));
 }
 
 /// End-to-end: a *tight* markdown list (no blank lines between items) must
