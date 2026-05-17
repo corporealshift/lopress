@@ -331,9 +331,15 @@ fn render_body(
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
         }
-        (BlockKind::List { ordered }, BlockBody::List(items)) => {
-            list::render_list(*ordered, items).into_any()
-        }
+        (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
+            items,
+            block_id,
+            *ordered,
+            on_action,
+            focus_target,
+            focus_pub,
+            current_doc,
+        ),
         _ => floem::views::empty().into_any(),
     }
 }
