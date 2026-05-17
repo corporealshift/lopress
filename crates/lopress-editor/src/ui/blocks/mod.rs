@@ -110,15 +110,6 @@ pub fn block_view(
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
         }
-        (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
-            items,
-            block.id,
-            *ordered,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            current_doc,
-        ),
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
             opaque::render_opaque(type_name, value).into_any()
         }
