@@ -238,15 +238,7 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
                 text: None,
             }
         }
-        Event::Start(Tag::Item) => {
-            let children = parse_blocks(parser, Some(TagEnd::Item))?;
-            Block {
-                r#type: "list_item".into(),
-                attrs: json!({}),
-                children,
-                text: None,
-            }
-        }
+        Event::Start(Tag::Item) => parse_item(parser)?,
         Event::Html(_)
         | Event::InlineHtml(_)
         | Event::Text(_)
@@ -261,6 +253,98 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
             return Ok(None);
         }
     }))
+}
+
+/// Parse the children of a list item.
+///
+/// Loose-list items wrap their content in `Paragraph` events (handled by
+/// `parse_one`); tight-list items emit bare inline events with no wrapper.
+/// Bare inline content is accumulated and synthesised into a `paragraph`
+/// child so every `list_item` has the uniform `list_item > paragraph` shape
+/// regardless of list tightness. An item may also hold block children (e.g.
+/// a nested list) — pending inline text is flushed as a paragraph before
+/// each. An item with no content at all still gets one empty paragraph.
+fn parse_item(parser: &mut Parser<'_>) -> Result<Block, ParseError> {
+    let mut children: Vec<Block> = Vec::new();
+    // Pending bare-inline text of a tight-list item. The inline conversions
+    // here mirror `consume_inline` (emphasis → `*`, strong → `**`, code →
+    // backticks); keep the two in step if either changes.
+    let mut inline = String::new();
+
+    while let Some(ev) = parser.next() {
+        match ev {
+            Event::End(TagEnd::Item) => break,
+            Event::Text(t) => inline.push_str(&t),
+            Event::Code(t) => {
+                inline.push('`');
+                inline.push_str(&t);
+                inline.push('`');
+            }
+            Event::SoftBreak | Event::HardBreak => inline.push('\n'),
+            Event::Start(Tag::Emphasis) | Event::End(TagEnd::Emphasis) => inline.push('*'),
+            Event::Start(Tag::Strong) | Event::End(TagEnd::Strong) => inline.push_str("**"),
+            Event::Start(Tag::Link { .. }) => {
+                for inner in parser.by_ref() {
+                    match inner {
+                        Event::Text(t) => inline.push_str(&t),
+                        Event::End(TagEnd::Link) => break,
+                        _ => {}
+                    }
+                }
+            }
+            Event::Start(Tag::Image { .. }) => {
+                // Consistent with `consume_inline`: an image mixed with text
+                // is dropped (only a standalone image becomes its own block,
+                // which a list item is not).
+                for inner in parser.by_ref() {
+                    if matches!(inner, Event::End(TagEnd::Image)) {
+                        break;
+                    }
+                }
+            }
+            // A block-level child (loose-list paragraph, nested list, …).
+            // Flush any pending tight-list inline text first.
+            block_start @ Event::Start(_) => {
+                flush_item_paragraph(&mut children, &mut inline);
+                if let Some(block) = parse_one(block_start, parser)? {
+                    children.push(block);
+                }
+            }
+            // Stray End events, task markers, raw HTML — ignore.
+            _ => {}
+        }
+    }
+    flush_item_paragraph(&mut children, &mut inline);
+    if children.is_empty() {
+        children.push(Block {
+            r#type: "paragraph".into(),
+            attrs: json!({}),
+            children: vec![],
+            text: Some(String::new()),
+        });
+    }
+
+    Ok(Block {
+        r#type: "list_item".into(),
+        attrs: json!({}),
+        children,
+        text: None,
+    })
+}
+
+/// Drain `inline` into a synthesised `paragraph` child when it holds
+/// non-whitespace text; otherwise discard it.
+fn flush_item_paragraph(children: &mut Vec<Block>, inline: &mut String) {
+    if inline.trim().is_empty() {
+        inline.clear();
+    } else {
+        children.push(Block {
+            r#type: "paragraph".into(),
+            attrs: json!({}),
+            children: vec![],
+            text: Some(std::mem::take(inline)),
+        });
+    }
 }
 
 fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block>) {
@@ -360,6 +444,53 @@ mod tests {
         assert_eq!(d.blocks[0].attrs, json!({"ordered": false}));
         assert_eq!(d.blocks[0].children.len(), 2);
         assert_eq!(d.blocks[0].children[0].r#type, "list_item");
+    }
+
+    #[test]
+    fn tight_list_items_carry_their_text() {
+        // Tight lists (no blank line between items) emit bare inline events
+        // with no Paragraph wrapper — the item text must still be captured.
+        let d = parse("- one\n- two\n").unwrap();
+        let list = &d.blocks[0];
+        assert_eq!(list.children.len(), 2);
+        for (item, expected) in list.children.iter().zip(["one", "two"]) {
+            assert_eq!(item.r#type, "list_item");
+            assert_eq!(
+                item.children.len(),
+                1,
+                "item should have one paragraph child"
+            );
+            assert_eq!(item.children[0].r#type, "paragraph");
+            assert_eq!(item.children[0].text.as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn loose_list_items_carry_their_text() {
+        let d = parse("- one\n\n- two\n").unwrap();
+        let list = &d.blocks[0];
+        assert_eq!(list.children.len(), 2);
+        assert_eq!(list.children[0].children[0].text.as_deref(), Some("one"));
+        assert_eq!(list.children[1].children[0].text.as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn ordered_tight_list_items_carry_their_text() {
+        let d = parse("1. first\n2. second\n").unwrap();
+        let list = &d.blocks[0];
+        assert_eq!(list.attrs, json!({"ordered": true}));
+        assert_eq!(list.children[0].children[0].text.as_deref(), Some("first"));
+        assert_eq!(list.children[1].children[0].text.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn tight_list_item_with_nested_list_keeps_both() {
+        let d = parse("- one\n  - sub\n").unwrap();
+        let item0 = &d.blocks[0].children[0];
+        assert_eq!(item0.children.len(), 2);
+        assert_eq!(item0.children[0].r#type, "paragraph");
+        assert_eq!(item0.children[0].text.as_deref(), Some("one"));
+        assert_eq!(item0.children[1].r#type, "list");
     }
 
     #[test]

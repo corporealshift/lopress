@@ -62,3 +62,28 @@ fn list_without_registered_base_plugin_has_no_plugin_meta() {
     let editor_doc = doc_from_core(&list_doc(), &PluginRegistry::default());
     assert!(editor_doc.blocks[0].plugin.is_none());
 }
+
+/// End-to-end: a *tight* markdown list (no blank lines between items) must
+/// load as an editable `List` block, not fall back to `Opaque`.
+#[test]
+fn tight_markdown_list_loads_as_an_editable_list_block() {
+    let parsed = lopress_core::parse("- one\n- two\n- three\n").unwrap();
+    let editor_doc = doc_from_core(&parsed, &registry());
+    assert_eq!(editor_doc.blocks.len(), 1);
+    let block = &editor_doc.blocks[0];
+    assert!(
+        matches!(block.kind, BlockKind::List { ordered: false }),
+        "tight list should be a List block, got {:?}",
+        block.kind
+    );
+    match &block.body {
+        BlockBody::List(items) => {
+            let texts: Vec<String> = items
+                .iter()
+                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect())
+                .collect();
+            assert_eq!(texts, vec!["one", "two", "three"]);
+        }
+        other => panic!("expected List body, got {other:?}"),
+    }
+}
