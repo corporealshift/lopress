@@ -139,7 +139,7 @@ pub fn editable_inline(
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
-    let _combined_key = move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
+    let combined_key = move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
         let result = handle_key(
             kp,
             ms,
@@ -192,6 +192,42 @@ pub fn editable_inline(
         .on_event_cont(EventListener::PointerUp, move |event| {
             if let Event::PointerUp(pe) = event {
                 editor_sig.get_untracked().pointer_up(pe);
+            }
+        })
+        .on_event_stop(EventListener::KeyDown, move |event| {
+            let Event::KeyDown(key_event) = event else {
+                return;
+            };
+            let key_text = key_event.key.text.clone();
+            let Ok(keypress) = KeyPress::try_from(key_event) else {
+                return;
+            };
+            combined_key(&keypress, key_event.modifiers);
+
+            // Character insertion: Floem's editor_view does not insert text
+            // itself — editor_content used to. Replicate that, with SHIFT/ALTGR
+            // (and ALT on macOS) cleared so shifted characters still type.
+            let mut mods = key_event.modifiers;
+            mods.set(floem::keyboard::Modifiers::SHIFT, false);
+            mods.set(floem::keyboard::Modifiers::ALTGR, false);
+            #[cfg(target_os = "macos")]
+            mods.set(floem::keyboard::Modifiers::ALT, false);
+            if mods.is_empty() {
+                use floem::keyboard::{Key, NamedKey};
+                match keypress.key {
+                    KeyInput::Keyboard(Key::Character(c), _) => {
+                        editor_sig.get_untracked().receive_char(&c);
+                    }
+                    KeyInput::Keyboard(Key::Named(NamedKey::Space), _) => {
+                        editor_sig.get_untracked().receive_char(" ");
+                    }
+                    KeyInput::Keyboard(Key::Unidentified(_), _) => {
+                        if let Some(text) = key_text {
+                            editor_sig.get_untracked().receive_char(&text);
+                        }
+                    }
+                    _ => {}
+                }
             }
         })
         .on_move(move |point| {
