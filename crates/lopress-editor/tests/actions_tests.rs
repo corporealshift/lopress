@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::to_core::doc_to_core;
