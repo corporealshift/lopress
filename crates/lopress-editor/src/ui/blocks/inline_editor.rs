@@ -5,6 +5,7 @@ use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::style_span::InlineRunStyling;
+use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
@@ -13,10 +14,11 @@ use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::text_document::TextDocument;
-use floem::views::editor::view::editor_container_view;
+use floem::views::editor::view::editor_view;
 use floem::views::editor::Editor;
 use floem::views::{stack, Decorators};
 use floem::IntoView;
+use floem::View;
 use lapce_xi_rope::Rope;
 use std::rc::Rc;
 
@@ -135,44 +137,66 @@ pub fn editable_inline(
 
     let on_action_for_key = on_action;
 
-    // Build the default command handler once; it handles arrow navigation,
-    // backspace deletion, etc. via the editor's built-in keymap.
-    // We call it explicitly because editor_container_view discards the return
-    // value of our closure (see view.rs:1172 — semicolon), so returning
-    // CommandExecuted::No does NOT automatically fall through to any default.
+    // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
+    let _combined_key = move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
+        let result = handle_key(
+            kp,
+            ms,
+            editor_sig,
+            spans_sig,
+            style_rev,
+            block_id,
+            &on_action_for_key,
+            focus_target,
+            current_doc,
+            &on_undo,
+            &on_redo,
+            slash_eligible,
+            link_url_sig,
+        );
+        if result == CommandExecuted::Yes {
+            result
+        } else {
+            default_kp_handler(kp, ms)
+        }
+    };
 
-    let view = editor_container_view(
-        editor_sig,
-        // Only show the cursor for the block that actually has keyboard focus.
-        // Passing |_| true causes every block to paint a cursor permanently.
-        move |_| editor_sig.with_untracked(|ed| ed.active.get()),
-        move |kp, ms| {
-            let result = handle_key(
-                kp,
-                ms,
-                editor_sig,
-                spans_sig,
-                style_rev,
-                block_id,
-                &on_action_for_key,
-                focus_target,
-                current_doc,
-                &on_undo,
-                &on_redo,
-                slash_eligible,
-                link_url_sig,
-            );
-            // If we consumed the key (block-level action), stop here.
-            // Otherwise delegate to the editor's built-in command dispatch
-            // so that arrow keys, backspace, etc. work normally.
-            if result == CommandExecuted::Yes {
-                result
-            } else {
-                default_kp_handler(kp, ms)
+    // Lower-level editor view: no gutter, no per-block scroll. The is_active
+    // closure reads `active` with a *tracked* `.get()` so the caret paint is
+    // invalidated when focus changes (Floem wraps this closure in a memo).
+    let view = editor_view(editor_sig, move |_| editor_sig.with(|ed| ed.active.get()));
+    let view_id = view.id();
+    editor_sig.with_untracked(|ed| ed.editor_view_id.set(Some(view_id)));
+
+    let view = view
+        .style(|s| s.size_full().cursor(floem::style::CursorStyle::Text))
+        .on_event_cont(EventListener::FocusGained, move |_| {
+            editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());
+        })
+        .on_event_cont(EventListener::FocusLost, move |_| {
+            editor_sig.with_untracked(|ed| ed.editor_view_focus_lost.notify());
+        })
+        .on_event_cont(EventListener::PointerDown, move |event| {
+            if let Event::PointerDown(pe) = event {
+                view_id.request_active();
+                view_id.request_focus();
+                editor_sig.get_untracked().pointer_down(pe);
             }
-        },
-    );
+        })
+        .on_event_cont(EventListener::PointerMove, move |event| {
+            if let Event::PointerMove(pe) = event {
+                editor_sig.get_untracked().pointer_move(pe);
+            }
+        })
+        .on_event_cont(EventListener::PointerUp, move |event| {
+            if let Event::PointerUp(pe) = event {
+                editor_sig.get_untracked().pointer_up(pe);
+            }
+        })
+        .on_move(move |point| {
+            editor_sig.with_untracked(|ed| ed.window_origin.set(point));
+        });
 
     // Publish focus so the toolbar can reach our editor + spans.
     create_effect(move |_| {
