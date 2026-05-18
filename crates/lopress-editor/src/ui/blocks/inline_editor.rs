@@ -57,6 +57,12 @@ pub struct BlockEditorState {
     pub link_url_sig: RwSignal<Option<String>>,
 }
 
+/// Pixel height of a block given its wrapped visual-line count. Clamps to at
+/// least one line so an empty block still has height.
+fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
+    f32::from(visual_lines.max(1)) * line_height
+}
+
 /// Build a `BlockEditorState` for an inline block, initialised from `runs`.
 /// Creates the `TextDocument`, `InlineRunStyling`, and `Editor` in scope `cx`.
 pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> BlockEditorState {
@@ -516,5 +522,21 @@ fn commit_and_jump_next(
     });
     if let Some(id) = next_id {
         focus_target.set(Some(id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_height_px;
+
+    #[test]
+    fn block_height_scales_with_visual_lines() {
+        assert!((block_height_px(1, 20.0) - 20.0).abs() < f32::EPSILON);
+        assert!((block_height_px(3, 20.0) - 60.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn block_height_clamps_empty_to_one_line() {
+        assert!((block_height_px(0, 20.0) - 20.0).abs() < f32::EPSILON);
     }
 }
