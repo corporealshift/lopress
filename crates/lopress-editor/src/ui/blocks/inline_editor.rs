@@ -9,7 +9,7 @@ use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
-use floem::views::editor::gutter::GutterClass;
+
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
@@ -132,7 +132,6 @@ pub fn editable_inline(
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
-    let text_sig = state.text_sig;
     let link_url_sig = state.link_url_sig;
 
     let on_action_for_key = on_action;
@@ -267,10 +266,15 @@ pub fn editable_inline(
     // in normal flow; the inner absolute stack then fills it via size_pct(100%).
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
     stack((view,)).style(move |s| {
-        let lines = text_sig.get().split('\n').count().max(1) as f32;
-        s.class(GutterClass, |s| s.hide())
-            .width_full()
-            .height(lines * line_height)
+        // Track screen_lines so the height recomputes when wrapping reflows
+        // (text edit or column-width change). `last_vline()` is the index of
+        // the last wrapped visual line; +1 converts it to a count.
+        let visual_lines = editor_sig.with(|ed| {
+            ed.screen_lines.get();
+            u16::try_from(ed.last_vline().0 + 1).unwrap_or(u16::MAX)
+        });
+        s.width_full()
+            .height(block_height_px(visual_lines, line_height))
     })
 }
 
