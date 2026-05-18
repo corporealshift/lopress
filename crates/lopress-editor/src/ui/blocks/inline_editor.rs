@@ -9,7 +9,6 @@ use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
-
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
@@ -21,6 +20,9 @@ use floem::IntoView;
 use floem::View;
 use lapce_xi_rope::Rope;
 use std::rc::Rc;
+
+/// Caret color for inline block editors — dark enough to contrast on white.
+const CARET_COLOR: floem::peniko::Color = floem::peniko::Color::rgb8(40, 40, 40);
 
 /// Callback used by editable widgets to push every block-tree mutation
 /// through the `actions::apply` chokepoint.
@@ -169,7 +171,11 @@ pub fn editable_inline(
     editor_sig.with_untracked(|ed| ed.editor_view_id.set(Some(view_id)));
 
     let view = view
-        .style(|s| s.size_full().cursor(floem::style::CursorStyle::Text))
+        .style(|s| {
+            s.size_full()
+                .cursor(floem::style::CursorStyle::Text)
+                .set(floem::style::CursorColor, CARET_COLOR)
+        })
         .on_event_cont(EventListener::FocusGained, move |_| {
             editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());
         })
