@@ -118,8 +118,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 ///   cross-block ↑/↓ navigation.
 /// `slash_eligible`: when true, typing `/` on an empty block opens the slash
 ///   command menu instead of inserting the character (paragraphs only).
-// Line counts are tiny, so the usize->f32 height math cannot lose precision.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::too_many_arguments)]
 pub fn editable_inline(
     state: BlockEditorState,
     block_id: BlockId,
@@ -264,12 +263,9 @@ pub fn editable_inline(
         }
     });
 
-    // `editor_container_view` returns a stack with `.absolute().size_pct(100%)`
-    // baked in.  `AnyView = Box<dyn View>` delegates its ViewId to the inner
-    // view, so `.into_any().style()` modifies the inner absolute stack in-place
-    // — leaving it out of normal flow and contributing zero height to the block
-    // list.  Wrapping with `stack((view,))` creates a NEW layout node that IS
-    // in normal flow; the inner absolute stack then fills it via size_pct(100%).
+    // Wrap the `editor_view` in a `stack` so the explicit per-block height
+    // below lands on a normal-flow layout node; the inner `editor_view` fills
+    // it via `size_full()`.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
     stack((view,)).style(move |s| {
         // Track screen_lines so the height recomputes when wrapping reflows
