@@ -104,7 +104,15 @@ fn render_custom(
         write_block(&mut inner_html, c, registry, tera)?;
     }
     let plugin_name = &plugin.manifest.name;
-    let template_name = &decl.template;
+    let Some(template_name) = &decl.template else {
+        // Base (built-in) block with no HTML template — handled by the
+        // editor, not the static renderer. Emit the inner HTML directly.
+        out.push_str(&inner_html);
+        if !inner_html.is_empty() && !inner_html.ends_with('\n') {
+            out.push('\n');
+        }
+        return Ok(());
+    };
     let template_key = format!("{plugin_name}::{template_name}");
     let mut ctx = tera::Context::new();
     ctx.insert("attrs", &b.attrs);
@@ -184,10 +192,14 @@ mod tests {
                 theme: false,
                 blocks: vec![BlockDecl {
                     name: "lopress:demo".into(),
-                    template: "blocks/demo.html".into(),
+                    template: Some("blocks/demo.html".into()),
                     attrs: Default::default(),
                     renderer: None,
                     editor: None,
+                    builtin: false,
+                    native: None,
+                    css: Vec::new(),
+                    js: Vec::new(),
                 }],
             },
         })

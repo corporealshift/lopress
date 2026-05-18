@@ -16,8 +16,13 @@ pub fn doc_to_core(doc: &EditorDoc) -> Document {
 }
 
 fn block_to_core(b: &EditorBlock) -> Block {
+    // Plugin-flagged blocks: a `native` claim serializes as bare native
+    // markdown of that core type; otherwise the comment container is used.
     if let Some(meta) = &b.plugin {
-        return plugin_block_to_core(b, meta);
+        return match &meta.native {
+            Some(core_type) => native_block_to_core(b, meta, core_type),
+            None => plugin_block_to_core(b, meta),
+        };
     }
     match (&b.kind, &b.body) {
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => Block {
@@ -38,30 +43,7 @@ fn block_to_core(b: &EditorBlock) -> Block {
             children: vec![],
             text: Some(text.clone()),
         },
-        (BlockKind::List { ordered }, BlockBody::List(items)) => Block {
-            r#type: "list".into(),
-            attrs: json!({ "ordered": ordered }),
-            children: items
-                .iter()
-                .map(|i| Block {
-                    r#type: "list_item".into(),
-                    attrs: empty_attrs(),
-                    children: vec![Block {
-                        r#type: "paragraph".into(),
-                        attrs: empty_attrs(),
-                        children: vec![],
-                        text: Some(serialize_inline(&i.runs)),
-                    }],
-                    text: None,
-                })
-                .collect(),
-            text: None,
-        },
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
-            // The Opaque body holds the original `Block` JSON verbatim.
-            // Reconstructing from it gives us byte-identical round-trip.
-            // On the impossible failure path, emit a typed empty block rather
-            // than panicking.
             serde_json::from_value::<Block>(value.clone()).unwrap_or_else(|_| Block {
                 r#type: type_name.clone(),
                 attrs: empty_attrs(),
@@ -69,13 +51,54 @@ fn block_to_core(b: &EditorBlock) -> Block {
                 text: None,
             })
         }
-        // kind / body mismatch shouldn't arise from the constructors, but if it
-        // does, fall back to an empty paragraph rather than panic.
+        // kind / body mismatch shouldn't arise from the constructors, but if
+        // it does, fall back to an empty paragraph rather than panic.
         _ => Block {
             r#type: "paragraph".into(),
             attrs: empty_attrs(),
             children: vec![],
             text: Some(String::new()),
+        },
+    }
+}
+
+/// Serialize a `native`-claiming plugin block to its core markdown form.
+/// Dispatches on the body shape; `list` is the only native type today.
+fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> Block {
+    match &b.body {
+        BlockBody::List(items) => {
+            let ordered = meta
+                .attrs
+                .get("ordered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Block {
+                r#type: core_type.to_string(),
+                attrs: json!({ "ordered": ordered }),
+                children: items
+                    .iter()
+                    .map(|i| Block {
+                        r#type: "list_item".into(),
+                        attrs: empty_attrs(),
+                        children: vec![Block {
+                            r#type: "paragraph".into(),
+                            attrs: empty_attrs(),
+                            children: vec![],
+                            text: Some(serialize_inline(&i.runs)),
+                        }],
+                        text: None,
+                    })
+                    .collect(),
+                text: None,
+            }
+        }
+        // Other body shapes belong to native types not yet migrated; emit a
+        // typed block carrying the attrs rather than panicking.
+        _ => Block {
+            r#type: core_type.to_string(),
+            attrs: Value::Object(meta.attrs.clone()),
+            children: vec![],
+            text: None,
         },
     }
 }

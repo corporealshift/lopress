@@ -6,6 +6,7 @@
 //! will fold edits back into the document model.
 
 pub mod code;
+pub mod editor_registry;
 pub mod heading;
 pub mod inline_editor;
 pub mod list;
@@ -108,9 +109,6 @@ pub fn block_view(
         .into_any(),
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code::render_code(lang, text).into_any()
-        }
-        (BlockKind::List { ordered }, BlockBody::List(items)) => {
-            list::render_list(*ordered, items).into_any()
         }
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
             opaque::render_opaque(type_name, value).into_any()

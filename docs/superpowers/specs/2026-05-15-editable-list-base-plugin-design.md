@@ -1,7 +1,7 @@
 # Editable List Items — List as a Base Plugin
 
 **Date:** 2026-05-15
-**Status:** approved, deferred
+**Status:** implemented
 **Prerequisite:** `2026-05-15-editor-assessment-fixes-design.md` fully implemented
 
 Lists are currently read-only in the editor. This spec covers making list items

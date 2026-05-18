@@ -75,10 +75,14 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     }
     for plugin in &registry.plugins {
         for block in &plugin.manifest.blocks {
+            // Base (built-in) blocks are editor-only and ship no HTML
+            // template — there is nothing to register for the static build.
+            let Some(template) = &block.template else {
+                continue;
+            };
             let plugin_name = &plugin.manifest.name;
-            let template = &block.template;
             let key = format!("{plugin_name}::{template}");
-            let src = std::fs::read_to_string(plugin.root.join(&block.template))?;
+            let src = std::fs::read_to_string(plugin.root.join(template))?;
             tera.add_raw_template(&key, &src)
                 .map_err(|e| BuildError::Config(format!("plugin template `{key}`: {e}")))?;
         }

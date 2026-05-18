@@ -142,7 +142,20 @@ fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         | BlockAction::Move { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
         BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
+        BlockAction::EditListItem { block_id, .. }
+        | BlockAction::SplitListItem { block_id, .. }
+        | BlockAction::MergeListItemWithPrev { block_id, .. } => Some(*block_id),
     }
+}
+
+/// The id of the item immediately after `item_id` in `block_id`'s list.
+fn list_item_after(doc: &EditorDoc, block_id: BlockId, item_id: BlockId) -> Option<BlockId> {
+    let block = doc.blocks.iter().find(|b| b.id == block_id)?;
+    let crate::model::types::BlockBody::List(items) = &block.body else {
+        return None;
+    };
+    let pos = items.iter().position(|it| it.id == item_id)?;
+    items.get(pos + 1).map(|it| it.id)
 }
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
@@ -273,6 +286,18 @@ fn editing_view(
             }
         }
 
+        // Fix SplitListItem inverse now that the new item id exists.
+        if let BlockAction::SplitListItem {
+            block_id, item_id, ..
+        } = &action
+        {
+            let new_item_id = current_doc
+                .with_untracked(|maybe| list_item_after(maybe.as_ref()?, *block_id, *item_id));
+            if let Some(new_item_id) = new_item_id {
+                undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
+            }
+        }
+
         let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::Split { block_id, .. }, Some(d)) => d
                 .blocks
@@ -280,6 +305,12 @@ fn editing_view(
                 .position(|b| b.id == *block_id)
                 .and_then(|i| d.blocks.get(i + 1))
                 .map(|b| b.id),
+            (
+                BlockAction::SplitListItem {
+                    block_id, item_id, ..
+                },
+                Some(d),
+            ) => list_item_after(d, *block_id, *item_id),
             _ => None,
         });
         let change_type_focus = match &action {
@@ -322,6 +353,20 @@ fn editing_view(
                         undo_stack.update(|s| s.fix_merge_redo(new_id));
                     }
                 }
+                // Undoing a MergeListItemWithPrev re-applies a SplitListItem,
+                // minting a fresh item id; point the redo entry's
+                // MergeListItemWithPrev at it.
+                if let BlockAction::SplitListItem {
+                    block_id, item_id, ..
+                } = &action
+                {
+                    let new_item_id = current_doc.with_untracked(|maybe| {
+                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
+                    });
+                    if let Some(new_item_id) = new_item_id {
+                        undo_stack.update(|s| s.fix_merge_list_item_redo(new_item_id));
+                    }
+                }
                 if let Some(id) = focus_id {
                     floem::action::exec_after(Duration::from_millis(0), move |_| {
                         focus_target.set(Some(id));
@@ -357,6 +402,19 @@ fn editing_view(
                     });
                     if let Some(new_id) = new_id {
                         undo_stack.update(|s| s.fix_split_inverse(new_id));
+                    }
+                }
+                // Redoing a SplitListItem mints a fresh item id; refresh the
+                // undo entry's MergeListItemWithPrev inverse to target it.
+                if let BlockAction::SplitListItem {
+                    block_id, item_id, ..
+                } = &action
+                {
+                    let new_item_id = current_doc.with_untracked(|maybe| {
+                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
+                    });
+                    if let Some(new_item_id) = new_item_id {
+                        undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
                     }
                 }
                 if let Some(id) = focus_id {

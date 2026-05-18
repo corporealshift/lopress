@@ -85,6 +85,38 @@ pub struct PluginMeta {
     pub block_type_name: String,
     pub attrs: serde_json::Map<String, Value>,
     pub attr_decls: Vec<AttrDecl>,
+    /// True when this block is owned by a built-in base plugin. The plugin
+    /// block view suppresses chrome (header strip, attr form) when set.
+    pub builtin: bool,
+    /// The block's editor key (manifest `editor` field). Drives `render_body`
+    /// dispatch via the editor registry. `None` → generic attr-form editor.
+    pub editor: Option<String>,
+    /// The native core type this block claims (manifest `native` field).
+    /// `Some` → `to_core` serializes it as bare native markdown of this type.
+    /// `None` → `to_core` uses the comment container.
+    pub native: Option<String>,
+}
+
+impl PluginMeta {
+    /// The canonical `PluginMeta` for a built-in list block.
+    ///
+    /// Mirrors what `from_core` stamps for a `list` core block, so a list
+    /// created inside the editor (e.g. via `ChangeType` from the toolbar or
+    /// slash menu) carries the same plugin identity as one loaded from disk —
+    /// taking the plugin render path and native serialization. `attr_decls`
+    /// is empty: the list is `builtin`, so the attr form is suppressed.
+    pub fn list(ordered: bool) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("ordered".to_string(), Value::Bool(ordered));
+        Self {
+            block_type_name: "list".to_string(),
+            attrs,
+            attr_decls: Vec::new(),
+            builtin: true,
+            editor: Some("list".to_string()),
+            native: Some("list".to_string()),
+        }
+    }
 }
 
 impl EditorBlock {

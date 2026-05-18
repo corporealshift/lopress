@@ -20,7 +20,7 @@ use lopress_core::{parse, serialize, Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
-    BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem,
+    BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use lopress_plugin::PluginRegistry;
 use serde_json::json;
@@ -101,21 +101,35 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     // Instead we build the editor representation directly, convert to core,
     // and assert the resulting `Document` matches the shape the rest of the
     // pipeline expects (list → list_item → paragraph).
+    // A list block as `from_core` produces it: `BlockKind::List` body plus
+    // `PluginMeta` claiming the native `list` type, so `to_core` serializes
+    // it natively.
+    let mut list_block = EditorBlock::list(
+        false,
+        vec![
+            ListItem {
+                id: Default::default(),
+                runs: vec![InlineRun::plain("first item")],
+            },
+            ListItem {
+                id: Default::default(),
+                runs: vec![InlineRun::plain("second item")],
+            },
+        ],
+    );
+    let mut list_attrs = serde_json::Map::new();
+    list_attrs.insert("ordered".to_string(), serde_json::Value::Bool(false));
+    list_block.plugin = Some(PluginMeta {
+        block_type_name: "list".to_string(),
+        attrs: list_attrs,
+        attr_decls: vec![],
+        builtin: true,
+        editor: Some("list".to_string()),
+        native: Some("list".to_string()),
+    });
     let editor_doc = EditorDoc {
         front_matter: FrontMatter::default(),
-        blocks: vec![EditorBlock::list(
-            false,
-            vec![
-                ListItem {
-                    id: Default::default(),
-                    runs: vec![InlineRun::plain("first item")],
-                },
-                ListItem {
-                    id: Default::default(),
-                    runs: vec![InlineRun::plain("second item")],
-                },
-            ],
-        )],
+        blocks: vec![list_block],
     };
 
     let core = doc_to_core(&editor_doc);
@@ -133,7 +147,11 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     assert_eq!(item.children[0].text.as_deref(), Some("first item"));
 
     // And the reverse direction reconstructs the same editor structure.
-    let editor_back = doc_from_core(&core, &PluginRegistry::default());
+    // The base list plugin must be registered for the native `list` type to
+    // resolve; without it the block would degrade to `Opaque`.
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor_back = doc_from_core(&core, &registry);
     assert!(matches!(
         editor_back.blocks[0].kind,
         BlockKind::List { ordered: false }

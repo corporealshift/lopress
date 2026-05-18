@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
 use lopress_editor::actions::BlockAction;
 use lopress_editor::model::types::{BlockKind, EditorBlock, EditorDoc, InlineRun};
@@ -199,6 +199,103 @@ fn edit_inline_within_one_second_coalesces() {
         BlockAction::EditInline { new_runs, .. } => {
             // Restores to original "a", not to intermediate "ab"
             assert_eq!(new_runs, vec![InlineRun::plain("a")]);
+        }
+        _ => panic!("wrong variant"),
+    }
+}
+
+use lopress_editor::model::types::{BlockBody, BlockId, ListItem};
+
+fn list_item(text: &str) -> ListItem {
+    ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain(text)],
+    }
+}
+
+#[test]
+fn inverse_of_edit_list_item_restores_old_runs() {
+    let it0 = list_item("old");
+    let item_id = it0.id;
+    let list = EditorBlock::list(false, vec![it0]);
+    let block_id = list.id;
+    let doc = doc_with(vec![list]);
+    let inv = compute_inverse(
+        &doc,
+        &BlockAction::EditListItem {
+            block_id,
+            item_id,
+            new_runs: vec![InlineRun::plain("new")],
+        },
+    )
+    .unwrap();
+    match inv {
+        BlockAction::EditListItem { new_runs, .. } => {
+            assert_eq!(new_runs, vec![InlineRun::plain("old")]);
+        }
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn inverse_of_merge_list_item_is_split_at_join_point() {
+    let it0 = list_item("foo");
+    let it1 = list_item("bar");
+    let prev_id = it0.id;
+    let cur_id = it1.id;
+    let list = EditorBlock::list(false, vec![it0, it1]);
+    let block_id = list.id;
+    let doc = doc_with(vec![list]);
+    let inv = compute_inverse(
+        &doc,
+        &BlockAction::MergeListItemWithPrev {
+            block_id,
+            item_id: cur_id,
+        },
+    )
+    .unwrap();
+    match inv {
+        BlockAction::SplitListItem {
+            item_id,
+            byte_offset,
+            ..
+        } => {
+            assert_eq!(item_id, prev_id);
+            assert_eq!(byte_offset, 3);
+        }
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn split_list_item_pushes_placeholder_then_fixes_it() {
+    use lopress_editor::undo::UndoStack;
+    let it0 = list_item("hello world");
+    let item_id = it0.id;
+    let list = EditorBlock::list(false, vec![it0]);
+    let block_id = list.id;
+    let mut doc = doc_with(vec![list]);
+    let mut stack = UndoStack::new();
+
+    let action = BlockAction::SplitListItem {
+        block_id,
+        item_id,
+        byte_offset: 6,
+    };
+    stack.push_before_apply(&doc, &action);
+    lopress_editor::actions::apply(&mut doc, action);
+    assert_eq!(stack.undo_depth(), 1);
+
+    let new_item_id = match &doc.blocks[0].body {
+        BlockBody::List(items) => items[1].id,
+        _ => panic!("not a list"),
+    };
+    stack.fix_split_list_item_inverse(new_item_id);
+
+    let undo = stack.pop_undo().unwrap();
+    match undo {
+        BlockAction::MergeListItemWithPrev { item_id, .. } => {
+            assert_eq!(item_id, new_item_id);
         }
         _ => panic!("wrong variant"),
     }

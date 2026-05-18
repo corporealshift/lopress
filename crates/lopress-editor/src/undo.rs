@@ -36,17 +36,32 @@ impl UndoStack {
     /// coalesce window expires.
     pub fn push_before_apply(&mut self, doc: &EditorDoc, action: &BlockAction) {
         let Some(inverse) = compute_inverse(doc, action) else {
-            // Split: push a placeholder; caller must call fix_split_inverse.
-            // OpenSlashMenu: never recorded.
-            if matches!(action, BlockAction::Split { .. }) {
-                let placeholder = BlockAction::MergeWithPrev {
-                    block_id: BlockId::new(), // replaced by fix_split_inverse
-                };
-                self.redo.clear();
-                self.push_entry(UndoEntry {
-                    action: action.clone(),
-                    inverse: placeholder,
-                });
+            // Actions whose inverse needs post-apply state push a placeholder
+            // here; the caller fixes it up once the new id exists.
+            match action {
+                BlockAction::Split { .. } => {
+                    let placeholder = BlockAction::MergeWithPrev {
+                        block_id: BlockId::new(), // replaced by fix_split_inverse
+                    };
+                    self.redo.clear();
+                    self.push_entry(UndoEntry {
+                        action: action.clone(),
+                        inverse: placeholder,
+                    });
+                }
+                BlockAction::SplitListItem { block_id, .. } => {
+                    let placeholder = BlockAction::MergeListItemWithPrev {
+                        block_id: *block_id,
+                        item_id: BlockId::new(), // replaced by fix_split_list_item_inverse
+                    };
+                    self.redo.clear();
+                    self.push_entry(UndoEntry {
+                        action: action.clone(),
+                        inverse: placeholder,
+                    });
+                }
+                // OpenSlashMenu and unrecordable actions: never recorded.
+                _ => {}
             }
             return;
         };
@@ -98,6 +113,18 @@ impl UndoStack {
         }
     }
 
+    /// Replace the placeholder inverse for the most recent `SplitListItem`
+    /// entry with `MergeListItemWithPrev` targeting the newly-created item.
+    pub fn fix_split_list_item_inverse(&mut self, new_item_id: BlockId) {
+        if let Some(entry) = self.undo.back_mut() {
+            if matches!(entry.action, BlockAction::SplitListItem { .. }) {
+                if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.inverse {
+                    *item_id = new_item_id;
+                }
+            }
+        }
+    }
+
     /// After an undo recreates a block via `Split` (undoing a
     /// `MergeWithPrev`), the recreated block has a fresh `BlockId`. Update
     /// the matching redo entry's `MergeWithPrev` action to target it, so a
@@ -106,6 +133,18 @@ impl UndoStack {
         if let Some(entry) = self.redo.last_mut() {
             if let BlockAction::MergeWithPrev { block_id } = &mut entry.action {
                 *block_id = new_block_id;
+            }
+        }
+    }
+
+    /// After an undo recreates a list item via `SplitListItem` (undoing a
+    /// `MergeListItemWithPrev`), the recreated item has a fresh `BlockId`.
+    /// Update the matching redo entry's `MergeListItemWithPrev` action so a
+    /// subsequent redo merges the right item.
+    pub fn fix_merge_list_item_redo(&mut self, new_item_id: BlockId) {
+        if let Some(entry) = self.redo.last_mut() {
+            if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.action {
+                *item_id = new_item_id;
             }
         }
     }
@@ -231,6 +270,35 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             Some(BlockAction::EditAttrs {
                 block_id: *block_id,
                 new_attrs: old_attrs,
+            })
+        }
+        BlockAction::EditListItem {
+            block_id, item_id, ..
+        } => {
+            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
+            let BlockBody::List(items) = &block.body else {
+                return None;
+            };
+            let old_runs = items.iter().find(|it| it.id == *item_id)?.runs.clone();
+            Some(BlockAction::EditListItem {
+                block_id: *block_id,
+                item_id: *item_id,
+                new_runs: old_runs,
+            })
+        }
+        BlockAction::SplitListItem { .. } => None, // post-state required
+        BlockAction::MergeListItemWithPrev { block_id, item_id } => {
+            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
+            let BlockBody::List(items) = &block.body else {
+                return None;
+            };
+            let pos = items.iter().position(|it| it.id == *item_id)?;
+            let prev = items.get(pos.checked_sub(1)?)?;
+            let split_offset: usize = prev.runs.iter().map(|r| r.text.len()).sum();
+            Some(BlockAction::SplitListItem {
+                block_id: *block_id,
+                item_id: prev.id,
+                byte_offset: split_offset,
             })
         }
         BlockAction::OpenSlashMenu { .. } => None,

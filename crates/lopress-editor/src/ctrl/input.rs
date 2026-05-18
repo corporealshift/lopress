@@ -58,16 +58,17 @@ mod platform {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{BOOL, HWND, POINT};
     use windows::Win32::Graphics::Gdi::ClientToScreen;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        MapVirtualKeyW, SendInput, VkKeyScanW, INPUT, INPUT_0, INPUT_KEYBOARD,
-        INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-        KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-        MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_BACK,
-        VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
-        VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT,
-        VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
-    };
     use windows::Win32::System::Threading::AttachThreadInput;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        MapVirtualKeyW, SendInput, VkKeyScanW, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE,
+        KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        MAPVK_VK_TO_VSC, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+        MOUSEEVENTF_MOVE, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN,
+        VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7,
+        VK_F8, VK_F9, VK_HOME, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_NEXT, VK_PRIOR,
+        VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+    };
+
     use windows::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, FindWindowW, GetForegroundWindow, GetSystemMetrics,
         GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos, SM_CXSCREEN, SM_CYSCREEN,

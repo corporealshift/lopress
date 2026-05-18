@@ -37,8 +37,23 @@ pub struct EditingState {
 
 impl EditingState {
     /// Create a new `EditingState` wrapping the given `session`.
+    ///
+    /// The plugin registry is seeded with the built-in base plugins first,
+    /// then user plugins from the workspace are layered on top. A user plugin
+    /// that declares a block name already owned by a base plugin is rejected
+    /// by `insert` (and silently skipped here) — base plugins are non-removable.
     pub fn new(session: Session) -> Self {
-        let plugin_registry = session.plugin_registry();
+        let mut plugin_registry = PluginRegistry::default();
+        if let Err(e) = plugin_registry.load_base_plugins() {
+            eprintln!("failed to load base plugins: {e}");
+        }
+        for plugin in session.plugin_registry().plugins {
+            // `insert` recomputes block/theme indices from the registry's
+            // current length, so moving a `LoadedPlugin` across registries
+            // is sound. Duplicate block names (e.g. a user plugin shadowing
+            // a base block) are skipped.
+            let _ = plugin_registry.insert(plugin);
+        }
         Self {
             session,
             plugin_registry,

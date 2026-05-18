@@ -31,11 +31,13 @@ pub fn load_dir(dir: &Path, enabled: Option<&[String]>) -> Result<PluginRegistry
             }
         }
         for block in &manifest.blocks {
-            if !root.join(&block.template).exists() {
-                return Err(PluginError::MissingTemplate {
-                    name: block.name.clone(),
-                    template: block.template.clone(),
-                });
+            if let Some(template) = &block.template {
+                if !root.join(template).exists() {
+                    return Err(PluginError::MissingTemplate {
+                        name: block.name.clone(),
+                        template: template.clone(),
+                    });
+                }
             }
         }
         reg.insert(LoadedPlugin { root, manifest })?;
