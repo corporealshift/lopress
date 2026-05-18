@@ -6,7 +6,7 @@
 //! per-block widgets keep reactive copies for live editing.
 
 use crate::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem,
+    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 
 /// One discrete edit. Each variant maps to one function below.
@@ -314,6 +314,10 @@ fn apply_change_type(doc: &mut EditorDoc, id: BlockId, new_kind: BlockKind) {
                 id: BlockId::new(),
                 runs: runs.clone(),
             }]);
+            // A list block must carry list `PluginMeta` to render via the
+            // plugin path and serialize natively — `from_core` stamps it for
+            // loaded lists; do the same for one created here.
+            block.plugin = Some(PluginMeta::list(*ordered));
         }
         _ => {
             block.kind = new_kind;

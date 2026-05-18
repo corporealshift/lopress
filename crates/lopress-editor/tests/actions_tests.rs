@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use lopress_editor::actions::{apply, BlockAction};
+use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun,
 };
@@ -319,4 +320,50 @@ fn split_code_block_inserts_newline() {
     // Code block does not split; a newline is inserted at offset.
     assert_eq!(doc.blocks.len(), 1);
     assert_eq!(run_text(&doc.blocks[0]), "fn main(\n) {}");
+}
+
+#[test]
+fn change_type_to_list_stamps_plugin_meta() {
+    // A list created in-editor (toolbar / slash menu emit `ChangeType`) must
+    // carry list `PluginMeta`, exactly like a list loaded via `from_core` —
+    // otherwise it takes neither the plugin render path nor native
+    // serialization and renders/serializes as nothing.
+    let (id, block) = paragraph_with_id("an item");
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: false },
+        },
+    );
+    let block = &doc.blocks[0];
+    assert!(matches!(block.kind, BlockKind::List { ordered: false }));
+    assert!(matches!(block.body, BlockBody::List(_)));
+    let meta = block
+        .plugin
+        .as_ref()
+        .expect("a list block created via ChangeType must carry PluginMeta");
+    assert_eq!(meta.editor.as_deref(), Some("list"));
+    assert_eq!(meta.native.as_deref(), Some("list"));
+    assert!(meta.builtin);
+    assert_eq!(meta.block_type_name, "list");
+}
+
+#[test]
+fn change_type_to_list_serializes_as_native_list() {
+    // The plugin meta from `ChangeType` must drive `to_core`'s native branch,
+    // so the new list serializes as a bare `list` core block.
+    let (id, block) = paragraph_with_id("an item");
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: true },
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "list");
+    assert_eq!(core.blocks[0].children[0].r#type, "list_item");
 }

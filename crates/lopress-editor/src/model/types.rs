@@ -97,6 +97,28 @@ pub struct PluginMeta {
     pub native: Option<String>,
 }
 
+impl PluginMeta {
+    /// The canonical `PluginMeta` for a built-in list block.
+    ///
+    /// Mirrors what `from_core` stamps for a `list` core block, so a list
+    /// created inside the editor (e.g. via `ChangeType` from the toolbar or
+    /// slash menu) carries the same plugin identity as one loaded from disk —
+    /// taking the plugin render path and native serialization. `attr_decls`
+    /// is empty: the list is `builtin`, so the attr form is suppressed.
+    pub fn list(ordered: bool) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("ordered".to_string(), Value::Bool(ordered));
+        Self {
+            block_type_name: "list".to_string(),
+            attrs,
+            attr_decls: Vec::new(),
+            builtin: true,
+            editor: Some("list".to_string()),
+            native: Some("list".to_string()),
+        }
+    }
+}
+
 impl EditorBlock {
     pub fn paragraph(runs: Vec<InlineRun>) -> Self {
         Self {
