@@ -1,13 +1,15 @@
 //! The vertical scrollable editor pane.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockId, EditorDoc};
+use crate::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use crate::ui::blocks::block_view;
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{gap_drop_zone, DndState};
 use crate::ui::slash_menu::slash_menu;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
-use floem::views::{dyn_container, empty, scroll, stack, v_stack_from_iter, Decorators};
+use floem::views::{
+    button, dyn_container, empty, label, scroll, stack, v_stack_from_iter, Decorators,
+};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
@@ -41,22 +43,27 @@ pub fn editor_pane(
     };
     // Interleave gap drop-zones with block views: gap(0), block(0), gap(1),
     // block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
-    // target.
+    // target. An empty document has no blocks to click into, so it shows a
+    // single "add block" button instead.
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
-    for (i, b) in doc.blocks.iter().enumerate() {
-        rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
-        rows.push(block_view(
-            b,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            dnd,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
-        ));
+    if doc.blocks.is_empty() {
+        rows.push(add_block_button(on_action.clone()));
+    } else {
+        for (i, b) in doc.blocks.iter().enumerate() {
+            rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
+            rows.push(block_view(
+                b,
+                on_action.clone(),
+                focus_target,
+                focus_pub,
+                dnd,
+                current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
+            ));
+        }
+        rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
     }
-    rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
     let column = v_stack_from_iter(rows).style(|s| {
         s.max_width(720.)
             .width_full()
@@ -101,4 +108,19 @@ pub fn editor_pane(
     });
 
     stack((scroll_view, menu_overlay)).style(|s| s.width_full().height_full().min_height(0.))
+}
+
+/// The affordance shown for an empty document: a button that inserts the
+/// first paragraph block. `BlockAction::InsertAfter` with an anchor that
+/// matches no block appends to the (empty) document — see `apply_insert_after`.
+fn add_block_button(on_action: ActionSink) -> AnyView {
+    button(label(|| "+ Add a block".to_string()))
+        .action(move || {
+            on_action(BlockAction::InsertAfter {
+                anchor: BlockId::new(),
+                new_block: EditorBlock::paragraph(vec![InlineRun::plain("")]),
+            });
+        })
+        .style(|s| s.margin_top(8.))
+        .into_any()
 }

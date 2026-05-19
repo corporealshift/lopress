@@ -317,7 +317,17 @@ fn editing_view(
             BlockAction::ChangeType { block_id, .. } => Some(*block_id),
             _ => None,
         };
-        if let Some(id) = pre_focus.or(post_focus).or(change_type_focus) {
+        // A freshly inserted block (e.g. the empty-document "add block"
+        // button) should take focus so the caret lands in it immediately.
+        let insert_focus = match &action {
+            BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
+            _ => None,
+        };
+        if let Some(id) = pre_focus
+            .or(post_focus)
+            .or(change_type_focus)
+            .or(insert_focus)
+        {
             floem::action::exec_after(Duration::from_millis(0), move |_| {
                 focus_target.set(Some(id));
             });
