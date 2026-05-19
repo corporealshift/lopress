@@ -162,10 +162,13 @@ pub fn editable_inline(
         }
     };
 
-    // Lower-level editor view: no gutter, no per-block scroll. The is_active
-    // closure reads `active` with a *tracked* `.get()` so the caret paint is
-    // invalidated when focus changes (Floem wraps this closure in a memo).
-    let view = editor_view(editor_sig, move |_| editor_sig.with(|ed| ed.active.get()));
+    // Lower-level editor view: no gutter, no per-block scroll. `is_active`
+    // gates caret painting; it must mean "this block holds keyboard focus".
+    // `ed.active` is NOT that — Floem sets it true only between pointer-down
+    // and pointer-up, so gating on it makes the caret vanish the moment the
+    // mouse button is released. Track focus explicitly via Focus events.
+    let focused = RwSignal::new(false);
+    let view = editor_view(editor_sig, move |_| focused.get());
     let view_id = view.id();
     editor_sig.with_untracked(|ed| ed.editor_view_id.set(Some(view_id)));
 
@@ -176,9 +179,11 @@ pub fn editable_inline(
                 .set(floem::style::CursorColor, CARET_COLOR)
         })
         .on_event_cont(EventListener::FocusGained, move |_| {
+            focused.set(true);
             editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
+            focused.set(false);
             editor_sig.with_untracked(|ed| ed.editor_view_focus_lost.notify());
         })
         .on_event_cont(EventListener::PointerDown, move |event| {
