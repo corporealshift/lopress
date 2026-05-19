@@ -63,7 +63,12 @@ pub fn editor_pane(
             .margin_horiz(floem::unit::PxPctAuto::Auto)
             .padding(24.)
     });
-    let scroll_view = scroll(column).style(|s| s.width_full().height_full());
+    // `min_height(0)` is load-bearing: a flex item's default `min-height:auto`
+    // floors it at its content size, so without this the scroll grows to the
+    // full document height and never has a viewport smaller than its content
+    // — i.e. it can never scroll. See the matching calls up the layout chain
+    // in `ui::mod::editing_view`.
+    let scroll_view = scroll(column).style(|s| s.width_full().height_full().min_height(0.));
 
     // Slash menu overlay. Mounts when `slash_menu_open` is `Some(_)`.
     // Anchored placement against a specific block isn't worth the wiring on
@@ -95,5 +100,5 @@ pub fn editor_pane(
             .width_full()
     });
 
-    stack((scroll_view, menu_overlay)).style(|s| s.width_full().height_full())
+    stack((scroll_view, menu_overlay)).style(|s| s.width_full().height_full().min_height(0.))
 }
