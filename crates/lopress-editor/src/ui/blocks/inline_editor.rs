@@ -5,20 +5,24 @@ use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::style_span::InlineRunStyling;
+use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
-use floem::views::editor::gutter::GutterClass;
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::text_document::TextDocument;
-use floem::views::editor::view::editor_container_view;
+use floem::views::editor::view::editor_view;
 use floem::views::editor::Editor;
 use floem::views::{stack, Decorators};
 use floem::IntoView;
+use floem::View;
 use lapce_xi_rope::Rope;
 use std::rc::Rc;
+
+/// Caret color for inline block editors — dark enough to contrast on white.
+const CARET_COLOR: floem::peniko::Color = floem::peniko::Color::rgb8(40, 40, 40);
 
 /// Callback used by editable widgets to push every block-tree mutation
 /// through the `actions::apply` chokepoint.
@@ -55,6 +59,12 @@ pub struct BlockEditorState {
     /// When `Some`, the link-URL input row is shown; holds the editing buffer
     /// seed. `None` hides the row.
     pub link_url_sig: RwSignal<Option<String>>,
+}
+
+/// Pixel height of a block given its wrapped visual-line count. Clamps to at
+/// least one line so an empty block still has height.
+fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
+    f32::from(visual_lines.max(1)) * line_height
 }
 
 /// Build a `BlockEditorState` for an inline block, initialised from `runs`.
@@ -108,8 +118,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 ///   cross-block ↑/↓ navigation.
 /// `slash_eligible`: when true, typing `/` on an empty block opens the slash
 ///   command menu instead of inserting the character (paragraphs only).
-// Line counts are tiny, so the usize->f32 height math cannot lose precision.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::too_many_arguments)]
 pub fn editable_inline(
     state: BlockEditorState,
     block_id: BlockId,
@@ -124,49 +133,115 @@ pub fn editable_inline(
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
-    let text_sig = state.text_sig;
     let link_url_sig = state.link_url_sig;
 
     let on_action_for_key = on_action;
 
-    // Build the default command handler once; it handles arrow navigation,
-    // backspace deletion, etc. via the editor's built-in keymap.
-    // We call it explicitly because editor_container_view discards the return
-    // value of our closure (see view.rs:1172 — semicolon), so returning
-    // CommandExecuted::No does NOT automatically fall through to any default.
+    // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
+    let combined_key = move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
+        let result = handle_key(
+            kp,
+            ms,
+            editor_sig,
+            spans_sig,
+            style_rev,
+            block_id,
+            &on_action_for_key,
+            focus_target,
+            current_doc,
+            &on_undo,
+            &on_redo,
+            slash_eligible,
+            link_url_sig,
+        );
+        if result == CommandExecuted::Yes {
+            result
+        } else {
+            default_kp_handler(kp, ms)
+        }
+    };
 
-    let view = editor_container_view(
-        editor_sig,
-        // Only show the cursor for the block that actually has keyboard focus.
-        // Passing |_| true causes every block to paint a cursor permanently.
-        move |_| editor_sig.with_untracked(|ed| ed.active.get()),
-        move |kp, ms| {
-            let result = handle_key(
-                kp,
-                ms,
-                editor_sig,
-                spans_sig,
-                style_rev,
-                block_id,
-                &on_action_for_key,
-                focus_target,
-                current_doc,
-                &on_undo,
-                &on_redo,
-                slash_eligible,
-                link_url_sig,
-            );
-            // If we consumed the key (block-level action), stop here.
-            // Otherwise delegate to the editor's built-in command dispatch
-            // so that arrow keys, backspace, etc. work normally.
-            if result == CommandExecuted::Yes {
-                result
-            } else {
-                default_kp_handler(kp, ms)
+    // Lower-level editor view: no gutter, no per-block scroll. `is_active`
+    // gates caret painting; it must mean "this block holds keyboard focus".
+    // `ed.active` is NOT that — Floem sets it true only between pointer-down
+    // and pointer-up, so gating on it makes the caret vanish the moment the
+    // mouse button is released. Track focus explicitly via Focus events.
+    let focused = RwSignal::new(false);
+    let view = editor_view(editor_sig, move |_| focused.get());
+    let view_id = view.id();
+    editor_sig.with_untracked(|ed| ed.editor_view_id.set(Some(view_id)));
+
+    let view = view
+        .style(|s| {
+            s.size_full()
+                .cursor(floem::style::CursorStyle::Text)
+                .set(floem::style::CursorColor, CARET_COLOR)
+        })
+        .on_event_cont(EventListener::FocusGained, move |_| {
+            focused.set(true);
+            editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());
+        })
+        .on_event_cont(EventListener::FocusLost, move |_| {
+            focused.set(false);
+            editor_sig.with_untracked(|ed| ed.editor_view_focus_lost.notify());
+        })
+        .on_event_cont(EventListener::PointerDown, move |event| {
+            if let Event::PointerDown(pe) = event {
+                view_id.request_active();
+                view_id.request_focus();
+                editor_sig.get_untracked().pointer_down(pe);
             }
-        },
-    );
+        })
+        .on_event_cont(EventListener::PointerMove, move |event| {
+            if let Event::PointerMove(pe) = event {
+                editor_sig.get_untracked().pointer_move(pe);
+            }
+        })
+        .on_event_cont(EventListener::PointerUp, move |event| {
+            if let Event::PointerUp(pe) = event {
+                editor_sig.get_untracked().pointer_up(pe);
+            }
+        })
+        .on_event_stop(EventListener::KeyDown, move |event| {
+            let Event::KeyDown(key_event) = event else {
+                return;
+            };
+            let key_text = key_event.key.text.clone();
+            let Ok(keypress) = KeyPress::try_from(key_event) else {
+                return;
+            };
+            combined_key(&keypress, key_event.modifiers);
+
+            // Character insertion: Floem's editor_view does not insert text
+            // itself — editor_content used to. Replicate that, with SHIFT/ALTGR
+            // (and ALT on macOS) cleared so shifted characters still type.
+            let mut mods = key_event.modifiers;
+            mods.set(floem::keyboard::Modifiers::SHIFT, false);
+            mods.set(floem::keyboard::Modifiers::ALTGR, false);
+            #[cfg(target_os = "macos")]
+            mods.set(floem::keyboard::Modifiers::ALT, false);
+            if mods.is_empty() {
+                use floem::keyboard::{Key, NamedKey};
+                match keypress.key {
+                    KeyInput::Keyboard(Key::Character(c), _) => {
+                        editor_sig.get_untracked().receive_char(&c);
+                    }
+                    KeyInput::Keyboard(Key::Named(NamedKey::Space), _) => {
+                        editor_sig.get_untracked().receive_char(" ");
+                    }
+                    KeyInput::Keyboard(Key::Unidentified(_), _) => {
+                        if let Some(text) = key_text {
+                            editor_sig.get_untracked().receive_char(&text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .on_move(move |point| {
+            editor_sig.with_untracked(|ed| ed.window_origin.set(point));
+        });
 
     // Publish focus so the toolbar can reach our editor + spans.
     create_effect(move |_| {
@@ -193,18 +268,20 @@ pub fn editable_inline(
         }
     });
 
-    // `editor_container_view` returns a stack with `.absolute().size_pct(100%)`
-    // baked in.  `AnyView = Box<dyn View>` delegates its ViewId to the inner
-    // view, so `.into_any().style()` modifies the inner absolute stack in-place
-    // — leaving it out of normal flow and contributing zero height to the block
-    // list.  Wrapping with `stack((view,))` creates a NEW layout node that IS
-    // in normal flow; the inner absolute stack then fills it via size_pct(100%).
+    // Wrap the `editor_view` in a `stack` so the explicit per-block height
+    // below lands on a normal-flow layout node; the inner `editor_view` fills
+    // it via `size_full()`.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
     stack((view,)).style(move |s| {
-        let lines = text_sig.get().split('\n').count().max(1) as f32;
-        s.class(GutterClass, |s| s.hide())
-            .width_full()
-            .height(lines * line_height)
+        // Track screen_lines so the height recomputes when wrapping reflows
+        // (text edit or column-width change). `last_vline()` is the index of
+        // the last wrapped visual line; +1 converts it to a count.
+        let visual_lines = editor_sig.with(|ed| {
+            ed.screen_lines.get();
+            u16::try_from(ed.last_vline().0 + 1).unwrap_or(u16::MAX)
+        });
+        s.width_full()
+            .height(block_height_px(visual_lines, line_height))
     })
 }
 
@@ -516,5 +593,21 @@ fn commit_and_jump_next(
     });
     if let Some(id) = next_id {
         focus_target.set(Some(id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_height_px;
+
+    #[test]
+    fn block_height_scales_with_visual_lines() {
+        assert!((block_height_px(1, 20.0) - 20.0).abs() < f32::EPSILON);
+        assert!((block_height_px(3, 20.0) - 60.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn block_height_clamps_empty_to_one_line() {
+        assert!((block_height_px(0, 20.0) - 20.0).abs() < f32::EPSILON);
     }
 }

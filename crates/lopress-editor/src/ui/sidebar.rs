@@ -187,10 +187,14 @@ pub fn unique_untitled_path(dir: &Path) -> PathBuf {
 }
 
 /// Default stub markdown for a new post or page.
+///
+/// Includes an `# {title}` H1 so the document opens with an editable block —
+/// without one the editor pane is blank and there is no way to add the first
+/// block.
 pub fn new_doc_stub(title: &str) -> String {
     let date = Local::now().format("%Y-%m-%d");
     format!(
-        "---\ntitle: {title}\ndate: {date}\ndraft: true\n---\n\n",
+        "---\ntitle: {title}\ndate: {date}\ndraft: true\n---\n\n# {title}\n",
         title = title,
         date = date
     )

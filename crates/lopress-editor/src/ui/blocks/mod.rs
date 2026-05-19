@@ -25,6 +25,14 @@ use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
+/// Border color for the block that currently holds focus.
+const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
+
+/// Background tint for the block under the pointer. Subtle so it reads as a
+/// hover hint, not a selection — its main job is making empty blocks (which
+/// have no text to see) visible when the mouse is over them.
+const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246);
+
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
 /// other kinds remain read-only for now.
@@ -79,7 +87,15 @@ pub fn block_view(
             .style(|s| s.width_full())
         };
         return v_stack((toolbar_slot, plugin_view))
-            .style(|s| s.width_full())
+            .style(move |s| {
+                let focused = focus_pub.block.get() == Some(block_id);
+                let s = s.width_full().border(1.0).border_radius(4.0);
+                if focused {
+                    s.border_color(FOCUS_BORDER)
+                } else {
+                    s.border_color(floem::peniko::Color::TRANSPARENT)
+                }
+            })
             .into_any();
     }
 
@@ -150,7 +166,14 @@ pub fn block_view(
         .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.).items_center());
 
     let row = h_stack((handle, body.style(|s| s.flex_grow(1.0))))
-        .style(|s| s.width_full())
+        .style(move |s| {
+            let s = s.width_full().border_radius(4.);
+            if hover.get() {
+                s.background(HOVER_BG)
+            } else {
+                s
+            }
+        })
         .on_event(EventListener::PointerEnter, move |_| {
             hover.set(true);
             EventPropagation::Continue
@@ -161,6 +184,14 @@ pub fn block_view(
         });
 
     v_stack((toolbar_slot, row))
-        .style(|s| s.width_full())
+        .style(move |s| {
+            let focused = focus_pub.block.get() == Some(block_id);
+            let s = s.width_full().border(1.0).border_radius(4.0);
+            if focused {
+                s.border_color(FOCUS_BORDER)
+            } else {
+                s.border_color(floem::peniko::Color::TRANSPARENT)
+            }
+        })
         .into_any()
 }

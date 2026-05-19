@@ -317,7 +317,17 @@ fn editing_view(
             BlockAction::ChangeType { block_id, .. } => Some(*block_id),
             _ => None,
         };
-        if let Some(id) = pre_focus.or(post_focus).or(change_type_focus) {
+        // A freshly inserted block (e.g. the empty-document "add block"
+        // button) should take focus so the caret lands in it immediately.
+        let insert_focus = match &action {
+            BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
+            _ => None,
+        };
+        if let Some(id) = pre_focus
+            .or(post_focus)
+            .or(change_type_focus)
+            .or(insert_focus)
+        {
             floem::action::exec_after(Duration::from_millis(0), move |_| {
                 focus_target.set(Some(id));
             });
@@ -479,7 +489,7 @@ fn editing_view(
             })
             .into_any(),
     })
-    .style(|s| s.flex_grow(1.0).height_full());
+    .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
     let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
 
@@ -568,7 +578,10 @@ fn editing_view(
         });
     }
 
-    let columns = h_stack((sidebar, editor, inspector)).style(|s| s.width_full().flex_grow(1.0));
+    // `min_height(0)` lets these flex items shrink below their content height
+    // so the editor pane's `scroll` gets a bounded viewport (see editor_pane).
+    let columns = h_stack((sidebar, editor, inspector))
+        .style(|s| s.width_full().flex_grow(1.0).min_height(0.));
 
     let editing_for_close = Rc::clone(&editing);
     stack((columns, footer))
