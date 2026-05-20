@@ -42,8 +42,15 @@ pub enum BuildStatus {
 
 #[derive(Debug, Clone)]
 pub enum ServeStatus {
-    Unavailable { reason: String },
-    Listening { url: String },
+    /// The preview server has not finished binding yet. Used while the
+    /// background open thread is still working.
+    Starting,
+    Unavailable {
+        reason: String,
+    },
+    Listening {
+        url: String,
+    },
 }
 
 // ── Session ──────────────────────────────────────────────────────────────────
@@ -52,7 +59,7 @@ pub struct Session {
     workspace: Arc<Workspace>,
     summary: Arc<Mutex<WorkspaceSummary>>,
     build_status: Arc<Mutex<BuildStatus>>,
-    serve_status: ServeStatus,
+    serve_status: Arc<Mutex<ServeStatus>>,
     _server: Option<Arc<ServerHandle>>,
     _watcher: Option<Watcher>,
 }
@@ -162,7 +169,7 @@ impl Session {
             workspace,
             summary,
             build_status,
-            serve_status,
+            serve_status: Arc::new(Mutex::new(serve_status)),
             _server: server_arc,
             _watcher: watcher,
         })
@@ -285,15 +292,16 @@ impl Session {
     }
 
     /// Current serve status.
-    pub fn serve_status(&self) -> &ServeStatus {
-        &self.serve_status
+    pub fn serve_status(&self) -> ServeStatus {
+        lock(&self.serve_status).clone()
     }
 
     /// URL for the given document in the browser.
     pub fn preview_url_for(&self, doc_ref: &DocumentRef) -> Option<String> {
-        let url = match &self.serve_status {
-            ServeStatus::Listening { url } => url,
-            ServeStatus::Unavailable { .. } => return None,
+        let status = lock(&self.serve_status).clone();
+        let url = match &status {
+            ServeStatus::Listening { url } => url.clone(),
+            ServeStatus::Unavailable { .. } | ServeStatus::Starting => return None,
         };
         let slug = doc_ref
             .path

@@ -92,7 +92,9 @@ fn serve_responds_to_get() {
     let session = Session::open(dir.path()).unwrap();
     let url = match session.serve_status() {
         ServeStatus::Listening { url } => url.clone(),
-        ServeStatus::Unavailable { .. } => panic!("expected serve to be listening"),
+        ServeStatus::Unavailable { .. } | ServeStatus::Starting => {
+            panic!("expected serve to be listening")
+        }
     };
     let addr = url.strip_prefix("http://").unwrap();
     let mut stream = TcpStream::connect(addr).unwrap();

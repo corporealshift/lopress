@@ -498,7 +498,7 @@ fn editing_view(
     let serve_url_str = editing
         .borrow()
         .as_ref()
-        .and_then(|s| serve_url(s.session.serve_status()));
+        .and_then(|s| serve_url(&s.session.serve_status()));
 
     {
         let editing_for_poll = Rc::clone(&editing);

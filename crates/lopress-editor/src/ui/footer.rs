@@ -169,6 +169,6 @@ pub fn start_build_status_poll(
 pub fn serve_url(status: &ServeStatus) -> Option<String> {
     match status {
         ServeStatus::Listening { url } => Some(url.clone()),
-        ServeStatus::Unavailable { .. } => None,
+        ServeStatus::Unavailable { .. } | ServeStatus::Starting => None,
     }
 }
