@@ -17,6 +17,7 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
 use floem::IntoView;
+use lopress_core::perf;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -27,10 +28,10 @@ use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
-use crate::ui::footer::{footer_view, serve_url, start_build_status_poll};
+use crate::ui::footer::{footer_view, start_build_status_poll, start_serve_status_poll};
 use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
-use lopress_gui_host::{BuildStatus, DocumentRef, Session, WorkspaceSummary};
+use lopress_gui_host::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};
 use std::path::PathBuf;
 
 /// Maximum number of recent workspaces to retain.
@@ -243,6 +244,7 @@ fn editing_view(
     // lookups derive the block to focus after structural actions.
     let on_action_mark_dirty = Rc::clone(&mark_dirty);
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
+        let _t = perf::span("editor.on_action");
         if let BlockAction::OpenSlashMenu { block_id } = action {
             slash_menu_open.set(Some(block_id));
             return;
@@ -251,11 +253,15 @@ fn editing_view(
             slash_menu_open.set(None);
         }
 
-        // Push to undo stack before apply (using pre-state).
-        let pre_doc_snapshot = current_doc.with_untracked(|d| d.clone());
-        if let Some(ref doc) = pre_doc_snapshot {
-            undo_stack.update(|s| s.push_before_apply(doc, &action));
-        }
+        // Push to undo stack before apply (using pre-state). Nested closure
+        // avoids cloning the entire EditorDoc — push_before_apply takes the
+        // pre-state by reference, and compute_inverse clones just the
+        // affected block.
+        current_doc.with_untracked(|maybe| {
+            if let Some(d) = maybe {
+                undo_stack.update(|s| s.push_before_apply(d, &action));
+            }
+        });
 
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
@@ -493,10 +499,7 @@ fn editing_view(
 
     let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
 
-    let serve_url_str = editing
-        .borrow()
-        .as_ref()
-        .and_then(|s| serve_url(s.session.serve_status()));
+    let serve_status_sig: RwSignal<ServeStatus> = RwSignal::new(ServeStatus::Starting);
 
     {
         let editing_for_poll = Rc::clone(&editing);
@@ -508,6 +511,18 @@ fn editing_view(
                 .unwrap_or(BuildStatus::Idle)
         });
         start_build_status_poll(session_reader, build_status_sig);
+    }
+
+    {
+        let editing_for_poll = Rc::clone(&editing);
+        let serve_reader: Rc<dyn Fn() -> ServeStatus> = Rc::new(move || {
+            editing_for_poll
+                .borrow()
+                .as_ref()
+                .map(|s| s.session.serve_status())
+                .unwrap_or(ServeStatus::Starting)
+        });
+        start_serve_status_poll(serve_reader, serve_status_sig);
     }
 
     // Debounced save+rebuild. `debounce_action` resets its internal timer on
@@ -546,7 +561,7 @@ fn editing_view(
         dirty_sig,
         save_error_sig,
         current_doc,
-        serve_url_str,
+        serve_status_sig,
     );
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────

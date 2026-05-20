@@ -32,6 +32,27 @@ fn make_workspace() -> TempDir {
     dir
 }
 
+/// Poll `read()` every 20 ms until `done(result)` returns true, or panic after
+/// `timeout`. Used by tests that have to wait for the deferred background
+/// thread in `Session::open` to finish its work.
+fn wait_until<T>(
+    timeout: std::time::Duration,
+    mut read: impl FnMut() -> T,
+    done: impl Fn(&T) -> bool,
+) -> T {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let v = read();
+        if done(&v) {
+            return v;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("wait_until timed out after {:?}", timeout);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn open_valid_workspace_succeeds() {
     let dir = make_workspace();
@@ -53,7 +74,12 @@ fn open_invalid_workspace_errors() {
 fn build_status_is_ok_after_open() {
     let dir = make_workspace();
     let session = Session::open(dir.path()).unwrap();
-    assert!(matches!(session.build_status(), BuildStatus::Ok { .. }));
+    let final_status = wait_until(
+        std::time::Duration::from_secs(5),
+        || session.build_status(),
+        |s| matches!(s, BuildStatus::Ok { .. } | BuildStatus::Failed { .. }),
+    );
+    assert!(matches!(final_status, BuildStatus::Ok { .. }));
 }
 
 #[test]
@@ -77,10 +103,12 @@ fn load_and_save_document_roundtrip() {
 fn serve_status_is_listening_after_open() {
     let dir = make_workspace();
     let session = Session::open(dir.path()).unwrap();
-    assert!(matches!(
-        session.serve_status(),
-        ServeStatus::Listening { .. }
-    ));
+    let final_status = wait_until(
+        std::time::Duration::from_secs(5),
+        || session.serve_status(),
+        |s| !matches!(s, ServeStatus::Starting),
+    );
+    assert!(matches!(final_status, ServeStatus::Listening { .. }));
 }
 
 #[test]
@@ -90,9 +118,16 @@ fn serve_responds_to_get() {
 
     let dir = make_workspace();
     let session = Session::open(dir.path()).unwrap();
-    let url = match session.serve_status() {
-        ServeStatus::Listening { url } => url.clone(),
-        ServeStatus::Unavailable { .. } => panic!("expected serve to be listening"),
+    let final_status = wait_until(
+        std::time::Duration::from_secs(5),
+        || session.serve_status(),
+        |s| !matches!(s, ServeStatus::Starting),
+    );
+    let url = match final_status {
+        ServeStatus::Listening { url } => url,
+        ServeStatus::Unavailable { .. } | ServeStatus::Starting => {
+            panic!("expected serve to be listening")
+        }
     };
     let addr = url.strip_prefix("http://").unwrap();
     let mut stream = TcpStream::connect(addr).unwrap();

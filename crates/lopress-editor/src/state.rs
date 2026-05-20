@@ -4,6 +4,7 @@ use crate::model::from_core::doc_from_core;
 use crate::model::to_core::doc_to_core;
 use crate::model::types::EditorDoc;
 use crate::settings::Settings;
+use lopress_core::perf;
 use lopress_core::Document;
 use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
 use lopress_plugin::PluginRegistry;
@@ -91,13 +92,21 @@ impl EditingState {
     /// Load and parse the document at `doc_ref.path`, replacing `current_doc`.
     /// On failure, clears `current_doc` and stores the error message.
     pub fn open_document(&mut self, doc_ref: &DocumentRef) {
-        match self.session.load_document(&doc_ref.path) {
+        let load_result = {
+            let _t = perf::span("editor.open_document.load_parse");
+            self.session.load_document(&doc_ref.path)
+        };
+        match load_result {
             Ok(loaded) => {
                 let core_doc = Document {
                     front_matter: loaded.front_matter,
                     blocks: loaded.blocks,
                 };
-                self.current_doc = Some(doc_from_core(&core_doc, &self.plugin_registry));
+                let editor_doc = {
+                    let _t = perf::span("editor.open_document.from_core");
+                    doc_from_core(&core_doc, &self.plugin_registry)
+                };
+                self.current_doc = Some(editor_doc);
                 self.current_ref = Some(doc_ref.clone());
                 self.last_error = None;
             }

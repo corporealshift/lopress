@@ -20,6 +20,7 @@ pub mod delimiter;
 pub mod error;
 pub mod frontmatter;
 pub mod parser;
+pub mod perf;
 pub mod serializer;
 pub mod types;
 
