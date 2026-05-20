@@ -276,7 +276,7 @@ fn editing_view(
         let action_for_apply = action.clone();
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
-                apply(d, action_for_apply);
+                let _ = apply(d, action_for_apply);
             }
         });
 
@@ -353,7 +353,7 @@ fn editing_view(
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
-                        apply(d, action_for_apply);
+                        let _ = apply(d, action_for_apply);
                     }
                 });
                 // Undoing a MergeWithPrev re-applies a Split, which mints a
@@ -405,7 +405,7 @@ fn editing_view(
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
-                        apply(d, action_for_apply);
+                        let _ = apply(d, action_for_apply);
                     }
                 });
                 // Redoing a Split mints a fresh BlockId; refresh the undo

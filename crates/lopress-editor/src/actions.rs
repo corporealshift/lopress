@@ -94,8 +94,30 @@ pub enum BlockAction {
     },
 }
 
-/// Apply one `BlockAction` to the document. Unknown block ids are no-ops.
-pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
+/// Apply one `BlockAction` to the document.
+///
+/// Returns `Some((canonical_action, inverse_action))` for any recordable
+/// action — the action that, when applied to the post-state, restores the
+/// pre-state. `canonical_action` differs from the input only for variants
+/// that mint ids (`Split`, `SplitListItem`): the returned form has
+/// `new_block_id: Some(...)` filled in, so a future redo reuses the same
+/// id and undo↔redo stays id-stable without post-apply patching.
+///
+/// Returns `None` when the action does not produce a recordable inverse.
+/// That covers three cases:
+/// 1. **UI-only actions** (`OpenSlashMenu`) — never touch the model.
+/// 2. **No-op actions** — target block id not found, or `Move` with a
+///    same-position gap. The model is unchanged.
+/// 3. **Mutations whose inverse cannot be expressed in stage 1's action
+///    enum.** Splits on `Code` and `List` bodies mutate the doc but the
+///    inverse would need cross-action coordination (a `MergeListItemWithPrev`
+///    inverse for a top-level `Split` on a list block, or an offset-aware
+///    code-newline removal). First-block `Delete` is also in this bucket —
+///    no predecessor anchor exists for an `InsertAfter` inverse. Today's
+///    `compute_inverse` returns `None` for these same cases, so this
+///    preserves behavior bit-for-bit. Stage 3's `EditBlockBody` collapse
+///    makes all of these fully reversible.
+pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, BlockAction)> {
     match action {
         BlockAction::Split {
             block_id,
@@ -130,7 +152,7 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             apply_merge_list_item(doc, block_id, item_id)
         }
         // UI-only — handled by the editor pane's action sink, not the model.
-        BlockAction::OpenSlashMenu { .. } => {}
+        BlockAction::OpenSlashMenu { .. } => None,
         BlockAction::EditAttrs {
             block_id,
             new_attrs,
@@ -142,14 +164,27 @@ fn apply_edit_attrs(
     doc: &mut EditorDoc,
     id: BlockId,
     new_attrs: serde_json::Map<String, serde_json::Value>,
-) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
-    };
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get_mut(idx)?;
+    let old_attrs = block
+        .plugin
+        .as_ref()
+        .map(|m| m.attrs.clone())
+        .unwrap_or_default();
     if let Some(meta) = block.plugin.as_mut() {
-        meta.attrs = new_attrs;
+        meta.attrs = new_attrs.clone();
     }
+    Some((
+        BlockAction::EditAttrs {
+            block_id: id,
+            new_attrs,
+        },
+        BlockAction::EditAttrs {
+            block_id: id,
+            new_attrs: old_attrs,
+        },
+    ))
 }
 
 fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
@@ -161,11 +196,9 @@ fn apply_split(
     id: BlockId,
     byte_offset: usize,
     new_block_id: Option<BlockId>,
-) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get(idx) else {
-        return;
-    };
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get(idx)?;
     let kind = block.kind.clone();
     let body = block.body.clone();
 
@@ -173,7 +206,8 @@ fn apply_split(
         BlockBody::Code(text) => {
             let mut new_text = text;
             new_text.insert(byte_offset.min(new_text.len()), '\n');
-            apply_edit_code(doc, id, new_text);
+            let _ = apply_edit_code(doc, id, new_text);
+            None
         }
         BlockBody::Inline(runs) => {
             let flat: String = runs.iter().map(|r| r.text.as_str()).collect();
@@ -196,10 +230,23 @@ fn apply_split(
                 }
                 _ => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
             };
-            if let Some(id) = new_block_id {
-                tail_block.id = id;
-            }
+            let minted_id = if let Some(nid) = new_block_id {
+                tail_block.id = nid;
+                nid
+            } else {
+                tail_block.id
+            };
             doc.blocks.insert(idx + 1, tail_block);
+            Some((
+                BlockAction::Split {
+                    block_id: id,
+                    byte_offset,
+                    new_block_id: Some(minted_id),
+                },
+                BlockAction::MergeWithPrev {
+                    block_id: minted_id,
+                },
+            ))
         }
         BlockBody::List(items) => {
             // The ctrl API's `Split` command treats a list as the flat text
@@ -221,16 +268,18 @@ fn apply_split(
                     split_item_at(list, pos, local);
                 }
             }
+            None
         }
-        BlockBody::Opaque(_) => {}
+        BlockBody::Opaque(_) => None,
     }
 }
 
-fn apply_merge(doc: &mut EditorDoc, id: BlockId) {
-    let Some(idx) = find_idx(doc, id) else { return };
+fn apply_merge(doc: &mut EditorDoc, id: BlockId) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
     if idx == 0 {
-        return;
+        return None;
     }
+    let prev_idx = idx - 1;
     // A list block merges only its *first item* into the previous block; the
     // remaining items stay as a list. Merging the whole list away would
     // silently drop every item — this fires on Backspace at the start of the
@@ -239,13 +288,18 @@ fn apply_merge(doc: &mut EditorDoc, id: BlockId) {
         doc.blocks.get(idx).map(|b| &b.body),
         Some(BlockBody::List(_))
     ) {
+        let prev_id = doc.blocks.get(prev_idx)?.id;
+        let prev_flat_len: usize = match &doc.blocks.get(prev_idx)?.body {
+            BlockBody::Inline(runs) => runs.iter().map(|r| r.text.len()).sum(),
+            _ => 0,
+        };
         let first_runs = match doc.blocks.get_mut(idx).map(|b| &mut b.body) {
             Some(BlockBody::List(items)) if !items.is_empty() => Some(items.remove(0).runs),
             _ => None,
         };
         if let Some(runs) = first_runs {
             if let Some(BlockBody::Inline(prev_runs)) =
-                doc.blocks.get_mut(idx - 1).map(|b| &mut b.body)
+                doc.blocks.get_mut(prev_idx).map(|b| &mut b.body)
             {
                 prev_runs.extend(runs);
             }
@@ -258,47 +312,96 @@ fn apply_merge(doc: &mut EditorDoc, id: BlockId) {
         if empty {
             doc.blocks.remove(idx);
         }
-        return;
+        return Some((
+            BlockAction::MergeWithPrev { block_id: id },
+            BlockAction::Split {
+                block_id: prev_id,
+                byte_offset: prev_flat_len,
+                new_block_id: None,
+            },
+        ));
     }
+    let prev_id = doc.blocks.get(prev_idx)?.id;
+    let prev_flat_len: usize = match &doc.blocks.get(prev_idx)?.body {
+        BlockBody::Inline(runs) => runs.iter().map(|r| r.text.len()).sum(),
+        _ => 0,
+    };
+    let cur_id = doc.blocks.get(idx)?.id;
     let cur = doc.blocks.remove(idx);
-    let Some(prev) = doc.blocks.get_mut(idx - 1) else {
+    let Some(prev) = doc.blocks.get_mut(prev_idx) else {
         doc.blocks.insert(idx, cur);
-        return;
+        return None;
     };
     if let (BlockBody::Inline(prev_runs), BlockBody::Inline(cur_runs)) = (&mut prev.body, cur.body)
     {
         prev_runs.extend(cur_runs);
     }
+    Some((
+        BlockAction::MergeWithPrev { block_id: id },
+        BlockAction::Split {
+            block_id: prev_id,
+            byte_offset: prev_flat_len,
+            new_block_id: Some(cur_id),
+        },
+    ))
 }
 
-fn apply_insert_after(doc: &mut EditorDoc, anchor: BlockId, new_block: EditorBlock) {
+fn apply_insert_after(
+    doc: &mut EditorDoc,
+    anchor: BlockId,
+    new_block: EditorBlock,
+) -> Option<(BlockAction, BlockAction)> {
     let pos = find_idx(doc, anchor)
         .map(|i| i + 1)
         .unwrap_or(doc.blocks.len());
+    let inserted_id = new_block.id;
+    // The canonical action and the doc each need an owned copy; clone once
+    // for the doc, move the original into the canonical below.
     if pos > doc.blocks.len() {
-        doc.blocks.push(new_block);
+        doc.blocks.push(new_block.clone());
     } else {
-        doc.blocks.insert(pos, new_block);
+        doc.blocks.insert(pos, new_block.clone());
     }
+    Some((
+        BlockAction::InsertAfter { anchor, new_block },
+        BlockAction::Delete {
+            block_id: inserted_id,
+        },
+    ))
 }
 
-fn apply_delete(doc: &mut EditorDoc, id: BlockId) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    doc.blocks.remove(idx);
+fn apply_delete(doc: &mut EditorDoc, id: BlockId) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let removed = doc.blocks.remove(idx);
     if doc.blocks.is_empty() {
         doc.blocks
             .push(EditorBlock::paragraph(vec![InlineRun::plain("")]));
     }
+    // No predecessor anchor for the first block — return `None` to mark
+    // the action as unrecordable (preserves current behavior).
+    let anchor = idx
+        .checked_sub(1)
+        .and_then(|j| doc.blocks.get(j))
+        .map(|b| b.id)?;
+    Some((
+        BlockAction::Delete { block_id: id },
+        BlockAction::InsertAfter {
+            anchor,
+            new_block: removed,
+        },
+    ))
 }
 
-fn apply_move(doc: &mut EditorDoc, id: BlockId, to_index: usize) {
-    let Some(from) = find_idx(doc, id) else {
-        return;
-    };
+fn apply_move(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    to_index: usize,
+) -> Option<(BlockAction, BlockAction)> {
+    let from = find_idx(doc, id)?;
     let target_gap = to_index.min(doc.blocks.len());
     // Dropping into the gap immediately before or after self is a no-op.
     if target_gap == from || target_gap == from + 1 {
-        return;
+        return None;
     }
     let block = doc.blocks.remove(from);
     let insert_at = if target_gap > from {
@@ -307,16 +410,30 @@ fn apply_move(doc: &mut EditorDoc, id: BlockId, to_index: usize) {
         target_gap
     };
     doc.blocks.insert(insert_at, block);
+    let inverse_to = if to_index > from { from } else { from + 1 };
+    Some((
+        BlockAction::Move {
+            block_id: id,
+            to_index,
+        },
+        BlockAction::Move {
+            block_id: id,
+            to_index: inverse_to,
+        },
+    ))
 }
 
-fn apply_change_type(doc: &mut EditorDoc, id: BlockId, new_kind: BlockKind) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
-    };
+fn apply_change_type(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    new_kind: BlockKind,
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get_mut(idx)?;
+    let old_kind = block.kind.clone();
     match (&new_kind, &block.body) {
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_)) => {
-            block.kind = new_kind;
+            block.kind = new_kind.clone();
         }
         (BlockKind::Code { lang }, BlockBody::Inline(runs)) => {
             let text: String = runs.iter().map(|r| r.text.clone()).collect();
@@ -335,29 +452,73 @@ fn apply_change_type(doc: &mut EditorDoc, id: BlockId, new_kind: BlockKind) {
             block.plugin = Some(PluginMeta::list(*ordered));
         }
         _ => {
-            block.kind = new_kind;
+            block.kind = new_kind.clone();
         }
     }
+    // NOTE: this inverse restores `kind` only, not `body`. Body conversions
+    // (Inline→Code stringifies runs; Inline→List wraps into a single item)
+    // are lossy on undo — the original body is not snapshot here. This
+    // matches today's `compute_inverse` behavior. Stage 3's `EditBlockBody`
+    // collapse makes ChangeType fully reversible by snapshotting body
+    // alongside kind. See
+    // `docs/superpowers/specs/2026-05-20-list-editor-unification-and-generic-undo-design.md`
+    // Section 3 — "Shift B".
+    Some((
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind,
+        },
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: old_kind,
+        },
+    ))
 }
 
-fn apply_edit_inline(doc: &mut EditorDoc, id: BlockId, new_runs: Vec<InlineRun>) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
+fn apply_edit_inline(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    new_runs: Vec<InlineRun>,
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get_mut(idx)?;
+    let BlockBody::Inline(old_runs) = block.body.clone() else {
+        return None;
     };
-    if matches!(block.body, BlockBody::Inline(_)) {
-        block.body = BlockBody::Inline(new_runs);
-    }
+    block.body = BlockBody::Inline(new_runs.clone());
+    Some((
+        BlockAction::EditInline {
+            block_id: id,
+            new_runs,
+        },
+        BlockAction::EditInline {
+            block_id: id,
+            new_runs: old_runs,
+        },
+    ))
 }
 
-fn apply_edit_code(doc: &mut EditorDoc, id: BlockId, new_text: String) {
-    let Some(idx) = find_idx(doc, id) else { return };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
+fn apply_edit_code(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    new_text: String,
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get_mut(idx)?;
+    let BlockBody::Code(old_text) = block.body.clone() else {
+        return None;
     };
-    if matches!(block.body, BlockBody::Code(_)) {
-        block.body = BlockBody::Code(new_text);
-    }
+    block.body = BlockBody::Code(new_text.clone());
+    Some((
+        BlockAction::EditCode {
+            block_id: id,
+            new_text,
+        },
+        BlockAction::EditCode {
+            block_id: id,
+            new_text: old_text,
+        },
+    ))
 }
 
 fn apply_edit_list_item(
@@ -365,17 +526,27 @@ fn apply_edit_list_item(
     block_id: BlockId,
     item_id: BlockId,
     new_runs: Vec<InlineRun>,
-) {
-    let Some(idx) = find_idx(doc, block_id) else {
-        return;
-    };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
-    };
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, block_id)?;
+    let block = doc.blocks.get_mut(idx)?;
     if let BlockBody::List(items) = &mut block.body {
-        if let Some(item) = items.iter_mut().find(|it| it.id == item_id) {
-            item.runs = new_runs;
-        }
+        let item = items.iter_mut().find(|it| it.id == item_id)?;
+        let old_runs = item.runs.clone();
+        item.runs = new_runs.clone();
+        Some((
+            BlockAction::EditListItem {
+                block_id,
+                item_id,
+                new_runs,
+            },
+            BlockAction::EditListItem {
+                block_id,
+                item_id,
+                new_runs: old_runs,
+            },
+        ))
+    } else {
+        None
     }
 }
 
@@ -385,38 +556,62 @@ fn apply_split_list_item(
     item_id: BlockId,
     byte_offset: usize,
     new_item_id: Option<BlockId>,
-) {
-    let Some(idx) = find_idx(doc, block_id) else {
-        return;
-    };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
-    };
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, block_id)?;
+    let block = doc.blocks.get_mut(idx)?;
     if let BlockBody::List(items) = &mut block.body {
-        if let Some(pos) = items.iter().position(|it| it.id == item_id) {
-            split_item_at_with_id(items, pos, byte_offset, new_item_id);
-        }
+        let pos = items.iter().position(|it| it.id == item_id)?;
+        split_item_at_with_id(items, pos, byte_offset, new_item_id);
+        let minted_id = items.get(pos + 1)?.id;
+        Some((
+            BlockAction::SplitListItem {
+                block_id,
+                item_id,
+                byte_offset,
+                new_block_id: Some(minted_id),
+            },
+            BlockAction::MergeListItemWithPrev {
+                block_id,
+                item_id: minted_id,
+            },
+        ))
+    } else {
+        None
     }
 }
 
-fn apply_merge_list_item(doc: &mut EditorDoc, block_id: BlockId, item_id: BlockId) {
-    let Some(idx) = find_idx(doc, block_id) else {
-        return;
-    };
-    let Some(block) = doc.blocks.get_mut(idx) else {
-        return;
-    };
+fn apply_merge_list_item(
+    doc: &mut EditorDoc,
+    block_id: BlockId,
+    item_id: BlockId,
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, block_id)?;
+    let block = doc.blocks.get_mut(idx)?;
     if let BlockBody::List(items) = &mut block.body {
-        let Some(pos) = items.iter().position(|it| it.id == item_id) else {
-            return;
-        };
+        let pos = items.iter().position(|it| it.id == item_id)?;
         if pos == 0 {
-            return;
+            return None;
         }
+        let prev_idx = pos - 1;
+        let prev_item = items.get(prev_idx)?;
+        let prev_id = prev_item.id;
+        let split_offset: usize = prev_item.runs.iter().map(|r| r.text.len()).sum();
+        let cur_item_id = item_id;
         let cur = items.remove(pos);
-        if let Some(prev) = items.get_mut(pos - 1) {
+        if let Some(prev) = items.get_mut(prev_idx) {
             prev.runs.extend(cur.runs);
         }
+        Some((
+            BlockAction::MergeListItemWithPrev { block_id, item_id },
+            BlockAction::SplitListItem {
+                block_id,
+                item_id: prev_id,
+                byte_offset: split_offset,
+                new_block_id: Some(cur_item_id),
+            },
+        ))
+    } else {
+        None
     }
 }
 

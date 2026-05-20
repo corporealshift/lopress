@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::to_core::doc_to_core;
@@ -404,4 +409,102 @@ fn split_with_new_block_id_none_mints_fresh_id() {
     );
     assert_eq!(doc.blocks.len(), 2);
     assert_ne!(doc.blocks[1].id, doc.blocks[0].id);
+}
+/// For every recordable action, `apply` must return the inverse action that
+/// would restore the doc. Applying that inverse to the post-state must
+/// reproduce the original pre-state.
+mod inverse_symmetry {
+    use super::*;
+
+    #[test]
+    fn edit_inline_round_trip() {
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let before_body = doc.blocks[0].body.clone();
+        let action = BlockAction::EditInline {
+            block_id: id,
+            new_runs: vec![InlineRun::plain("changed")],
+        };
+        let (_canonical, inverse) =
+            apply(&mut doc, action).expect("EditInline must record an inverse");
+        // Sanity: doc actually changed.
+        assert_ne!(doc.blocks[0].body, before_body);
+        // Apply the inverse; the body must match the pre-state.
+        let _ = apply(&mut doc, inverse).expect("inverse must also record");
+        assert_eq!(doc.blocks[0].body, before_body);
+    }
+
+    #[test]
+    fn split_round_trip_id_stable() {
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let before_len = doc.blocks.len();
+        let before_text = run_text(&doc.blocks[0]);
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 5,
+                new_block_id: None,
+            },
+        )
+        .expect("Split must record an inverse");
+
+        // Canonical must carry the minted id.
+        let minted_id = match &canonical {
+            BlockAction::Split {
+                new_block_id: Some(nid),
+                ..
+            } => *nid,
+            _ => panic!("canonical Split must have a concrete new_block_id"),
+        };
+        assert_eq!(doc.blocks[1].id, minted_id);
+
+        // Apply the inverse; doc must restore the pre-state content. The
+        // run *structure* may differ (split+merge of plain runs leaves two
+        // adjacent runs instead of one consolidated run) — compare flat
+        // text, which is what "restored to pre-state" means semantically.
+        let _ = apply(&mut doc, inverse).expect("inverse must record");
+        assert_eq!(doc.blocks.len(), before_len);
+        assert_eq!(run_text(&doc.blocks[0]), before_text);
+    }
+
+    #[test]
+    fn split_redo_uses_same_id() {
+        // Apply Split -> undo (apply the inverse) -> re-apply the canonical
+        // Split -> the new block must have the SAME id as the first time,
+        // because canonical carries it.
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 5,
+                new_block_id: None,
+            },
+        )
+        .expect("Split must record");
+        let original_new_id = doc.blocks[1].id;
+
+        // Undo.
+        let _ = apply(&mut doc, inverse).expect("inverse must record");
+        assert_eq!(doc.blocks.len(), 1);
+
+        // Redo the canonical form.
+        let _ = apply(&mut doc, canonical).expect("canonical re-apply must record");
+        assert_eq!(doc.blocks.len(), 2);
+        assert_eq!(
+            doc.blocks[1].id, original_new_id,
+            "redo must reuse the original new_block_id"
+        );
+    }
+
+    #[test]
+    fn open_slash_menu_returns_none() {
+        let (id, block) = paragraph_with_id("anything");
+        let mut doc = doc_with(vec![block]);
+        let result = apply(&mut doc, BlockAction::OpenSlashMenu { block_id: id });
+        assert!(result.is_none(), "OpenSlashMenu is UI-only, unrecorded");
+    }
 }

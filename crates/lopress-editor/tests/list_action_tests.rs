@@ -183,3 +183,46 @@ fn split_list_item_with_new_item_id_uses_provided_id() {
     assert_eq!(items.len(), 3);
     assert_eq!(items[1].id, target_id);
 }
+#[test]
+fn split_list_item_round_trip_id_stable() {
+    let it0 = item("alpha");
+    let it1 = item("beta");
+    let item_a = it0.id;
+    let mut doc = list_doc(vec![it0, it1]);
+    let block_id = doc.blocks[0].id;
+    let before = doc.clone();
+
+    let (canonical, inverse) = apply(
+        &mut doc,
+        BlockAction::SplitListItem {
+            block_id,
+            item_id: item_a,
+            byte_offset: 3,
+            new_block_id: None,
+        },
+    )
+    .unwrap();
+
+    let minted_item_id = match &canonical {
+        BlockAction::SplitListItem {
+            new_block_id: Some(nid),
+            ..
+        } => *nid,
+        _ => panic!("canonical must carry concrete new_block_id"),
+    };
+    let BlockBody::List(items) = &doc.blocks[0].body else {
+        panic!()
+    };
+    assert_eq!(items[1].id, minted_item_id);
+
+    // Undo.
+    let _ = apply(&mut doc, inverse).unwrap();
+    assert_eq!(doc.blocks.len(), before.blocks.len());
+    let BlockBody::List(items_after) = &doc.blocks[0].body else {
+        panic!()
+    };
+    let BlockBody::List(items_before) = &before.blocks[0].body else {
+        panic!()
+    };
+    assert_eq!(items_after.len(), items_before.len());
+}
