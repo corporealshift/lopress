@@ -2,14 +2,16 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, EditorDoc};
+use crate::model::types::BlockId;
 
 const MAX_UNDO: usize = 100;
 const COALESCE_WINDOW: Duration = Duration::from_secs(1);
 
 struct UndoEntry {
-    action: BlockAction,  // original (for redo)
-    inverse: BlockAction, // computed at push-time (for undo)
+    /// Canonical action with any minted ids filled in. Re-apply for redo.
+    action: BlockAction,
+    /// The action that, applied to the post-state, restores the pre-state.
+    inverse: BlockAction,
 }
 
 pub struct UndoStack {
@@ -27,130 +29,42 @@ impl UndoStack {
         }
     }
 
-    /// Push an action onto the undo stack before it is applied.
-    /// `doc` is the pre-apply state used to compute the inverse.
-    /// For `Split`, the inverse (`MergeWithPrev`) cannot be computed from
-    /// pre-state (we don't know the new block's ID yet); call
-    /// `fix_split_inverse` immediately after applying.
-    /// Clears the redo stack for non-inline-edit actions, or when the
-    /// coalesce window expires.
-    pub fn push_before_apply(&mut self, doc: &EditorDoc, action: &BlockAction) {
-        let Some(inverse) = compute_inverse(doc, action) else {
-            // Actions whose inverse needs post-apply state push a placeholder
-            // here; the caller fixes it up once the new id exists.
-            match action {
-                BlockAction::Split { .. } => {
-                    let placeholder = BlockAction::MergeWithPrev {
-                        block_id: BlockId::new(), // replaced by fix_split_inverse
-                    };
-                    self.redo.clear();
-                    self.push_entry(UndoEntry {
-                        action: action.clone(),
-                        inverse: placeholder,
-                    });
-                }
-                BlockAction::SplitListItem { block_id, .. } => {
-                    let placeholder = BlockAction::MergeListItemWithPrev {
-                        block_id: *block_id,
-                        item_id: BlockId::new(), // replaced by fix_split_list_item_inverse
-                    };
-                    self.redo.clear();
-                    self.push_entry(UndoEntry {
-                        action: action.clone(),
-                        inverse: placeholder,
-                    });
-                }
-                // OpenSlashMenu and unrecordable actions: never recorded.
-                _ => {}
-            }
-            return;
-        };
-
-        if let (
-            BlockAction::EditInline { block_id, .. },
-            BlockAction::EditInline {
-                block_id: _inv_id,
-                new_runs: _old_runs,
-            },
-        ) = (action, &inverse)
-        {
+    /// Record a (canonical action, inverse action) pair that the caller just
+    /// obtained from `actions::apply`'s return value. Successive
+    /// `EditInline`s on the same block within `COALESCE_WINDOW` collapse
+    /// into one undo entry (the oldest inverse is kept, the latest action
+    /// is bumped forward). Clears the redo stack for non-coalescing actions.
+    pub fn push_after_apply(&mut self, action: BlockAction, inverse: BlockAction) {
+        // Coalesce successive EditInline actions on the same block within
+        // the time window. The stored inverse keeps the OLDEST old_runs
+        // (already on the existing entry); only the action is bumped.
+        if let BlockAction::EditInline { block_id, .. } = &action {
+            let edit_id = *block_id;
             let now = Instant::now();
             if let Some((last_id, last_t)) = self.last_inline_edit {
-                if last_id == *block_id
+                if last_id == edit_id
                     && now.duration_since(last_t) < COALESCE_WINDOW
                     && self.redo.is_empty()
                 {
-                    // Coalesce: keep the oldest old_runs (already stored in the
-                    // existing entry's inverse), update the action to the latest.
                     if let Some(entry) = self.undo.back_mut() {
-                        entry.action = action.clone();
+                        entry.action = action;
                     }
-                    self.last_inline_edit = Some((*block_id, now));
+                    self.last_inline_edit = Some((edit_id, now));
                     return;
                 }
             }
-            self.last_inline_edit = Some((*block_id, now));
+            self.last_inline_edit = Some((edit_id, now));
         } else {
             self.last_inline_edit = None;
         }
 
         self.redo.clear();
-        self.push_entry(UndoEntry {
-            action: action.clone(),
-            inverse,
-        });
+        self.push_entry(UndoEntry { action, inverse });
     }
 
-    /// Replace the placeholder inverse for the most recent Split entry with
-    /// the real `MergeWithPrev { block_id: new_block_id }`.
-    pub fn fix_split_inverse(&mut self, new_block_id: BlockId) {
-        if let Some(entry) = self.undo.back_mut() {
-            if matches!(entry.action, BlockAction::Split { .. }) {
-                entry.inverse = BlockAction::MergeWithPrev {
-                    block_id: new_block_id,
-                };
-            }
-        }
-    }
-
-    /// Replace the placeholder inverse for the most recent `SplitListItem`
-    /// entry with `MergeListItemWithPrev` targeting the newly-created item.
-    pub fn fix_split_list_item_inverse(&mut self, new_item_id: BlockId) {
-        if let Some(entry) = self.undo.back_mut() {
-            if matches!(entry.action, BlockAction::SplitListItem { .. }) {
-                if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.inverse {
-                    *item_id = new_item_id;
-                }
-            }
-        }
-    }
-
-    /// After an undo recreates a block via `Split` (undoing a
-    /// `MergeWithPrev`), the recreated block has a fresh `BlockId`. Update
-    /// the matching redo entry's `MergeWithPrev` action to target it, so a
-    /// subsequent redo merges the right block.
-    pub fn fix_merge_redo(&mut self, new_block_id: BlockId) {
-        if let Some(entry) = self.redo.last_mut() {
-            if let BlockAction::MergeWithPrev { block_id } = &mut entry.action {
-                *block_id = new_block_id;
-            }
-        }
-    }
-
-    /// After an undo recreates a list item via `SplitListItem` (undoing a
-    /// `MergeListItemWithPrev`), the recreated item has a fresh `BlockId`.
-    /// Update the matching redo entry's `MergeListItemWithPrev` action so a
-    /// subsequent redo merges the right item.
-    pub fn fix_merge_list_item_redo(&mut self, new_item_id: BlockId) {
-        if let Some(entry) = self.redo.last_mut() {
-            if let BlockAction::MergeListItemWithPrev { item_id, .. } = &mut entry.action {
-                *item_id = new_item_id;
-            }
-        }
-    }
-
-    /// Pop the top undo entry's inverse action (to apply as undo).
-    /// Pushes the original onto the redo stack.
+    /// Pop the top undo entry's inverse (to apply as undo). Moves the entry
+    /// onto the redo stack so a subsequent redo re-applies the canonical
+    /// action.
     pub fn pop_undo(&mut self) -> Option<BlockAction> {
         let entry = self.undo.pop_back()?;
         let inverse = entry.inverse.clone();
@@ -158,8 +72,8 @@ impl UndoStack {
         Some(inverse)
     }
 
-    /// Pop the top redo entry's original action (to re-apply as redo).
-    /// Pushes back onto the undo stack.
+    /// Pop the top redo entry's canonical action (to re-apply). Moves the
+    /// entry back onto the undo stack.
     pub fn pop_redo(&mut self) -> Option<BlockAction> {
         let entry = self.redo.pop()?;
         let action = entry.action.clone();
@@ -186,123 +100,5 @@ impl UndoStack {
 impl Default for UndoStack {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Compute the inverse of `action` from the pre-apply document state.
-/// Returns `None` for `Split` (use `fix_split_inverse` after apply),
-/// `OpenSlashMenu` (UI-only, not recorded), and first-block `Delete`
-/// (no predecessor anchor available).
-pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAction> {
-    match action {
-        BlockAction::EditInline { block_id, .. } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let old_runs = match &block.body {
-                BlockBody::Inline(runs) => runs.clone(),
-                _ => return None,
-            };
-            Some(BlockAction::EditInline {
-                block_id: *block_id,
-                new_runs: old_runs,
-            })
-        }
-        BlockAction::EditCode { block_id, .. } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let old_text = match &block.body {
-                BlockBody::Code(t) => t.clone(),
-                _ => return None,
-            };
-            Some(BlockAction::EditCode {
-                block_id: *block_id,
-                new_text: old_text,
-            })
-        }
-        BlockAction::Split { .. } => None, // post-state required; handled separately
-        BlockAction::MergeWithPrev { block_id } => {
-            let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
-            let prev = doc.blocks.get(idx.checked_sub(1)?)?;
-            let split_offset: usize = match &prev.body {
-                BlockBody::Inline(runs) => runs.iter().map(|r| r.text.len()).sum(),
-                _ => return None,
-            };
-            Some(BlockAction::Split {
-                block_id: prev.id,
-                byte_offset: split_offset,
-                new_block_id: None,
-            })
-        }
-        BlockAction::Delete { block_id } => {
-            let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
-            // No predecessor anchor for the first block — `checked_sub` yields
-            // `None`, so this whole arm returns `None`.
-            let anchor = doc.blocks.get(idx.checked_sub(1)?)?.id;
-            let full_block = doc.blocks.get(idx)?.clone();
-            Some(BlockAction::InsertAfter {
-                anchor,
-                new_block: full_block,
-            })
-        }
-        BlockAction::InsertAfter { new_block, .. } => Some(BlockAction::Delete {
-            block_id: new_block.id,
-        }),
-        BlockAction::Move { block_id, to_index } => {
-            let idx = doc.blocks.iter().position(|b| b.id == *block_id)?;
-            // `apply_move` reads `to_index` as a gap in pre-removal
-            // coordinates. To return the block to its original index `idx`:
-            // a forward move (original to_index > idx) undoes with gap
-            // `idx`; a backward move undoes with gap `idx + 1`.
-            let inverse_to = if *to_index > idx { idx } else { idx + 1 };
-            Some(BlockAction::Move {
-                block_id: *block_id,
-                to_index: inverse_to,
-            })
-        }
-        BlockAction::ChangeType { block_id, .. } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let old_kind = block.kind.clone();
-            Some(BlockAction::ChangeType {
-                block_id: *block_id,
-                new_kind: old_kind,
-            })
-        }
-        BlockAction::EditAttrs { block_id, .. } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let old_attrs = block.plugin.as_ref()?.attrs.clone();
-            Some(BlockAction::EditAttrs {
-                block_id: *block_id,
-                new_attrs: old_attrs,
-            })
-        }
-        BlockAction::EditListItem {
-            block_id, item_id, ..
-        } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let BlockBody::List(items) = &block.body else {
-                return None;
-            };
-            let old_runs = items.iter().find(|it| it.id == *item_id)?.runs.clone();
-            Some(BlockAction::EditListItem {
-                block_id: *block_id,
-                item_id: *item_id,
-                new_runs: old_runs,
-            })
-        }
-        BlockAction::SplitListItem { .. } => None, // post-state required
-        BlockAction::MergeListItemWithPrev { block_id, item_id } => {
-            let block = doc.blocks.iter().find(|b| b.id == *block_id)?;
-            let BlockBody::List(items) = &block.body else {
-                return None;
-            };
-            let pos = items.iter().position(|it| it.id == *item_id)?;
-            let prev = items.get(pos.checked_sub(1)?)?;
-            let split_offset: usize = prev.runs.iter().map(|r| r.text.len()).sum();
-            Some(BlockAction::SplitListItem {
-                block_id: *block_id,
-                item_id: prev.id,
-                byte_offset: split_offset,
-                new_block_id: None,
-            })
-        }
-        BlockAction::OpenSlashMenu { .. } => None,
     }
 }

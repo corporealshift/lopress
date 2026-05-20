@@ -253,16 +253,9 @@ fn editing_view(
             slash_menu_open.set(None);
         }
 
-        // Push to undo stack before apply (using pre-state). Nested closure
-        // avoids cloning the entire EditorDoc — push_before_apply takes the
-        // pre-state by reference, and compute_inverse clones just the
-        // affected block.
-        current_doc.with_untracked(|maybe| {
-            if let Some(d) = maybe {
-                undo_stack.update(|s| s.push_before_apply(d, &action));
-            }
-        });
-
+        // Pre-focus must read pre-apply state (the block before the one
+        // being merged into its predecessor). Capture it before the apply
+        // mutates the doc.
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
                 .blocks
@@ -273,35 +266,20 @@ fn editing_view(
                 .map(|b| b.id),
             _ => None,
         });
+
+        // Apply the action; capture the returned (canonical, inverse) pair
+        // and push it onto the undo stack. apply returns None for
+        // unrecordable cases (UI-only, no-op, or stage-1-unrecordable
+        // structural splits / first-block delete).
         let action_for_apply = action.clone();
+        let mut recorded: Option<(BlockAction, BlockAction)> = None;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
-                let _ = apply(d, action_for_apply);
+                recorded = apply(d, action_for_apply);
             }
         });
-
-        // Fix Split inverse now that post-state has the new block id.
-        if let BlockAction::Split { block_id, .. } = &action {
-            let new_id = current_doc.with_untracked(|maybe| {
-                let d = maybe.as_ref()?;
-                let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                d.blocks.get(i + 1).map(|b| b.id)
-            });
-            if let Some(new_id) = new_id {
-                undo_stack.update(|s| s.fix_split_inverse(new_id));
-            }
-        }
-
-        // Fix SplitListItem inverse now that the new item id exists.
-        if let BlockAction::SplitListItem {
-            block_id, item_id, ..
-        } = &action
-        {
-            let new_item_id = current_doc
-                .with_untracked(|maybe| list_item_after(maybe.as_ref()?, *block_id, *item_id));
-            if let Some(new_item_id) = new_item_id {
-                undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
-            }
+        if let Some((canonical, inverse)) = recorded {
+            undo_stack.update(|s| s.push_after_apply(canonical, inverse));
         }
 
         let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
@@ -356,33 +334,9 @@ fn editing_view(
                         let _ = apply(d, action_for_apply);
                     }
                 });
-                // Undoing a MergeWithPrev re-applies a Split, which mints a
-                // fresh BlockId for the recreated block. Point the redo
-                // entry's MergeWithPrev at that new id.
-                if let BlockAction::Split { block_id, .. } = &action {
-                    let new_id = current_doc.with_untracked(|maybe| {
-                        let d = maybe.as_ref()?;
-                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                        d.blocks.get(i + 1).map(|b| b.id)
-                    });
-                    if let Some(new_id) = new_id {
-                        undo_stack.update(|s| s.fix_merge_redo(new_id));
-                    }
-                }
-                // Undoing a MergeListItemWithPrev re-applies a SplitListItem,
-                // minting a fresh item id; point the redo entry's
-                // MergeListItemWithPrev at it.
-                if let BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                } = &action
-                {
-                    let new_item_id = current_doc.with_untracked(|maybe| {
-                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
-                    });
-                    if let Some(new_item_id) = new_item_id {
-                        undo_stack.update(|s| s.fix_merge_list_item_redo(new_item_id));
-                    }
-                }
+                // No post-apply id surgery: Split / SplitListItem in stored
+                // entries carry new_block_id: Some(...), so re-applying them
+                // is id-stable without patching the redo entry.
                 if let Some(id) = focus_id {
                     floem::action::exec_after(Duration::from_millis(0), move |_| {
                         focus_target.set(Some(id));
@@ -408,31 +362,7 @@ fn editing_view(
                         let _ = apply(d, action_for_apply);
                     }
                 });
-                // Redoing a Split mints a fresh BlockId; refresh the undo
-                // entry's MergeWithPrev inverse to target it.
-                if let BlockAction::Split { block_id, .. } = &action {
-                    let new_id = current_doc.with_untracked(|maybe| {
-                        let d = maybe.as_ref()?;
-                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                        d.blocks.get(i + 1).map(|b| b.id)
-                    });
-                    if let Some(new_id) = new_id {
-                        undo_stack.update(|s| s.fix_split_inverse(new_id));
-                    }
-                }
-                // Redoing a SplitListItem mints a fresh item id; refresh the
-                // undo entry's MergeListItemWithPrev inverse to target it.
-                if let BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                } = &action
-                {
-                    let new_item_id = current_doc.with_untracked(|maybe| {
-                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
-                    });
-                    if let Some(new_item_id) = new_item_id {
-                        undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
-                    }
-                }
+                // No post-apply id surgery for the same reason as on_undo.
                 if let Some(id) = focus_id {
                     floem::action::exec_after(Duration::from_millis(0), move |_| {
                         focus_target.set(Some(id));
