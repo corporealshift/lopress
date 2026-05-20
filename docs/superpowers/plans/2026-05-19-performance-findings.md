@@ -2,7 +2,7 @@
 
 **Spec:** [`docs/superpowers/specs/2026-05-19-editor-perf-and-instrumentation-design.md`](../specs/2026-05-19-editor-perf-and-instrumentation-design.md)
 **Plan:** [`docs/superpowers/plans/2026-05-19-editor-perf-and-instrumentation.md`](2026-05-19-editor-perf-and-instrumentation.md)
-**Status:** Awaiting measurement run.
+**Status:** Deferred — implementation tasks landed; the measurement pass and O5/O6/O7 decisions were not pursued. Revisit only if a performance regression is suspected. The protocol and table below remain populated as a ready-to-use template for that future run.
 
 ## Implementation status
 
@@ -102,4 +102,6 @@ Reasoning: _<fill in. If you only judge the editor through the debug control wor
 
 ## Overall
 
-_<one of: "perf work complete — close out remaining items" / "open a follow-up spec for X, Y">_
+Implementation tasks T1–T7 landed and judged sufficient at this stage. The visible win — workspace open returning immediately with the footer surfacing build/serve progress — plus the O4 clone fix moved subjective feel far enough that a formal measurement pass wasn't worth the effort right now. The instrumentation (`perf::span` + the run-it protocol above) is in place to revisit quickly if anything regresses.
+
+O5, O6, and O7 are explicitly not closed — just not pursued. Re-open this doc and run the measurement protocol if needed.
