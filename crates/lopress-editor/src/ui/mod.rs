@@ -17,6 +17,7 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
 use floem::IntoView;
+use lopress_core::perf;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -243,6 +244,7 @@ fn editing_view(
     // lookups derive the block to focus after structural actions.
     let on_action_mark_dirty = Rc::clone(&mark_dirty);
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
+        let _t = perf::span("editor.on_action");
         if let BlockAction::OpenSlashMenu { block_id } = action {
             slash_menu_open.set(Some(block_id));
             return;
