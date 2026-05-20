@@ -507,4 +507,180 @@ mod inverse_symmetry {
         let result = apply(&mut doc, BlockAction::OpenSlashMenu { block_id: id });
         assert!(result.is_none(), "OpenSlashMenu is UI-only, unrecorded");
     }
+
+    /// Snapshot a doc's block content as a list of (id, flat-text) tuples.
+    /// Stable across inverse round-trips for the non-lossy variants — runs
+    /// may consolidate differently, but the text and id sequence must match.
+    fn snapshot(doc: &EditorDoc) -> Vec<(BlockId, String, &'static str)> {
+        doc.blocks
+            .iter()
+            .map(|b| {
+                let (text, tag) = match &b.body {
+                    BlockBody::Inline(runs) => {
+                        (runs.iter().map(|r| r.text.as_str()).collect(), "inline")
+                    }
+                    BlockBody::Code(t) => (t.clone(), "code"),
+                    BlockBody::List(items) => (
+                        items
+                            .iter()
+                            .map(|it| -> String {
+                                it.runs.iter().map(|r| r.text.as_str()).collect()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        "list",
+                    ),
+                    BlockBody::Opaque(_) => (String::new(), "opaque"),
+                };
+                (b.id, text, tag)
+            })
+            .collect()
+    }
+
+    /// Apply `action` then its returned inverse, asserting the doc returns
+    /// to its pre-state snapshot. The shape of the inverse is also checked
+    /// to be non-trivial (apply must have recorded something).
+    fn assert_round_trip(doc: &mut EditorDoc, action: BlockAction) {
+        let before = snapshot(doc);
+        let (_canonical, inverse) = apply(doc, action).expect("action must record");
+        let _ = apply(doc, inverse).expect("inverse must record");
+        assert_eq!(snapshot(doc), before);
+    }
+
+    #[test]
+    fn merge_with_prev_round_trip() {
+        let (_id_a, a) = paragraph_with_id("hello ");
+        let (id_b, b) = paragraph_with_id("world");
+        let mut doc = doc_with(vec![a, b]);
+        assert_round_trip(&mut doc, BlockAction::MergeWithPrev { block_id: id_b });
+    }
+
+    #[test]
+    fn delete_round_trip() {
+        let (_id_a, a) = paragraph_with_id("anchor");
+        let (id_b, b) = paragraph_with_id("victim");
+        let mut doc = doc_with(vec![a, b]);
+        assert_round_trip(&mut doc, BlockAction::Delete { block_id: id_b });
+    }
+
+    #[test]
+    fn insert_after_round_trip() {
+        let (id_a, a) = paragraph_with_id("anchor");
+        let mut doc = doc_with(vec![a]);
+        let new_block = EditorBlock::paragraph(vec![InlineRun::plain("inserted")]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::InsertAfter {
+                anchor: id_a,
+                new_block,
+            },
+        );
+    }
+
+    #[test]
+    fn move_round_trip_forward() {
+        let (id_a, a) = paragraph_with_id("a");
+        let (_id_b, b) = paragraph_with_id("b");
+        let (_id_c, c) = paragraph_with_id("c");
+        let mut doc = doc_with(vec![a, b, c]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Move {
+                block_id: id_a,
+                to_index: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn move_round_trip_backward() {
+        let (_id_a, a) = paragraph_with_id("a");
+        let (_id_b, b) = paragraph_with_id("b");
+        let (id_c, c) = paragraph_with_id("c");
+        let mut doc = doc_with(vec![a, b, c]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Move {
+                block_id: id_c,
+                to_index: 0,
+            },
+        );
+    }
+
+    #[test]
+    fn change_type_paragraph_heading_round_trip() {
+        // Paragraph↔Heading conversions are body-preserving (both Inline),
+        // so this round-trip should be lossless.
+        let (id, block) = paragraph_with_id("title");
+        let mut doc = doc_with(vec![block]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::ChangeType {
+                block_id: id,
+                new_kind: BlockKind::Heading(2),
+            },
+        );
+    }
+
+    #[test]
+    fn edit_code_round_trip() {
+        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
+        // Force a Code body for the test.
+        block.body = BlockBody::Code("fn main() {}".to_string());
+        block.kind = BlockKind::Code {
+            lang: String::new(),
+        };
+        let id = block.id;
+        let mut doc = doc_with(vec![block]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditCode {
+                block_id: id,
+                new_text: "fn main() { println!(\"hi\"); }".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn edit_list_item_round_trip() {
+        let it0 = lopress_editor::model::types::ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("old")],
+        };
+        let item_id = it0.id;
+        let list = EditorBlock::list(false, vec![it0]);
+        let block_id = list.id;
+        let mut doc = doc_with(vec![list]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditListItem {
+                block_id,
+                item_id,
+                new_runs: vec![InlineRun::plain("new")],
+            },
+        );
+    }
+
+    #[test]
+    fn merge_list_item_with_prev_round_trip() {
+        let it0 = lopress_editor::model::types::ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("foo")],
+        };
+        let it1 = lopress_editor::model::types::ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("bar")],
+        };
+        let cur_id = it1.id;
+        let list = EditorBlock::list(false, vec![it0, it1]);
+        let block_id = list.id;
+        let mut doc = doc_with(vec![list]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::MergeListItemWithPrev {
+                block_id,
+                item_id: cur_id,
+            },
+        );
+    }
 }

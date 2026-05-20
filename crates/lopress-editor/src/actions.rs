@@ -113,10 +113,10 @@ pub enum BlockAction {
 ///    inverse would need cross-action coordination (a `MergeListItemWithPrev`
 ///    inverse for a top-level `Split` on a list block, or an offset-aware
 ///    code-newline removal). First-block `Delete` is also in this bucket —
-///    no predecessor anchor exists for an `InsertAfter` inverse. Today's
-///    `compute_inverse` returns `None` for these same cases, so this
-///    preserves behavior bit-for-bit. Stage 3's `EditBlockBody` collapse
-///    makes all of these fully reversible.
+///    no predecessor anchor exists for an `InsertAfter` inverse. These cases
+///    are intentionally unrecordable in stage 1 (matching the pre-refactor
+///    behavior). Stage 3's `EditBlockBody` collapse makes all of them
+///    fully reversible.
 pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, BlockAction)> {
     match action {
         BlockAction::Split {
@@ -458,9 +458,9 @@ fn apply_change_type(
     // NOTE: this inverse restores `kind` only, not `body`. Body conversions
     // (Inline→Code stringifies runs; Inline→List wraps into a single item)
     // are lossy on undo — the original body is not snapshot here. This
-    // matches today's `compute_inverse` behavior. Stage 3's `EditBlockBody`
-    // collapse makes ChangeType fully reversible by snapshotting body
-    // alongside kind. See
+    // matches the pre-refactor behavior. Stage 3's `EditBlockBody` collapse
+    // makes ChangeType fully reversible by snapshotting body alongside kind.
+    // See
     // `docs/superpowers/specs/2026-05-20-list-editor-unification-and-generic-undo-design.md`
     // Section 3 — "Shift B".
     Some((
