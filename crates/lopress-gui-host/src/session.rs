@@ -1,6 +1,7 @@
 use crate::document::LoadedDocument;
 use crate::error::{LoadError, OpenError, SaveError};
 use lopress_build::Workspace;
+use lopress_core::perf;
 use lopress_core::{parse, serialize, Document};
 use lopress_serve::{serve_in_background, ServerHandle};
 use lopress_watch::{ChangeSet, Watcher};
@@ -67,13 +68,17 @@ impl Session {
     /// Returns `OpenError` if `lopress.toml` is missing or unparseable.
     pub fn open(workspace_root: &Path) -> Result<Self, OpenError> {
         // Validate
-        let workspace = Workspace::load(workspace_root)
-            .map_err(|e| OpenError::InvalidWorkspace(e.to_string()))?;
+        let workspace = {
+            let _t = perf::span("workspace.open.workspace_load");
+            Workspace::load(workspace_root)
+                .map_err(|e| OpenError::InvalidWorkspace(e.to_string()))?
+        };
         let workspace = Arc::new(workspace);
 
         // Initial build
         let build_status = Arc::new(Mutex::new(BuildStatus::Idle));
         {
+            let _t = perf::span("workspace.open.initial_build");
             let t0 = std::time::Instant::now();
             match lopress_build::build(workspace_root) {
                 Ok(r) => {
@@ -94,7 +99,8 @@ impl Session {
         // Serve (non-fatal if bind fails — try 8080 then ephemeral)
         let www_dir = workspace.www_dir();
         std::fs::create_dir_all(&www_dir).ok();
-        let (server_arc, serve_status) =
+        let (server_arc, serve_status) = {
+            let _t = perf::span("workspace.open.serve_start");
             match serve_in_background(www_dir.clone(), "127.0.0.1".into(), 8080) {
                 Ok(h) => {
                     let url = h.url.clone();
@@ -112,10 +118,14 @@ impl Session {
                         },
                     ),
                 },
-            };
+            }
+        };
 
         // Scan posts/pages
-        let summary = Arc::new(Mutex::new(scan_workspace(&workspace)));
+        let summary = Arc::new(Mutex::new({
+            let _t = perf::span("workspace.open.scan");
+            scan_workspace(&workspace)
+        }));
 
         // Watcher: on change, rebuild and broadcast
         let ws_root = workspace_root.to_path_buf();
@@ -192,11 +202,17 @@ impl Session {
     /// # Errors
     /// Returns `SaveError` on I/O failure.
     pub fn save(&self, doc: &LoadedDocument) -> Result<(), SaveError> {
-        let content = serialize(&Document {
-            front_matter: doc.front_matter.clone(),
-            blocks: doc.blocks.clone(),
-        });
-        atomic_write(&doc.path, content.as_bytes())?;
+        let content = {
+            let _t = perf::span("editor.save.serialize");
+            serialize(&Document {
+                front_matter: doc.front_matter.clone(),
+                blocks: doc.blocks.clone(),
+            })
+        };
+        {
+            let _t = perf::span("editor.save.write");
+            atomic_write(&doc.path, content.as_bytes())?;
+        }
         Ok(())
     }
 
