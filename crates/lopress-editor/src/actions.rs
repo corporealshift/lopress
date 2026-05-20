@@ -14,10 +14,12 @@ use crate::model::types::{
 pub enum BlockAction {
     /// Split the block at `byte_offset` into the block's flat text. The
     /// trailing portion becomes a new block of the same kind directly after
-    /// the original.
+    /// the original. `new_block_id`: `None` mints a fresh id; `Some(id)`
+    /// uses the provided id so undo↔redo round-trips are id-stable.
     Split {
         block_id: BlockId,
         byte_offset: usize,
+        new_block_id: Option<BlockId>,
     },
     /// Merge `block_id` into its predecessor. No-op for the first block.
     MergeWithPrev {
@@ -95,7 +97,8 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
         BlockAction::Split {
             block_id,
             byte_offset,
-        } => apply_split(doc, block_id, byte_offset),
+            new_block_id,
+        } => apply_split(doc, block_id, byte_offset, new_block_id),
         BlockAction::MergeWithPrev { block_id } => apply_merge(doc, block_id),
         BlockAction::InsertAfter { anchor, new_block } => {
             apply_insert_after(doc, anchor, new_block)
@@ -149,7 +152,12 @@ fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
     doc.blocks.iter().position(|b| b.id == id)
 }
 
-fn apply_split(doc: &mut EditorDoc, id: BlockId, byte_offset: usize) {
+fn apply_split(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    byte_offset: usize,
+    new_block_id: Option<BlockId>,
+) {
     let Some(idx) = find_idx(doc, id) else { return };
     let Some(block) = doc.blocks.get(idx) else {
         return;
@@ -177,13 +185,16 @@ fn apply_split(doc: &mut EditorDoc, id: BlockId, byte_offset: usize) {
             if let Some(b) = doc.blocks.get_mut(idx) {
                 b.body = BlockBody::Inline(vec![InlineRun::plain(head)]);
             }
-            let tail_block = match kind {
+            let mut tail_block = match kind {
                 BlockKind::Paragraph => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
                 BlockKind::Heading(level) => {
                     EditorBlock::heading(level, vec![InlineRun::plain(tail)])
                 }
                 _ => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
             };
+            if let Some(id) = new_block_id {
+                tail_block.id = id;
+            }
             doc.blocks.insert(idx + 1, tail_block);
         }
         BlockBody::List(items) => {

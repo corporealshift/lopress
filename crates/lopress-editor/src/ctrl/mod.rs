@@ -78,6 +78,7 @@ impl CtrlAction {
             } => BlockAction::Split {
                 block_id: find(doc, block_id)?,
                 byte_offset,
+                new_block_id: None,
             },
             CtrlAction::MergeWithPrev { block_id } => BlockAction::MergeWithPrev {
                 block_id: find(doc, block_id)?,

@@ -398,6 +398,7 @@ fn handle_key(
             on_action(BlockAction::Split {
                 block_id,
                 byte_offset,
+                new_block_id: None,
             });
             CommandExecuted::Yes
         }

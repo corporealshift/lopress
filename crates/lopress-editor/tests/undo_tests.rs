@@ -47,6 +47,7 @@ fn inverse_of_merge_with_prev_is_split_at_join_point() {
         BlockAction::Split {
             block_id,
             byte_offset,
+            ..
         } => {
             assert_eq!(block_id, prev_id);
             assert_eq!(byte_offset, 6);

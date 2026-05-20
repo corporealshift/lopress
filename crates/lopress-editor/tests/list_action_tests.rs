@@ -99,6 +99,7 @@ fn split_on_a_list_block_splits_the_containing_item() {
         BlockAction::Split {
             block_id,
             byte_offset: 4,
+            new_block_id: None,
         },
     );
     assert_eq!(items_of(&doc), vec!["ab", "c", "d"]);

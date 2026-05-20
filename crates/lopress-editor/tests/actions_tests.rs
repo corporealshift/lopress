@@ -36,6 +36,7 @@ fn split_paragraph_at_middle() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 5,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -52,6 +53,7 @@ fn split_at_end_creates_empty_trailing_block() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 2,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -69,6 +71,7 @@ fn split_heading_keeps_level() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 5,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -85,6 +88,7 @@ fn split_unknown_block_is_noop() {
         BlockAction::Split {
             block_id: BlockId::new(),
             byte_offset: 1,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 1);
@@ -315,6 +319,7 @@ fn split_code_block_inserts_newline() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 8,
+            new_block_id: None,
         },
     );
     // Code block does not split; a newline is inserted at offset.
@@ -366,4 +371,37 @@ fn change_type_to_list_serializes_as_native_list() {
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "list");
     assert_eq!(core.blocks[0].children[0].r#type, "list_item");
+}
+
+#[test]
+fn split_with_new_block_id_uses_provided_id() {
+    let (id, block) = paragraph_with_id("hello world");
+    let mut doc = doc_with(vec![block]);
+    let target_id = BlockId::new();
+    apply(
+        &mut doc,
+        BlockAction::Split {
+            block_id: id,
+            byte_offset: 5,
+            new_block_id: Some(target_id),
+        },
+    );
+    assert_eq!(doc.blocks.len(), 2);
+    assert_eq!(doc.blocks[1].id, target_id);
+}
+
+#[test]
+fn split_with_new_block_id_none_mints_fresh_id() {
+    let (id, block) = paragraph_with_id("hello world");
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::Split {
+            block_id: id,
+            byte_offset: 5,
+            new_block_id: None,
+        },
+    );
+    assert_eq!(doc.blocks.len(), 2);
+    assert_ne!(doc.blocks[1].id, doc.blocks[0].id);
 }

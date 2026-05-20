@@ -228,6 +228,7 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
             Some(BlockAction::Split {
                 block_id: prev.id,
                 byte_offset: split_offset,
+                new_block_id: None,
             })
         }
         BlockAction::Delete { block_id } => {
