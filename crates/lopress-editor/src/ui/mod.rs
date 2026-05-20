@@ -28,10 +28,10 @@ use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
-use crate::ui::footer::{footer_view, serve_url, start_build_status_poll};
+use crate::ui::footer::{footer_view, start_build_status_poll, start_serve_status_poll};
 use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
-use lopress_gui_host::{BuildStatus, DocumentRef, Session, WorkspaceSummary};
+use lopress_gui_host::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};
 use std::path::PathBuf;
 
 /// Maximum number of recent workspaces to retain.
@@ -495,10 +495,7 @@ fn editing_view(
 
     let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
 
-    let serve_url_str = editing
-        .borrow()
-        .as_ref()
-        .and_then(|s| serve_url(&s.session.serve_status()));
+    let serve_status_sig: RwSignal<ServeStatus> = RwSignal::new(ServeStatus::Starting);
 
     {
         let editing_for_poll = Rc::clone(&editing);
@@ -510,6 +507,18 @@ fn editing_view(
                 .unwrap_or(BuildStatus::Idle)
         });
         start_build_status_poll(session_reader, build_status_sig);
+    }
+
+    {
+        let editing_for_poll = Rc::clone(&editing);
+        let serve_reader: Rc<dyn Fn() -> ServeStatus> = Rc::new(move || {
+            editing_for_poll
+                .borrow()
+                .as_ref()
+                .map(|s| s.session.serve_status())
+                .unwrap_or(ServeStatus::Starting)
+        });
+        start_serve_status_poll(serve_reader, serve_status_sig);
     }
 
     // Debounced save+rebuild. `debounce_action` resets its internal timer on
@@ -548,7 +557,7 @@ fn editing_view(
         dirty_sig,
         save_error_sig,
         current_doc,
-        serve_url_str,
+        serve_status_sig,
     );
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────

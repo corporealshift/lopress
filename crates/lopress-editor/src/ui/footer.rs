@@ -5,7 +5,8 @@
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.
 //! - `dirty` and `save_error` — set by the save-debounce machinery in Task 21.
 //! - `current_doc` — for word count.
-//! - `serve_url` — captured once at footer-build time from `Session::serve_status()`.
+//! - `serve_status` — driven by a 250 ms poll on `Session::serve_status()`
+//!   set up in `mod.rs`. Background thread writes the mutex; we just read.
 
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -30,7 +31,7 @@ pub fn footer_view(
     dirty: RwSignal<bool>,
     save_error: RwSignal<Option<String>>,
     current_doc: RwSignal<Option<EditorDoc>>,
-    serve_url: Option<String>,
+    serve_status: RwSignal<ServeStatus>,
 ) -> impl IntoView {
     let build_label = dyn_container(
         move || build_status.get(),
@@ -48,25 +49,10 @@ pub fn footer_view(
     })
     .style(|s| s.color(MUTED).font_size(12.));
 
-    let url_view: AnyView = match serve_url {
-        Some(url) => {
-            let url_for_click = url.clone();
-            label(move || url.clone())
-                .on_click_stop(move |_| {
-                    let _ = Clipboard::set_contents(url_for_click.clone());
-                })
-                .style(|s| {
-                    s.color(MUTED)
-                        .font_size(12.)
-                        .cursor(floem::style::CursorStyle::Pointer)
-                        .hover(|s| s.color(FG))
-                })
-                .into_any()
-        }
-        None => label(|| "no preview".to_string())
-            .style(|s| s.color(MUTED).font_size(12.))
-            .into_any(),
-    };
+    let url_view = dyn_container(
+        move || serve_status.get(),
+        move |status| serve_status_view(&status).into_any(),
+    );
 
     h_stack((
         build_label.style(|s| s.padding_horiz(10.)),
@@ -128,6 +114,32 @@ fn save_state_view(dirty: bool, error: Option<String>) -> AnyView {
         .into_any()
 }
 
+fn serve_status_view(status: &ServeStatus) -> AnyView {
+    match status {
+        ServeStatus::Starting => label(|| "starting preview…".to_string())
+            .style(|s| s.color(MUTED).font_size(12.))
+            .into_any(),
+        ServeStatus::Listening { url } => {
+            let url_for_label = url.clone();
+            let url_for_click = url.clone();
+            label(move || url_for_label.clone())
+                .on_click_stop(move |_| {
+                    let _ = Clipboard::set_contents(url_for_click.clone());
+                })
+                .style(|s| {
+                    s.color(MUTED)
+                        .font_size(12.)
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.color(FG))
+                })
+                .into_any()
+        }
+        ServeStatus::Unavailable { .. } => label(|| "no preview".to_string())
+            .style(|s| s.color(MUTED).font_size(12.))
+            .into_any(),
+    }
+}
+
 /// Whitespace-split word count over inline-run text and code body text.
 /// List items contribute their inline runs.
 pub fn word_count(doc: &EditorDoc) -> usize {
@@ -155,6 +167,22 @@ pub fn start_build_status_poll(
     sink: RwSignal<BuildStatus>,
 ) {
     fn schedule(session: std::rc::Rc<dyn Fn() -> BuildStatus>, sink: RwSignal<BuildStatus>) {
+        floem::action::exec_after(std::time::Duration::from_millis(250), move |_| {
+            sink.set((session)());
+            schedule(session, sink);
+        });
+    }
+    sink.set((session)());
+    schedule(session, sink);
+}
+
+/// Initial poll loop for `ServeStatus`. Mirrors `start_build_status_poll`.
+/// Re-schedules itself every 250 ms.
+pub fn start_serve_status_poll(
+    session: std::rc::Rc<dyn Fn() -> ServeStatus>,
+    sink: RwSignal<ServeStatus>,
+) {
+    fn schedule(session: std::rc::Rc<dyn Fn() -> ServeStatus>, sink: RwSignal<ServeStatus>) {
         floem::action::exec_after(std::time::Duration::from_millis(250), move |_| {
             sink.set((session)());
             schedule(session, sink);
