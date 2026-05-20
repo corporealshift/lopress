@@ -67,10 +67,13 @@ pub enum BlockAction {
     },
     /// Split a list item at `byte_offset` into the item's flat text. The
     /// trailing portion becomes a new `ListItem` directly after it.
+    /// `new_block_id`: `None` mints a fresh item id; `Some(id)` uses it so
+    /// undo↔redo round-trips are id-stable.
     SplitListItem {
         block_id: BlockId,
         item_id: BlockId,
         byte_offset: usize,
+        new_block_id: Option<BlockId>,
     },
     /// Merge a list item into its predecessor item. No-op for the first item.
     MergeListItemWithPrev {
@@ -121,7 +124,8 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) {
             block_id,
             item_id,
             byte_offset,
-        } => apply_split_list_item(doc, block_id, item_id, byte_offset),
+            new_block_id,
+        } => apply_split_list_item(doc, block_id, item_id, byte_offset, new_block_id),
         BlockAction::MergeListItemWithPrev { block_id, item_id } => {
             apply_merge_list_item(doc, block_id, item_id)
         }
@@ -380,6 +384,7 @@ fn apply_split_list_item(
     block_id: BlockId,
     item_id: BlockId,
     byte_offset: usize,
+    new_item_id: Option<BlockId>,
 ) {
     let Some(idx) = find_idx(doc, block_id) else {
         return;
@@ -389,7 +394,7 @@ fn apply_split_list_item(
     };
     if let BlockBody::List(items) = &mut block.body {
         if let Some(pos) = items.iter().position(|it| it.id == item_id) {
-            split_item_at(items, pos, byte_offset);
+            split_item_at_with_id(items, pos, byte_offset, new_item_id);
         }
     }
 }
@@ -420,6 +425,18 @@ fn apply_merge_list_item(doc: &mut EditorDoc, block_id: BlockId, item_id: BlockI
 /// is dropped on both sides (the split produces plain runs), matching the
 /// behaviour of `apply_split` for paragraphs.
 fn split_item_at(items: &mut Vec<ListItem>, pos: usize, byte_offset: usize) {
+    split_item_at_with_id(items, pos, byte_offset, None);
+}
+
+/// Like `split_item_at`, but uses the provided id for the new item when
+/// `new_item_id` is `Some`. `None` mints a fresh id (the default behavior
+/// of `split_item_at`).
+fn split_item_at_with_id(
+    items: &mut Vec<ListItem>,
+    pos: usize,
+    byte_offset: usize,
+    new_item_id: Option<BlockId>,
+) {
     let Some(item) = items.get(pos) else { return };
     let flat: String = item.runs.iter().map(|r| r.text.as_str()).collect();
     let safe_offset = flat
@@ -433,10 +450,11 @@ fn split_item_at(items: &mut Vec<ListItem>, pos: usize, byte_offset: usize) {
     if let Some(item) = items.get_mut(pos) {
         item.runs = vec![InlineRun::plain(head)];
     }
+    let new_id = new_item_id.unwrap_or_default();
     items.insert(
         pos + 1,
         ListItem {
-            id: BlockId::new(),
+            id: new_id,
             runs: vec![InlineRun::plain(tail)],
         },
     );

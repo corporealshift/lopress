@@ -58,6 +58,7 @@ fn split_list_item_inserts_new_item_after() {
             block_id,
             item_id,
             byte_offset: 6,
+            new_block_id: None,
         },
     );
     assert_eq!(items_of(&doc), vec!["hello ", "world"]);
@@ -157,4 +158,28 @@ fn merge_with_prev_on_a_single_item_list_drops_the_emptied_list() {
         }
         _ => panic!("expected merged paragraph"),
     }
+}
+
+#[test]
+fn split_list_item_with_new_item_id_uses_provided_id() {
+    let it0 = item("first item");
+    let it1 = item("second");
+    let item_id = it0.id;
+    let target_id = BlockId::new();
+    let mut doc = list_doc(vec![it0, it1]);
+    let block_id = doc.blocks[0].id;
+    apply(
+        &mut doc,
+        BlockAction::SplitListItem {
+            block_id,
+            item_id,
+            byte_offset: 5,
+            new_block_id: Some(target_id),
+        },
+    );
+    let BlockBody::List(items) = &doc.blocks[0].body else {
+        panic!("expected list body");
+    };
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[1].id, target_id);
 }

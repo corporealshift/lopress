@@ -300,6 +300,7 @@ pub fn compute_inverse(doc: &EditorDoc, action: &BlockAction) -> Option<BlockAct
                 block_id: *block_id,
                 item_id: prev.id,
                 byte_offset: split_offset,
+                new_block_id: None,
             })
         }
         BlockAction::OpenSlashMenu { .. } => None,

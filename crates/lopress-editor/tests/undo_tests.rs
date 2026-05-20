@@ -282,6 +282,7 @@ fn split_list_item_pushes_placeholder_then_fixes_it() {
         block_id,
         item_id,
         byte_offset: 6,
+        new_block_id: None,
     };
     stack.push_before_apply(&doc, &action);
     lopress_editor::actions::apply(&mut doc, action);

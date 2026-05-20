@@ -232,6 +232,7 @@ fn handle_list_item_key(
                 block_id,
                 item_id,
                 byte_offset,
+                new_block_id: None,
             });
             CommandExecuted::Yes
         }
