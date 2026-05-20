@@ -60,7 +60,7 @@ pub struct Session {
     summary: Arc<Mutex<WorkspaceSummary>>,
     build_status: Arc<Mutex<BuildStatus>>,
     serve_status: Arc<Mutex<ServeStatus>>,
-    _server: Option<Arc<ServerHandle>>,
+    server: Arc<Mutex<Option<Arc<ServerHandle>>>>,
     _watcher: Option<Watcher>,
 }
 
@@ -74,7 +74,7 @@ impl Session {
     /// # Errors
     /// Returns `OpenError` if `lopress.toml` is missing or unparseable.
     pub fn open(workspace_root: &Path) -> Result<Self, OpenError> {
-        // Validate
+        // Synchronous: workspace load.
         let workspace = {
             let _t = perf::span("workspace.open.workspace_load");
             Workspace::load(workspace_root)
@@ -82,69 +82,85 @@ impl Session {
         };
         let workspace = Arc::new(workspace);
 
-        // Initial build
-        let build_status = Arc::new(Mutex::new(BuildStatus::Idle));
-        {
-            let _t = perf::span("workspace.open.initial_build");
-            let t0 = std::time::Instant::now();
-            match lopress_build::build(workspace_root) {
-                Ok(r) => {
-                    *lock(&build_status) = BuildStatus::Ok {
-                        pages_rendered: r.pages_rendered,
-                        pages_skipped: r.pages_skipped,
-                        duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-                    };
-                }
-                Err(e) => {
-                    *lock(&build_status) = BuildStatus::Failed {
-                        message: e.to_string(),
-                    };
-                }
-            }
-        }
-
-        // Serve (non-fatal if bind fails — try 8080 then ephemeral)
-        let www_dir = workspace.www_dir();
-        std::fs::create_dir_all(&www_dir).ok();
-        let (server_arc, serve_status) = {
-            let _t = perf::span("workspace.open.serve_start");
-            match serve_in_background(www_dir.clone(), "127.0.0.1".into(), 8080) {
-                Ok(h) => {
-                    let url = h.url.clone();
-                    (Some(Arc::new(h)), ServeStatus::Listening { url })
-                }
-                Err(_) => match serve_in_background(www_dir, "127.0.0.1".into(), 0) {
-                    Ok(h) => {
-                        let url = h.url.clone();
-                        (Some(Arc::new(h)), ServeStatus::Listening { url })
-                    }
-                    Err(e) => (
-                        None,
-                        ServeStatus::Unavailable {
-                            reason: e.to_string(),
-                        },
-                    ),
-                },
-            }
-        };
-
-        // Scan posts/pages
+        // Synchronous: workspace scan.
         let summary = Arc::new(Mutex::new({
             let _t = perf::span("workspace.open.scan");
             scan_workspace(&workspace)
         }));
 
-        // Watcher: on change, rebuild and broadcast
-        let ws_root = workspace_root.to_path_buf();
+        // Initial statuses reflect the "still working in the background" state.
+        let build_status = Arc::new(Mutex::new(BuildStatus::Building));
+        let serve_status = Arc::new(Mutex::new(ServeStatus::Starting));
+        let server: Arc<Mutex<Option<Arc<ServerHandle>>>> = Arc::new(Mutex::new(None));
+
+        let www_dir = workspace.www_dir();
+        std::fs::create_dir_all(&www_dir).ok();
+
+        // Background thread: initial build, then start serve.
+        let ws_root_bg = workspace_root.to_path_buf();
+        let build_status_bg = Arc::clone(&build_status);
+        let serve_status_bg = Arc::clone(&serve_status);
+        let server_bg = Arc::clone(&server);
+        let summary_bg = Arc::clone(&summary);
+        let workspace_bg = Arc::clone(&workspace);
+        let www_dir_bg = www_dir.clone();
+        std::thread::spawn(move || {
+            // Initial build.
+            {
+                let _t = perf::span("workspace.open.initial_build");
+                let t0 = std::time::Instant::now();
+                match lopress_build::build(&ws_root_bg) {
+                    Ok(r) => {
+                        *lock(&build_status_bg) = BuildStatus::Ok {
+                            pages_rendered: r.pages_rendered,
+                            pages_skipped: r.pages_skipped,
+                            duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                        };
+                        *lock(&summary_bg) = scan_workspace(&workspace_bg);
+                    }
+                    Err(e) => {
+                        *lock(&build_status_bg) = BuildStatus::Failed {
+                            message: e.to_string(),
+                        };
+                    }
+                }
+            }
+            // Start serve (try 8080, fall back to ephemeral).
+            {
+                let _t = perf::span("workspace.open.serve_start");
+                let new_serve =
+                    match serve_in_background(www_dir_bg.clone(), "127.0.0.1".into(), 8080) {
+                        Ok(h) => {
+                            let url = h.url.clone();
+                            *lock(&server_bg) = Some(Arc::new(h));
+                            ServeStatus::Listening { url }
+                        }
+                        Err(_) => match serve_in_background(www_dir_bg, "127.0.0.1".into(), 0) {
+                            Ok(h) => {
+                                let url = h.url.clone();
+                                *lock(&server_bg) = Some(Arc::new(h));
+                                ServeStatus::Listening { url }
+                            }
+                            Err(e) => ServeStatus::Unavailable {
+                                reason: e.to_string(),
+                            },
+                        },
+                    };
+                *lock(&serve_status_bg) = new_serve;
+            }
+        });
+
+        // Watcher: still spawned synchronously. Broadcasts via the shared server mutex.
+        let ws_root_w = workspace_root.to_path_buf();
         let build_status_w = Arc::clone(&build_status);
         let summary_w = Arc::clone(&summary);
         let workspace_w = Arc::clone(&workspace);
-        let server_for_watcher = server_arc.clone();
+        let server_w = Arc::clone(&server);
 
         let watcher = Watcher::spawn(workspace_root, move |_cs: ChangeSet| {
             *lock(&build_status_w) = BuildStatus::Building;
             let t0 = std::time::Instant::now();
-            match lopress_build::build(&ws_root) {
+            match lopress_build::build(&ws_root_w) {
                 Ok(r) => {
                     *lock(&build_status_w) = BuildStatus::Ok {
                         pages_rendered: r.pages_rendered,
@@ -152,7 +168,8 @@ impl Session {
                         duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                     };
                     *lock(&summary_w) = scan_workspace(&workspace_w);
-                    if let Some(srv) = &server_for_watcher {
+                    let srv = lock(&server_w).as_ref().map(Arc::clone);
+                    if let Some(srv) = srv {
                         srv.broadcast_reload();
                     }
                 }
@@ -169,8 +186,8 @@ impl Session {
             workspace,
             summary,
             build_status,
-            serve_status: Arc::new(Mutex::new(serve_status)),
-            _server: server_arc,
+            serve_status,
+            server,
             _watcher: watcher,
         })
     }
@@ -262,7 +279,7 @@ impl Session {
     pub fn rebuild(&self) {
         let build_status = Arc::clone(&self.build_status);
         let workspace_root = self.workspace.root.clone();
-        let server = self._server.clone();
+        let server = Arc::clone(&self.server);
         std::thread::spawn(move || {
             *lock(&build_status) = BuildStatus::Building;
             let t0 = std::time::Instant::now();
@@ -273,7 +290,8 @@ impl Session {
                         pages_skipped: r.pages_skipped,
                         duration_ms: t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                     };
-                    if let Some(srv) = server {
+                    let srv = lock(&server).as_ref().map(Arc::clone);
+                    if let Some(srv) = srv {
                         srv.broadcast_reload();
                     }
                 }
