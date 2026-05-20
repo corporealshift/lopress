@@ -253,11 +253,15 @@ fn editing_view(
             slash_menu_open.set(None);
         }
 
-        // Push to undo stack before apply (using pre-state).
-        let pre_doc_snapshot = current_doc.with_untracked(|d| d.clone());
-        if let Some(ref doc) = pre_doc_snapshot {
-            undo_stack.update(|s| s.push_before_apply(doc, &action));
-        }
+        // Push to undo stack before apply (using pre-state). Nested closure
+        // avoids cloning the entire EditorDoc — push_before_apply takes the
+        // pre-state by reference, and compute_inverse clones just the
+        // affected block.
+        current_doc.with_untracked(|maybe| {
+            if let Some(d) = maybe {
+                undo_stack.update(|s| s.push_before_apply(d, &action));
+            }
+        });
 
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
