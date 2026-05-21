@@ -99,13 +99,13 @@ impl CtrlAction {
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
                 },
             },
-            CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditInline {
+            CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_runs,
+                new_body: crate::model::types::BlockBody::Inline(new_runs),
             },
-            CtrlAction::EditCode { block_id, new_text } => BlockAction::EditCode {
+            CtrlAction::EditCode { block_id, new_text } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_text,
+                new_body: crate::model::types::BlockBody::Code(new_text),
             },
             CtrlAction::EditAttrs {
                 block_id,
