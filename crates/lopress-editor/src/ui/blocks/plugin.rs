@@ -359,6 +359,8 @@ fn render_body(
             focus_target,
             focus_pub,
             current_doc,
+            on_undo,
+            on_redo,
         ),
         _ => floem::views::empty().into_any(),
     }

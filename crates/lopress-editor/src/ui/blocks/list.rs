@@ -24,7 +24,15 @@ use lapce_xi_rope::Rope;
 use std::rc::Rc;
 
 /// Build the editable list view for a list block.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+///
+/// `on_undo` / `on_redo` are passed in so list items inherit Ctrl+Z/Y from
+/// the shared editor mount in stage 4 task 3. Stage 4 task 2 only plumbs
+/// them through; the per-item editor doesn't read them yet.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    unused_variables
+)]
 pub fn editable_list_view(
     items: &[ListItem],
     block_id: BlockId,
@@ -33,6 +41,8 @@ pub fn editable_list_view(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let item_ids: Rc<Vec<BlockId>> = Rc::new(items.iter().map(|it| it.id).collect());
     let count = items.len();

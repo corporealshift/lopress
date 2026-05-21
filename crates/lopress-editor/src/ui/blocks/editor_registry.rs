@@ -61,6 +61,8 @@ fn list_editor_widget(ctx: &EditorContext) -> AnyView {
         ctx.focus_target,
         ctx.focus_pub,
         ctx.current_doc,
+        Rc::clone(&ctx.on_undo),
+        Rc::clone(&ctx.on_redo),
     )
 }
 
