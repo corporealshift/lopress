@@ -206,69 +206,6 @@ fn edit_block_body_within_one_second_coalesces() {
     }
 }
 
-use lopress_editor::model::types::{BlockId, ListItem};
-
-fn list_item(text: &str) -> ListItem {
-    ListItem {
-        id: BlockId::new(),
-        runs: vec![InlineRun::plain(text)],
-    }
-}
-
-#[test]
-fn inverse_of_edit_list_item_restores_old_runs() {
-    let it0 = list_item("old");
-    let item_id = it0.id;
-    let list = EditorBlock::list(false, vec![it0]);
-    let block_id = list.id;
-    let doc = doc_with(vec![list]);
-    let inv = inverse_of(
-        &doc,
-        BlockAction::EditListItem {
-            block_id,
-            item_id,
-            new_runs: vec![InlineRun::plain("new")],
-        },
-    );
-    match inv {
-        BlockAction::EditListItem { new_runs, .. } => {
-            assert_eq!(new_runs, vec![InlineRun::plain("old")]);
-        }
-        _ => panic!("wrong variant"),
-    }
-}
-
-#[test]
-fn inverse_of_merge_list_item_is_split_at_join_point() {
-    let it0 = list_item("foo");
-    let it1 = list_item("bar");
-    let prev_id = it0.id;
-    let cur_id = it1.id;
-    let list = EditorBlock::list(false, vec![it0, it1]);
-    let block_id = list.id;
-    let doc = doc_with(vec![list]);
-    let inv = inverse_of(
-        &doc,
-        BlockAction::MergeListItemWithPrev {
-            block_id,
-            item_id: cur_id,
-        },
-    );
-    match inv {
-        BlockAction::SplitListItem {
-            item_id,
-            byte_offset,
-            new_block_id,
-            ..
-        } => {
-            assert_eq!(item_id, prev_id);
-            assert_eq!(byte_offset, 3);
-            assert_eq!(new_block_id, Some(cur_id));
-        }
-        _ => panic!("wrong variant"),
-    }
-}
-
 /// After Task 4's wiring, undo↔redo of a Split is id-stable across
 /// arbitrarily many cycles because the canonical action carries
 /// `new_block_id: Some(...)`. No post-apply patching needed.

@@ -30,65 +30,22 @@ fn items_of(doc: &EditorDoc) -> Vec<String> {
 }
 
 #[test]
-fn edit_list_item_replaces_runs() {
+fn edit_block_body_on_list_replaces_items() {
     let it0 = item("old");
-    let item_id = it0.id;
+    let original_id = it0.id;
     let mut doc = list_doc(vec![it0]);
     let block_id = doc.blocks[0].id;
     apply(
         &mut doc,
-        BlockAction::EditListItem {
+        BlockAction::EditBlockBody {
             block_id,
-            item_id,
-            new_runs: vec![InlineRun::plain("new")],
+            new_body: BlockBody::List(vec![ListItem {
+                id: original_id,
+                runs: vec![InlineRun::plain("new")],
+            }]),
         },
     );
     assert_eq!(items_of(&doc), vec!["new"]);
-}
-
-#[test]
-fn split_list_item_inserts_new_item_after() {
-    let it0 = item("hello world");
-    let item_id = it0.id;
-    let mut doc = list_doc(vec![it0]);
-    let block_id = doc.blocks[0].id;
-    apply(
-        &mut doc,
-        BlockAction::SplitListItem {
-            block_id,
-            item_id,
-            byte_offset: 6,
-            new_block_id: None,
-        },
-    );
-    assert_eq!(items_of(&doc), vec!["hello ", "world"]);
-}
-
-#[test]
-fn merge_list_item_with_prev_joins_into_predecessor() {
-    let it0 = item("foo");
-    let it1 = item("bar");
-    let item_id = it1.id;
-    let mut doc = list_doc(vec![it0, it1]);
-    let block_id = doc.blocks[0].id;
-    apply(
-        &mut doc,
-        BlockAction::MergeListItemWithPrev { block_id, item_id },
-    );
-    assert_eq!(items_of(&doc), vec!["foobar"]);
-}
-
-#[test]
-fn merge_first_list_item_is_a_no_op() {
-    let it0 = item("only");
-    let item_id = it0.id;
-    let mut doc = list_doc(vec![it0]);
-    let block_id = doc.blocks[0].id;
-    apply(
-        &mut doc,
-        BlockAction::MergeListItemWithPrev { block_id, item_id },
-    );
-    assert_eq!(items_of(&doc), vec!["only"]);
 }
 
 #[test]
@@ -161,19 +118,20 @@ fn merge_with_prev_on_a_single_item_list_drops_the_emptied_list() {
 }
 
 #[test]
-fn split_list_item_with_new_item_id_uses_provided_id() {
+fn split_on_a_list_block_with_new_block_id_uses_provided_id() {
+    // The top-level Split action (used by the ctrl /action endpoint) on a
+    // list block splits the item containing byte_offset; new_block_id, when
+    // provided, becomes the new item's id.
     let it0 = item("first item");
     let it1 = item("second");
-    let item_id = it0.id;
     let target_id = BlockId::new();
     let mut doc = list_doc(vec![it0, it1]);
     let block_id = doc.blocks[0].id;
     apply(
         &mut doc,
-        BlockAction::SplitListItem {
+        BlockAction::Split {
             block_id,
-            item_id,
-            byte_offset: 5,
+            byte_offset: 5, // inside item 0 ("first")
             new_block_id: Some(target_id),
         },
     );
@@ -182,49 +140,6 @@ fn split_list_item_with_new_item_id_uses_provided_id() {
     };
     assert_eq!(items.len(), 3);
     assert_eq!(items[1].id, target_id);
-}
-#[test]
-fn split_list_item_round_trip_id_stable() {
-    let it0 = item("alpha");
-    let it1 = item("beta");
-    let item_a = it0.id;
-    let mut doc = list_doc(vec![it0, it1]);
-    let block_id = doc.blocks[0].id;
-    let before = doc.clone();
-
-    let (canonical, inverse) = apply(
-        &mut doc,
-        BlockAction::SplitListItem {
-            block_id,
-            item_id: item_a,
-            byte_offset: 3,
-            new_block_id: None,
-        },
-    )
-    .unwrap();
-
-    let minted_item_id = match &canonical {
-        BlockAction::SplitListItem {
-            new_block_id: Some(nid),
-            ..
-        } => *nid,
-        _ => panic!("canonical must carry concrete new_block_id"),
-    };
-    let BlockBody::List(items) = &doc.blocks[0].body else {
-        panic!()
-    };
-    assert_eq!(items[1].id, minted_item_id);
-
-    // Undo.
-    let _ = apply(&mut doc, inverse).unwrap();
-    assert_eq!(doc.blocks.len(), before.blocks.len());
-    let BlockBody::List(items_after) = &doc.blocks[0].body else {
-        panic!()
-    };
-    let BlockBody::List(items_before) = &before.blocks[0].body else {
-        panic!()
-    };
-    assert_eq!(items_after.len(), items_before.len());
 }
 
 #[test]

@@ -48,28 +48,6 @@ pub enum BlockAction {
         block_id: BlockId,
         new_kind: BlockKind,
     },
-    /// Replace the runs of a single list item. No-op when the block isn't a
-    /// list or the item id is unknown.
-    EditListItem {
-        block_id: BlockId,
-        item_id: BlockId,
-        new_runs: Vec<InlineRun>,
-    },
-    /// Split a list item at `byte_offset` into the item's flat text. The
-    /// trailing portion becomes a new `ListItem` directly after it.
-    /// `new_block_id`: `None` mints a fresh item id; `Some(id)` uses it so
-    /// undo↔redo round-trips are id-stable.
-    SplitListItem {
-        block_id: BlockId,
-        item_id: BlockId,
-        byte_offset: usize,
-        new_block_id: Option<BlockId>,
-    },
-    /// Merge a list item into its predecessor item. No-op for the first item.
-    MergeListItemWithPrev {
-        block_id: BlockId,
-        item_id: BlockId,
-    },
     /// UI-only action: request the slash command menu for `block_id`. Handled
     /// by the editor pane's action sink (which sets a reactive flag); the
     /// document model is unchanged, so `apply` is a no-op for this variant.
@@ -96,10 +74,11 @@ pub enum BlockAction {
 ///
 /// Returns `Some((canonical_action, inverse_action))` for any recordable
 /// action — the action that, when applied to the post-state, restores the
-/// pre-state. `canonical_action` differs from the input only for variants
-/// that mint ids (`Split`, `SplitListItem`): the returned form has
-/// `new_block_id: Some(...)` filled in, so a future redo reuses the same
-/// id and undo↔redo stays id-stable without post-apply patching.
+/// pre-state. `canonical_action` differs from the input only for `Split`,
+/// which mints ids: the returned form has `new_block_id: Some(...)`
+/// filled in (for inline-bodied splits, the new block's id; for list-
+/// bodied splits, the new list item's id), so a future redo reuses the
+/// same id and undo↔redo stays id-stable without post-apply patching.
 ///
 /// Returns `None` when the action does not produce a recordable inverse.
 /// Two cases:
@@ -126,20 +105,6 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         BlockAction::Move { block_id, to_index } => apply_move(doc, block_id, to_index),
         BlockAction::ChangeType { block_id, new_kind } => {
             apply_change_type(doc, block_id, new_kind)
-        }
-        BlockAction::EditListItem {
-            block_id,
-            item_id,
-            new_runs,
-        } => apply_edit_list_item(doc, block_id, item_id, new_runs),
-        BlockAction::SplitListItem {
-            block_id,
-            item_id,
-            byte_offset,
-            new_block_id,
-        } => apply_split_list_item(doc, block_id, item_id, byte_offset, new_block_id),
-        BlockAction::MergeListItemWithPrev { block_id, item_id } => {
-            apply_merge_list_item(doc, block_id, item_id)
         }
         // UI-only — handled by the editor pane's action sink, not the model.
         BlockAction::OpenSlashMenu { .. } => None,
@@ -487,100 +452,6 @@ fn apply_change_type(
             new_kind: old_kind,
         },
     ))
-}
-
-fn apply_edit_list_item(
-    doc: &mut EditorDoc,
-    block_id: BlockId,
-    item_id: BlockId,
-    new_runs: Vec<InlineRun>,
-) -> Option<(BlockAction, BlockAction)> {
-    let idx = find_idx(doc, block_id)?;
-    let block = doc.blocks.get_mut(idx)?;
-    if let BlockBody::List(items) = &mut block.body {
-        let item = items.iter_mut().find(|it| it.id == item_id)?;
-        let old_runs = item.runs.clone();
-        item.runs = new_runs.clone();
-        Some((
-            BlockAction::EditListItem {
-                block_id,
-                item_id,
-                new_runs,
-            },
-            BlockAction::EditListItem {
-                block_id,
-                item_id,
-                new_runs: old_runs,
-            },
-        ))
-    } else {
-        None
-    }
-}
-
-fn apply_split_list_item(
-    doc: &mut EditorDoc,
-    block_id: BlockId,
-    item_id: BlockId,
-    byte_offset: usize,
-    new_item_id: Option<BlockId>,
-) -> Option<(BlockAction, BlockAction)> {
-    let idx = find_idx(doc, block_id)?;
-    let block = doc.blocks.get_mut(idx)?;
-    if let BlockBody::List(items) = &mut block.body {
-        let pos = items.iter().position(|it| it.id == item_id)?;
-        split_item_at_with_id(items, pos, byte_offset, new_item_id);
-        let minted_id = items.get(pos + 1)?.id;
-        Some((
-            BlockAction::SplitListItem {
-                block_id,
-                item_id,
-                byte_offset,
-                new_block_id: Some(minted_id),
-            },
-            BlockAction::MergeListItemWithPrev {
-                block_id,
-                item_id: minted_id,
-            },
-        ))
-    } else {
-        None
-    }
-}
-
-fn apply_merge_list_item(
-    doc: &mut EditorDoc,
-    block_id: BlockId,
-    item_id: BlockId,
-) -> Option<(BlockAction, BlockAction)> {
-    let idx = find_idx(doc, block_id)?;
-    let block = doc.blocks.get_mut(idx)?;
-    if let BlockBody::List(items) = &mut block.body {
-        let pos = items.iter().position(|it| it.id == item_id)?;
-        if pos == 0 {
-            return None;
-        }
-        let prev_idx = pos - 1;
-        let prev_item = items.get(prev_idx)?;
-        let prev_id = prev_item.id;
-        let split_offset: usize = prev_item.runs.iter().map(|r| r.text.len()).sum();
-        let cur_item_id = item_id;
-        let cur = items.remove(pos);
-        if let Some(prev) = items.get_mut(prev_idx) {
-            prev.runs.extend(cur.runs);
-        }
-        Some((
-            BlockAction::MergeListItemWithPrev { block_id, item_id },
-            BlockAction::SplitListItem {
-                block_id,
-                item_id: prev_id,
-                byte_offset: split_offset,
-                new_block_id: Some(cur_item_id),
-            },
-        ))
-    } else {
-        None
-    }
 }
 
 /// Split `items[pos]` at `byte_offset` into its flat text. The head stays in

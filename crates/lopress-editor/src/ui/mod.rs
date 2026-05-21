@@ -141,21 +141,8 @@ fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         | BlockAction::Move { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
         BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
-        BlockAction::EditListItem { block_id, .. }
-        | BlockAction::SplitListItem { block_id, .. }
-        | BlockAction::MergeListItemWithPrev { block_id, .. }
-        | BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
+        BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
     }
-}
-
-/// The id of the item immediately after `item_id` in `block_id`'s list.
-fn list_item_after(doc: &EditorDoc, block_id: BlockId, item_id: BlockId) -> Option<BlockId> {
-    let block = doc.blocks.iter().find(|b| b.id == block_id)?;
-    let crate::model::types::BlockBody::List(items) = &block.body else {
-        return None;
-    };
-    let pos = items.iter().position(|it| it.id == item_id)?;
-    items.get(pos + 1).map(|it| it.id)
 }
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
@@ -288,12 +275,6 @@ fn editing_view(
                 .position(|b| b.id == *block_id)
                 .and_then(|i| d.blocks.get(i + 1))
                 .map(|b| b.id),
-            (
-                BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                },
-                Some(d),
-            ) => list_item_after(d, *block_id, *item_id),
             _ => None,
         });
         let change_type_focus = match &action {

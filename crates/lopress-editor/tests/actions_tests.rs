@@ -605,49 +605,6 @@ mod inverse_symmetry {
     }
 
     #[test]
-    fn edit_list_item_round_trip() {
-        let it0 = lopress_editor::model::types::ListItem {
-            id: BlockId::new(),
-            runs: vec![InlineRun::plain("old")],
-        };
-        let item_id = it0.id;
-        let list = EditorBlock::list(false, vec![it0]);
-        let block_id = list.id;
-        let mut doc = doc_with(vec![list]);
-        assert_round_trip(
-            &mut doc,
-            BlockAction::EditListItem {
-                block_id,
-                item_id,
-                new_runs: vec![InlineRun::plain("new")],
-            },
-        );
-    }
-
-    #[test]
-    fn merge_list_item_with_prev_round_trip() {
-        let it0 = lopress_editor::model::types::ListItem {
-            id: BlockId::new(),
-            runs: vec![InlineRun::plain("foo")],
-        };
-        let it1 = lopress_editor::model::types::ListItem {
-            id: BlockId::new(),
-            runs: vec![InlineRun::plain("bar")],
-        };
-        let cur_id = it1.id;
-        let list = EditorBlock::list(false, vec![it0, it1]);
-        let block_id = list.id;
-        let mut doc = doc_with(vec![list]);
-        assert_round_trip(
-            &mut doc,
-            BlockAction::MergeListItemWithPrev {
-                block_id,
-                item_id: cur_id,
-            },
-        );
-    }
-
-    #[test]
     fn edit_block_body_inline_round_trip() {
         let (id, block) = paragraph_with_id("hello world");
         let mut doc = doc_with(vec![block]);
