@@ -226,3 +226,66 @@ fn split_list_item_round_trip_id_stable() {
     };
     assert_eq!(items_after.len(), items_before.len());
 }
+
+#[test]
+fn editing_multiple_items_then_splitting_one_preserves_all_edits() {
+    // Regression for the uncommitted-list-item-edit-loss bug
+    // (docs/superpowers/ideas/2026-05-18-list-item-uncommitted-edit-loss.md).
+    //
+    // The UI fix in stage 4 task 3 builds a complete new BlockBody::List
+    // from every item's live buffer + the structural mutation, and emits a
+    // single EditBlockBody. This action-layer test verifies the apply path
+    // handles that body shape correctly.
+    let it0 = item("item zero original");
+    let it1 = item("item one original");
+    let it2 = item("item two original");
+    let ids = vec![it0.id, it1.id, it2.id];
+    let list = EditorBlock::list(false, vec![it0, it1, it2]);
+    let block_id = list.id;
+    let mut doc = list_doc(vec![]);
+    doc.blocks[0] = list;
+
+    // User typed into items 0 and 2 but did not commit. Now they press
+    // Enter in item 1 to split it. The UI captures everyone's live buffer
+    // plus the split into a single EditBlockBody.
+    let new_item_after_split = BlockId::new();
+    let new_body = BlockBody::List(vec![
+        ListItem {
+            id: ids[0],
+            runs: vec![InlineRun::plain("item zero edited")],
+        },
+        ListItem {
+            id: ids[1],
+            runs: vec![InlineRun::plain("item one ed")],
+        },
+        ListItem {
+            id: new_item_after_split,
+            runs: vec![InlineRun::plain("ited")],
+        },
+        ListItem {
+            id: ids[2],
+            runs: vec![InlineRun::plain("item two edited")],
+        },
+    ]);
+    let (_canonical, inverse) =
+        apply(&mut doc, BlockAction::EditBlockBody { block_id, new_body }).unwrap();
+
+    // All four items present with the right text — no edit was lost.
+    let BlockBody::List(items) = &doc.blocks[0].body else {
+        panic!("expected list body");
+    };
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0].runs[0].text, "item zero edited");
+    assert_eq!(items[1].runs[0].text, "item one ed");
+    assert_eq!(items[2].runs[0].text, "ited");
+    assert_eq!(items[2].id, new_item_after_split);
+    assert_eq!(items[3].runs[0].text, "item two edited");
+
+    // Inverse round-trip restores the original three items with original ids.
+    let _ = apply(&mut doc, inverse).unwrap();
+    let BlockBody::List(items) = &doc.blocks[0].body else {
+        panic!();
+    };
+    assert_eq!(items.len(), 3);
+    assert_eq!(items.iter().map(|it| it.id).collect::<Vec<_>>(), ids);
+}

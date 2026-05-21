@@ -587,7 +587,10 @@ fn apply_merge_list_item(
 /// place; the tail becomes a `ListItem` inserted at `pos + 1` with the
 /// provided id when `new_item_id` is `Some`, or a freshly minted id when
 /// `None`. Styling is dropped on both sides (the split produces plain runs).
-fn split_item_at_with_id(
+///
+/// Visible to `crate::ui::blocks::list` so the list widget can construct
+/// post-split list bodies for its `EditBlockBody` emissions in stage 4.
+pub(crate) fn split_item_at_with_id(
     items: &mut Vec<ListItem>,
     pos: usize,
     byte_offset: usize,

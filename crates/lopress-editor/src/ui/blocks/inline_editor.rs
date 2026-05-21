@@ -156,6 +156,7 @@ pub fn editable_inline(
     mount_block_editor(
         state,
         block_id,
+        block_id,
         on_action,
         focus_target,
         focus_pub,
@@ -173,10 +174,17 @@ pub fn editable_inline(
 /// Calls `structural_key` first on every keypress; falls through to the
 /// shared default handler (Ctrl shortcuts, slash, Enter/Backspace/arrows)
 /// when `structural_key` returns `None`.
+///
+/// `block_id` is what `focus_target` reacts to and what the (now mostly
+/// unreached) default `handle_key` emits on. `publish_block_id` is what
+/// `focus_pub.block` reports when this editor becomes active — for list
+/// items it's the *list* block's id (the toolbar's "active block"), not
+/// the per-item id. Paragraphs pass the same id for both.
 #[allow(clippy::too_many_arguments)]
 pub fn mount_block_editor(
     state: BlockEditorState,
     block_id: BlockId,
+    publish_block_id: BlockId,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
@@ -309,11 +317,14 @@ pub fn mount_block_editor(
             editor_sig.with_untracked(|ed| ed.window_origin.set(point));
         });
 
-    // Publish focus so the toolbar can reach our editor + spans.
+    // Publish focus so the toolbar can reach our editor + spans. For list
+    // items, `publish_block_id` is the list block's id (the toolbar slot
+    // is owned by the list, not the item); for paragraphs it equals
+    // `block_id`.
     create_effect(move |_| {
         let is_active = editor_sig.with(|ed| ed.active.get());
         if is_active {
-            focus_pub.block.set(Some(block_id));
+            focus_pub.block.set(Some(publish_block_id));
             focus_pub
                 .editor_and_spans
                 .set(Some((editor_sig, spans_sig, style_rev, link_url_sig)));
