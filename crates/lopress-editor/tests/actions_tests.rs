@@ -753,4 +753,68 @@ mod inverse_symmetry {
             },
         );
     }
+
+    #[test]
+    fn split_code_block_is_now_recordable() {
+        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
+        block.body = BlockBody::Code("foobar".to_string());
+        block.kind = BlockKind::Code {
+            lang: String::new(),
+        };
+        let id = block.id;
+        let mut doc = doc_with(vec![block]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 3,
+                new_block_id: None,
+            },
+        );
+        // After undo, the Code body should be restored to "foobar".
+        match &doc.blocks[0].body {
+            BlockBody::Code(text) => assert_eq!(text, "foobar"),
+            _ => panic!("expected Code body"),
+        }
+    }
+
+    #[test]
+    fn split_list_block_is_now_recordable() {
+        use lopress_editor::model::types::ListItem;
+        let it0 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("ab")],
+        };
+        let it1 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("cd")],
+        };
+        let original_item_ids = vec![it0.id, it1.id];
+        let list = EditorBlock::list(false, vec![it0, it1]);
+        let block_id = list.id;
+        let mut doc = doc_with(vec![list]);
+        // Top-level Split on the list at flat-offset 4: item 0 has 2 chars
+        // + 1 newline = cumulative 3, so offset 4 lands inside item 1 at
+        // local-offset 1 (between 'c' and 'd').
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Split {
+                block_id,
+                byte_offset: 4,
+                new_block_id: None,
+            },
+        );
+        // After undo, the list should have its original two items with their
+        // original ids restored.
+        match &doc.blocks[0].body {
+            BlockBody::List(items) => {
+                let ids: Vec<_> = items.iter().map(|it| it.id).collect();
+                assert_eq!(
+                    ids, original_item_ids,
+                    "undo must restore the original item ids"
+                );
+            }
+            _ => panic!("expected List body"),
+        }
+    }
 }

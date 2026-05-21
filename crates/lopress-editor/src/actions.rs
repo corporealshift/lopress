@@ -112,19 +112,15 @@ pub enum BlockAction {
 /// id and undo↔redo stays id-stable without post-apply patching.
 ///
 /// Returns `None` when the action does not produce a recordable inverse.
-/// That covers three cases:
+/// Two cases:
 /// 1. **UI-only actions** (`OpenSlashMenu`) — never touch the model.
-/// 2. **No-op actions** — target block id not found, or `Move` with a
-///    same-position gap. The model is unchanged.
-/// 3. **Mutations whose inverse cannot be expressed in stage 1's action
-///    enum.** Splits on `Code` and `List` bodies mutate the doc but the
-///    inverse would need cross-action coordination (a `MergeListItemWithPrev`
-///    inverse for a top-level `Split` on a list block, or an offset-aware
-///    code-newline removal). First-block `Delete` is also in this bucket —
-///    no predecessor anchor exists for an `InsertAfter` inverse. These cases
-///    are intentionally unrecordable in stage 1 (matching the pre-refactor
-///    behavior). Stage 3's `EditBlockBody` collapse makes all of them
-///    fully reversible.
+/// 2. **No-op or first-block actions** — target block id not found,
+///    `Move` with a same-position gap, `MergeWithPrev` on the first
+///    block, or `Delete` of the first block (no predecessor anchor
+///    exists for the `InsertAfter` inverse). The model may be unchanged
+///    or, for first-block `Delete`, mutated in a way that cannot be
+///    undone via the current action enum. First-block `Delete` is the
+///    lone intentionally-unrecordable mutation remaining after stage 3.
 pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, BlockAction)> {
     match action {
         BlockAction::Split {
@@ -215,10 +211,22 @@ fn apply_split(
 
     match body {
         BlockBody::Code(text) => {
+            // Code "split" inserts a '\n' rather than producing a new
+            // top-level block. Build the new Code body and route through
+            // apply_edit_block_body so the inverse is recordable: an
+            // EditBlockBody restoring the old Code text.
             let mut new_text = text;
             new_text.insert(byte_offset.min(new_text.len()), '\n');
-            let _ = apply_edit_code(doc, id, new_text);
-            None
+            let (_inner_canonical, inverse) =
+                apply_edit_block_body(doc, id, BlockBody::Code(new_text))?;
+            Some((
+                BlockAction::Split {
+                    block_id: id,
+                    byte_offset,
+                    new_block_id: None,
+                },
+                inverse,
+            ))
         }
         BlockBody::Inline(runs) => {
             let flat: String = runs.iter().map(|r| r.text.as_str()).collect();
@@ -274,12 +282,21 @@ fn apply_split(
                 cumulative += item_len + 1; // +1 for the joining '\n'
             }
             let (pos, local) = target.unwrap_or((items.len().saturating_sub(1), 0));
-            if let Some(b) = doc.blocks.get_mut(idx) {
-                if let BlockBody::List(list) = &mut b.body {
-                    split_item_at(list, pos, local);
-                }
-            }
-            None
+            // `items` here is our local clone (from `body = block.body.clone()`
+            // above), so we can mutate it freely off-doc.
+            let mut new_items = items;
+            split_item_at_with_id(&mut new_items, pos, local, new_block_id);
+            let minted_id = new_items.get(pos + 1)?.id;
+            let (_inner_canonical, inverse) =
+                apply_edit_block_body(doc, id, BlockBody::List(new_items))?;
+            Some((
+                BlockAction::Split {
+                    block_id: id,
+                    byte_offset,
+                    new_block_id: Some(minted_id),
+                },
+                inverse,
+            ))
         }
         BlockBody::Opaque(_) => None,
     }
@@ -627,16 +644,9 @@ fn apply_merge_list_item(
 }
 
 /// Split `items[pos]` at `byte_offset` into its flat text. The head stays in
-/// place; the tail becomes a fresh `ListItem` inserted at `pos + 1`. Styling
-/// is dropped on both sides (the split produces plain runs), matching the
-/// behaviour of `apply_split` for paragraphs.
-fn split_item_at(items: &mut Vec<ListItem>, pos: usize, byte_offset: usize) {
-    split_item_at_with_id(items, pos, byte_offset, None);
-}
-
-/// Like `split_item_at`, but uses the provided id for the new item when
-/// `new_item_id` is `Some`. `None` mints a fresh id (the default behavior
-/// of `split_item_at`).
+/// place; the tail becomes a `ListItem` inserted at `pos + 1` with the
+/// provided id when `new_item_id` is `Some`, or a freshly minted id when
+/// `None`. Styling is dropped on both sides (the split produces plain runs).
 fn split_item_at_with_id(
     items: &mut Vec<ListItem>,
     pos: usize,
