@@ -48,16 +48,6 @@ pub enum BlockAction {
         block_id: BlockId,
         new_kind: BlockKind,
     },
-    /// Replace the inline runs of an `Inline`-bodied block.
-    EditInline {
-        block_id: BlockId,
-        new_runs: Vec<InlineRun>,
-    },
-    /// Replace the text of a `Code`-bodied block.
-    EditCode {
-        block_id: BlockId,
-        new_text: String,
-    },
     /// Replace the runs of a single list item. No-op when the block isn't a
     /// list or the item id is unknown.
     EditListItem {
@@ -137,10 +127,6 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         BlockAction::ChangeType { block_id, new_kind } => {
             apply_change_type(doc, block_id, new_kind)
         }
-        BlockAction::EditInline { block_id, new_runs } => {
-            apply_edit_inline(doc, block_id, new_runs)
-        }
-        BlockAction::EditCode { block_id, new_text } => apply_edit_code(doc, block_id, new_text),
         BlockAction::EditListItem {
             block_id,
             item_id,
@@ -499,52 +485,6 @@ fn apply_change_type(
         BlockAction::ChangeType {
             block_id: id,
             new_kind: old_kind,
-        },
-    ))
-}
-
-fn apply_edit_inline(
-    doc: &mut EditorDoc,
-    id: BlockId,
-    new_runs: Vec<InlineRun>,
-) -> Option<(BlockAction, BlockAction)> {
-    let idx = find_idx(doc, id)?;
-    let block = doc.blocks.get_mut(idx)?;
-    let BlockBody::Inline(old_runs) = block.body.clone() else {
-        return None;
-    };
-    block.body = BlockBody::Inline(new_runs.clone());
-    Some((
-        BlockAction::EditInline {
-            block_id: id,
-            new_runs,
-        },
-        BlockAction::EditInline {
-            block_id: id,
-            new_runs: old_runs,
-        },
-    ))
-}
-
-fn apply_edit_code(
-    doc: &mut EditorDoc,
-    id: BlockId,
-    new_text: String,
-) -> Option<(BlockAction, BlockAction)> {
-    let idx = find_idx(doc, id)?;
-    let block = doc.blocks.get_mut(idx)?;
-    let BlockBody::Code(old_text) = block.body.clone() else {
-        return None;
-    };
-    block.body = BlockBody::Code(new_text.clone());
-    Some((
-        BlockAction::EditCode {
-            block_id: id,
-            new_text,
-        },
-        BlockAction::EditCode {
-            block_id: id,
-            new_text: old_text,
         },
     ))
 }

@@ -286,29 +286,29 @@ fn change_paragraph_to_code_flattens_runs() {
 }
 
 #[test]
-fn edit_inline_replaces_runs() {
+fn edit_block_body_inline_replaces_runs() {
     let (id, a) = paragraph_with_id("old");
     let mut doc = doc_with(vec![a]);
     apply(
         &mut doc,
-        BlockAction::EditInline {
+        BlockAction::EditBlockBody {
             block_id: id,
-            new_runs: vec![InlineRun::plain("new")],
+            new_body: BlockBody::Inline(vec![InlineRun::plain("new")]),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
 }
 
 #[test]
-fn edit_code_replaces_text() {
+fn edit_block_body_code_replaces_text() {
     let block = EditorBlock::code("rust".into(), "old".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::EditCode {
+        BlockAction::EditBlockBody {
             block_id: id,
-            new_text: "new".into(),
+            new_body: BlockBody::Code("new".into()),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -415,24 +415,6 @@ fn split_with_new_block_id_none_mints_fresh_id() {
 /// reproduce the original pre-state.
 mod inverse_symmetry {
     use super::*;
-
-    #[test]
-    fn edit_inline_round_trip() {
-        let (id, block) = paragraph_with_id("hello world");
-        let mut doc = doc_with(vec![block]);
-        let before_body = doc.blocks[0].body.clone();
-        let action = BlockAction::EditInline {
-            block_id: id,
-            new_runs: vec![InlineRun::plain("changed")],
-        };
-        let (_canonical, inverse) =
-            apply(&mut doc, action).expect("EditInline must record an inverse");
-        // Sanity: doc actually changed.
-        assert_ne!(doc.blocks[0].body, before_body);
-        // Apply the inverse; the body must match the pre-state.
-        let _ = apply(&mut doc, inverse).expect("inverse must also record");
-        assert_eq!(doc.blocks[0].body, before_body);
-    }
 
     #[test]
     fn split_round_trip_id_stable() {
@@ -618,25 +600,6 @@ mod inverse_symmetry {
             BlockAction::ChangeType {
                 block_id: id,
                 new_kind: BlockKind::Heading(2),
-            },
-        );
-    }
-
-    #[test]
-    fn edit_code_round_trip() {
-        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
-        // Force a Code body for the test.
-        block.body = BlockBody::Code("fn main() {}".to_string());
-        block.kind = BlockKind::Code {
-            lang: String::new(),
-        };
-        let id = block.id;
-        let mut doc = doc_with(vec![block]);
-        assert_round_trip(
-            &mut doc,
-            BlockAction::EditCode {
-                block_id: id,
-                new_text: "fn main() { println!(\"hi\"); }".to_string(),
             },
         );
     }

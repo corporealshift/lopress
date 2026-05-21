@@ -31,14 +31,16 @@ impl UndoStack {
 
     /// Record a (canonical action, inverse action) pair that the caller just
     /// obtained from `actions::apply`'s return value. Successive
-    /// `EditInline`s on the same block within `COALESCE_WINDOW` collapse
-    /// into one undo entry (the oldest inverse is kept, the latest action
-    /// is bumped forward). Clears the redo stack for non-coalescing actions.
+    /// `EditBlockBody` actions on the same block within `COALESCE_WINDOW`
+    /// collapse into one undo entry (the oldest inverse is kept, the latest
+    /// action is bumped forward) — so typing N characters into a block
+    /// produces one undo entry per coalesce window, not N. Clears the redo
+    /// stack for non-coalescing actions.
     pub fn push_after_apply(&mut self, action: BlockAction, inverse: BlockAction) {
-        // Coalesce successive EditInline actions on the same block within
-        // the time window. The stored inverse keeps the OLDEST old_runs
+        // Coalesce successive EditBlockBody actions on the same block within
+        // the time window. The stored inverse keeps the OLDEST body
         // (already on the existing entry); only the action is bumped.
-        if let BlockAction::EditInline { block_id, .. } = &action {
+        if let BlockAction::EditBlockBody { block_id, .. } = &action {
             let edit_id = *block_id;
             let now = Instant::now();
             if let Some((last_id, last_t)) = self.last_inline_edit {

@@ -134,9 +134,7 @@ pub(crate) fn root_view(
 /// The block a just-applied undo/redo action should restore focus to.
 fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
     match action {
-        BlockAction::EditInline { block_id, .. }
-        | BlockAction::EditCode { block_id, .. }
-        | BlockAction::Split { block_id, .. }
+        BlockAction::Split { block_id, .. }
         | BlockAction::MergeWithPrev { block_id }
         | BlockAction::ChangeType { block_id, .. }
         | BlockAction::EditAttrs { block_id, .. }

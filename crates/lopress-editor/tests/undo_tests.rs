@@ -24,27 +24,6 @@ fn inverse_of(doc: &EditorDoc, action: BlockAction) -> BlockAction {
 }
 
 #[test]
-fn inverse_of_edit_inline_is_old_runs() {
-    let old = para("before");
-    let id = old.id;
-    let doc = doc_with(vec![old]);
-    let inv = inverse_of(
-        &doc,
-        BlockAction::EditInline {
-            block_id: id,
-            new_runs: vec![InlineRun::plain("after")],
-        },
-    );
-    match inv {
-        BlockAction::EditInline { block_id, new_runs } => {
-            assert_eq!(block_id, id);
-            assert_eq!(new_runs, vec![InlineRun::plain("before")]);
-        }
-        _ => panic!("wrong variant"),
-    }
-}
-
-#[test]
 fn inverse_of_merge_with_prev_is_split_at_join_point() {
     let a = para("hello ");
     let b = para("world");
@@ -134,23 +113,27 @@ fn inverse_of_insert_after_is_delete_new_block() {
 
 #[test]
 fn undo_stack_push_and_pop() {
+    use lopress_editor::model::types::BlockBody;
     use lopress_editor::undo::UndoStack;
     let a = para("text");
     let id = a.id;
     let mut doc = doc_with(vec![a]);
     let mut stack = UndoStack::new();
 
-    let action = BlockAction::EditInline {
+    let action = BlockAction::EditBlockBody {
         block_id: id,
-        new_runs: vec![InlineRun::plain("edited")],
+        new_body: BlockBody::Inline(vec![InlineRun::plain("edited")]),
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
 
     let undo_action = stack.pop_undo().unwrap();
     match undo_action {
-        BlockAction::EditInline { new_runs, .. } => {
-            assert_eq!(new_runs, vec![InlineRun::plain("text")]);
+        BlockAction::EditBlockBody {
+            new_body: BlockBody::Inline(runs),
+            ..
+        } => {
+            assert_eq!(runs, vec![InlineRun::plain("text")]);
         }
         _ => panic!("wrong variant"),
     }
@@ -158,15 +141,16 @@ fn undo_stack_push_and_pop() {
 
 #[test]
 fn undo_stack_redo_available_after_undo() {
+    use lopress_editor::model::types::BlockBody;
     use lopress_editor::undo::UndoStack;
     let a = para("original");
     let id = a.id;
     let mut doc = doc_with(vec![a]);
     let mut stack = UndoStack::new();
 
-    let action = BlockAction::EditInline {
+    let action = BlockAction::EditBlockBody {
         block_id: id,
-        new_runs: vec![InlineRun::plain("edited")],
+        new_body: BlockBody::Inline(vec![InlineRun::plain("edited")]),
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
@@ -174,42 +158,49 @@ fn undo_stack_redo_available_after_undo() {
     stack.pop_undo().unwrap();
     let redo_action = stack.pop_redo().unwrap();
     match redo_action {
-        BlockAction::EditInline { new_runs, .. } => {
-            assert_eq!(new_runs, vec![InlineRun::plain("edited")]);
+        BlockAction::EditBlockBody {
+            new_body: BlockBody::Inline(runs),
+            ..
+        } => {
+            assert_eq!(runs, vec![InlineRun::plain("edited")]);
         }
         _ => panic!("wrong variant"),
     }
 }
 
 #[test]
-fn edit_inline_within_one_second_coalesces() {
+fn edit_block_body_within_one_second_coalesces() {
+    use lopress_editor::model::types::BlockBody;
     use lopress_editor::undo::UndoStack;
     let a = para("a");
     let id = a.id;
     let mut doc = doc_with(vec![a]);
     let mut stack = UndoStack::new();
 
-    let a1 = BlockAction::EditInline {
+    let a1 = BlockAction::EditBlockBody {
         block_id: id,
-        new_runs: vec![InlineRun::plain("ab")],
+        new_body: BlockBody::Inline(vec![InlineRun::plain("ab")]),
     };
     let (c1, i1) = apply(&mut doc, a1).unwrap();
     stack.push_after_apply(c1, i1);
 
-    let a2 = BlockAction::EditInline {
+    let a2 = BlockAction::EditBlockBody {
         block_id: id,
-        new_runs: vec![InlineRun::plain("abc")],
+        new_body: BlockBody::Inline(vec![InlineRun::plain("abc")]),
     };
     let (c2, i2) = apply(&mut doc, a2).unwrap();
     stack.push_after_apply(c2, i2);
 
     // Should have only ONE undo entry (coalesced); the inverse keeps the
-    // oldest old_runs ("a") so a single undo restores all the way back.
+    // oldest body ("a") so a single undo restores all the way back.
     assert_eq!(stack.undo_depth(), 1);
     let undo = stack.pop_undo().unwrap();
     match undo {
-        BlockAction::EditInline { new_runs, .. } => {
-            assert_eq!(new_runs, vec![InlineRun::plain("a")]);
+        BlockAction::EditBlockBody {
+            new_body: BlockBody::Inline(runs),
+            ..
+        } => {
+            assert_eq!(runs, vec![InlineRun::plain("a")]);
         }
         _ => panic!("wrong variant"),
     }
