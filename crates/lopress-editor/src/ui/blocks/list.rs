@@ -306,7 +306,17 @@ fn make_list_structural_key(
             KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) => {
                 let byte_offset =
                     editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
+                let focused_text =
+                    editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                eprintln!(
+                    "[list_enter] item_index={} byte_offset={} focused_text={:?}",
+                    item_index, byte_offset, focused_text
+                );
                 let mut new_items = collect_items(&handles);
+                for (i, it) in new_items.iter().enumerate() {
+                    let t: String = it.runs.iter().map(|r| r.text.as_str()).collect();
+                    eprintln!("[list_enter] collected[{}] = {:?}", i, t);
+                }
                 let new_item_id = BlockId::new();
                 split_item_at_with_id(&mut new_items, item_index, byte_offset, Some(new_item_id));
                 on_action(BlockAction::EditBlockBody {

@@ -258,7 +258,19 @@ pub fn mount_block_editor(
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
             focused.set(false);
-            editor_sig.with_untracked(|ed| ed.editor_view_focus_lost.notify());
+            editor_sig.with_untracked(|ed| {
+                ed.editor_view_focus_lost.notify();
+                // Collapse any active selection to a caret on focus loss
+                // so the visual selection background does not linger when
+                // the user clicks into a sibling editor (e.g. another
+                // item in the same list).
+                use floem::views::editor::core::cursor::CursorMode;
+                use floem::views::editor::core::selection::Selection;
+                ed.cursor.update(|c| {
+                    let offset = c.offset();
+                    c.mode = CursorMode::Insert(Selection::caret(offset));
+                });
+            });
         })
         .on_event_cont(EventListener::PointerDown, move |event| {
             if let Event::PointerDown(pe) = event {
