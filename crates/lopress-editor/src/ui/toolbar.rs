@@ -86,7 +86,10 @@ pub fn block_toolbar_for(
                     let spans = spans_sig.get_untracked();
                     let rope = lapce_xi_rope::Rope::from(text.as_str());
                     let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                    on_action_for_btn(BlockAction::EditInline { block_id, new_runs });
+                    on_action_for_btn(BlockAction::EditBlockBody {
+                        block_id,
+                        new_body: crate::model::types::BlockBody::Inline(new_runs),
+                    });
                 }
                 on_action_for_btn(BlockAction::ChangeType {
                     block_id,
@@ -167,7 +170,10 @@ pub fn block_toolbar_for(
                         let spans = spans_sig.get_untracked();
                         let rope = lapce_xi_rope::Rope::from(text.as_str());
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                        on_action_commit(BlockAction::EditInline { block_id, new_runs });
+                        on_action_commit(BlockAction::EditBlockBody {
+                            block_id,
+                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                        });
                         url_sig.set(None);
                     }
                 };
@@ -188,7 +194,10 @@ pub fn block_toolbar_for(
                         let spans = spans_sig.get_untracked();
                         let rope = lapce_xi_rope::Rope::from(text.as_str());
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                        on_action_remove(BlockAction::EditInline { block_id, new_runs });
+                        on_action_remove(BlockAction::EditBlockBody {
+                            block_id,
+                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                        });
                     }
                 };
                 h_stack((
