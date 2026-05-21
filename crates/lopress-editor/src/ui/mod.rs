@@ -145,7 +145,8 @@ fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
         BlockAction::EditListItem { block_id, .. }
         | BlockAction::SplitListItem { block_id, .. }
-        | BlockAction::MergeListItemWithPrev { block_id, .. } => Some(*block_id),
+        | BlockAction::MergeListItemWithPrev { block_id, .. }
+        | BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
     }
 }
 

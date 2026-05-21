@@ -92,6 +92,14 @@ pub enum BlockAction {
         block_id: BlockId,
         new_attrs: serde_json::Map<String, serde_json::Value>,
     },
+    /// Replace `block_id`'s entire `body` with `new_body`. Generic content
+    /// edit — works for any body shape (Inline, Code, List, Opaque). The
+    /// inverse swaps the old body back. Used by widgets that construct the
+    /// target body locally rather than declaring a per-shape intent.
+    EditBlockBody {
+        block_id: BlockId,
+        new_body: BlockBody,
+    },
 }
 
 /// Apply one `BlockAction` to the document.
@@ -157,6 +165,9 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
             block_id,
             new_attrs,
         } => apply_edit_attrs(doc, block_id, new_attrs),
+        BlockAction::EditBlockBody { block_id, new_body } => {
+            apply_edit_block_body(doc, block_id, new_body)
+        }
     }
 }
 
@@ -653,4 +664,27 @@ fn split_item_at_with_id(
             runs: vec![InlineRun::plain(tail)],
         },
     );
+}
+
+/// Replace the body of `id` with `new_body`. Returns the (canonical action,
+/// inverse action) pair: the inverse is another `EditBlockBody` carrying
+/// the old body. Works for any body shape — the helper is shape-agnostic.
+fn apply_edit_block_body(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    new_body: BlockBody,
+) -> Option<(BlockAction, BlockAction)> {
+    let idx = find_idx(doc, id)?;
+    let block = doc.blocks.get_mut(idx)?;
+    let old_body = std::mem::replace(&mut block.body, new_body.clone());
+    Some((
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body,
+        },
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: old_body,
+        },
+    ))
 }

@@ -683,4 +683,74 @@ mod inverse_symmetry {
             },
         );
     }
+
+    #[test]
+    fn edit_block_body_inline_round_trip() {
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let new_body = BlockBody::Inline(vec![InlineRun::plain("entirely different content")]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_block_body_code_round_trip() {
+        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
+        block.body = BlockBody::Code("fn main() {}".to_string());
+        block.kind = BlockKind::Code {
+            lang: String::new(),
+        };
+        let id = block.id;
+        let mut doc = doc_with(vec![block]);
+        let new_body = BlockBody::Code("fn other() { /* ... */ }".to_string());
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_block_body_list_round_trip() {
+        use lopress_editor::model::types::ListItem;
+        let it0 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("first")],
+        };
+        let it1 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("second")],
+        };
+        let list = EditorBlock::list(false, vec![it0, it1]);
+        let id = list.id;
+        let mut doc = doc_with(vec![list]);
+        let new_body = BlockBody::List(vec![
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("entirely")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("different")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("items")],
+            },
+        ]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
 }
