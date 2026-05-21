@@ -5,6 +5,7 @@
 //! model stays the single source of truth for persistence — even though
 //! per-block widgets keep reactive copies for live editing.
 
+use crate::model::sync::canonicalize_body;
 use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
@@ -493,6 +494,19 @@ pub(crate) fn split_item_at_with_id(
 /// Replace the body of `id` with `new_body`. Returns the (canonical action,
 /// inverse action) pair: the inverse is another `EditBlockBody` carrying
 /// the old body. Works for any body shape — the helper is shape-agnostic.
+///
+/// Returns `None` when `new_body` already equals the block's current body —
+/// a no-op edit records nothing on the undo stack. This lets callers emit a
+/// "commit the live editor buffer" `EditBlockBody` unconditionally (e.g.
+/// before an undo, or before a structural list edit) without producing a
+/// spurious empty undo entry when there was no pending change.
+///
+/// Both the incoming body and the stored body are compared in canonical
+/// form ([`canonicalize_body`]): a body collected from the live editors and
+/// the structurally-identical body stored in the model can differ only in
+/// run splitting (a styled span vs. a styled span plus a typed plain tail)
+/// or empty runs. Comparing canonically recognises those as no-ops, and the
+/// stored/recorded body is the canonical one so the model stays canonical.
 fn apply_edit_block_body(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -500,6 +514,10 @@ fn apply_edit_block_body(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
+    let new_body = canonicalize_body(&new_body);
+    if canonicalize_body(&block.body) == new_body {
+        return None;
+    }
     let old_body = std::mem::replace(&mut block.body, new_body.clone());
     Some((
         BlockAction::EditBlockBody {

@@ -1,11 +1,8 @@
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
 
 use crate::actions::BlockAction;
-use crate::model::types::BlockId;
 
 const MAX_UNDO: usize = 100;
-const COALESCE_WINDOW: Duration = Duration::from_secs(1);
 
 struct UndoEntry {
     /// Canonical action with any minted ids filled in. Re-apply for redo.
@@ -17,7 +14,6 @@ struct UndoEntry {
 pub struct UndoStack {
     undo: VecDeque<UndoEntry>,
     redo: Vec<UndoEntry>,
-    last_inline_edit: Option<(BlockId, Instant)>,
 }
 
 impl UndoStack {
@@ -25,41 +21,21 @@ impl UndoStack {
         Self {
             undo: VecDeque::new(),
             redo: Vec::new(),
-            last_inline_edit: None,
         }
     }
 
     /// Record a (canonical action, inverse action) pair that the caller just
-    /// obtained from `actions::apply`'s return value. Successive
-    /// `EditBlockBody` actions on the same block within `COALESCE_WINDOW`
-    /// collapse into one undo entry (the oldest inverse is kept, the latest
-    /// action is bumped forward) — so typing N characters into a block
-    /// produces one undo entry per coalesce window, not N. Clears the redo
-    /// stack for non-coalescing actions.
+    /// obtained from `actions::apply`'s return value. Each call is its own
+    /// undo entry — there is no coalescing.
+    ///
+    /// (Coalescing previously merged successive `EditBlockBody` on the same
+    /// block within a time window. That made sense for the stage-1
+    /// per-character `EditInline` action, but `EditBlockBody` is only
+    /// emitted on commit/structural boundaries now — coalescing it merged
+    /// genuinely distinct user actions, e.g. a typing-commit with the
+    /// Enter-split that follows it, or two consecutive Enters. Each
+    /// `EditBlockBody` is a deliberate edit and gets its own entry.)
     pub fn push_after_apply(&mut self, action: BlockAction, inverse: BlockAction) {
-        // Coalesce successive EditBlockBody actions on the same block within
-        // the time window. The stored inverse keeps the OLDEST body
-        // (already on the existing entry); only the action is bumped.
-        if let BlockAction::EditBlockBody { block_id, .. } = &action {
-            let edit_id = *block_id;
-            let now = Instant::now();
-            if let Some((last_id, last_t)) = self.last_inline_edit {
-                if last_id == edit_id
-                    && now.duration_since(last_t) < COALESCE_WINDOW
-                    && self.redo.is_empty()
-                {
-                    if let Some(entry) = self.undo.back_mut() {
-                        entry.action = action;
-                    }
-                    self.last_inline_edit = Some((edit_id, now));
-                    return;
-                }
-            }
-            self.last_inline_edit = Some((edit_id, now));
-        } else {
-            self.last_inline_edit = None;
-        }
-
         self.redo.clear();
         self.push_entry(UndoEntry { action, inverse });
     }

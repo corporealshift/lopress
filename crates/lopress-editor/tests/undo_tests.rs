@@ -169,7 +169,11 @@ fn undo_stack_redo_available_after_undo() {
 }
 
 #[test]
-fn edit_block_body_within_one_second_coalesces() {
+fn each_edit_block_body_is_its_own_undo_entry() {
+    // EditBlockBody no longer coalesces — every commit/structural edit is a
+    // distinct undo step. Two EditBlockBody on the same block produce two
+    // entries; the first undo restores the intermediate state, the second
+    // restores the original.
     use lopress_editor::model::types::BlockBody;
     use lopress_editor::undo::UndoStack;
     let a = para("a");
@@ -191,17 +195,27 @@ fn edit_block_body_within_one_second_coalesces() {
     let (c2, i2) = apply(&mut doc, a2).unwrap();
     stack.push_after_apply(c2, i2);
 
-    // Should have only ONE undo entry (coalesced); the inverse keeps the
-    // oldest body ("a") so a single undo restores all the way back.
-    assert_eq!(stack.undo_depth(), 1);
-    let undo = stack.pop_undo().unwrap();
-    match undo {
+    // Two distinct undo entries.
+    assert_eq!(stack.undo_depth(), 2);
+
+    // First undo: restores the intermediate "ab" state.
+    let undo1 = stack.pop_undo().unwrap();
+    match &undo1 {
         BlockAction::EditBlockBody {
             new_body: BlockBody::Inline(runs),
             ..
-        } => {
-            assert_eq!(runs, vec![InlineRun::plain("a")]);
-        }
+        } => assert_eq!(runs, &vec![InlineRun::plain("ab")]),
+        _ => panic!("wrong variant"),
+    }
+    let _ = apply(&mut doc, undo1).unwrap();
+
+    // Second undo: restores the original "a".
+    let undo2 = stack.pop_undo().unwrap();
+    match undo2 {
+        BlockAction::EditBlockBody {
+            new_body: BlockBody::Inline(runs),
+            ..
+        } => assert_eq!(runs, vec![InlineRun::plain("a")]),
         _ => panic!("wrong variant"),
     }
 }

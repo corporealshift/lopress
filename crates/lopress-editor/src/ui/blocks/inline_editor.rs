@@ -201,6 +201,7 @@ pub fn mount_block_editor(
     let link_url_sig = state.link_url_sig;
 
     let on_action_for_key = on_action;
+    let commit_for_key = _commit;
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
@@ -225,6 +226,7 @@ pub fn mount_block_editor(
             current_doc,
             &on_undo,
             &on_redo,
+            &commit_for_key,
             slash_eligible,
             link_url_sig,
         );
@@ -389,6 +391,7 @@ fn handle_key(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: &Rc<dyn Fn()>,
     on_redo: &Rc<dyn Fn()>,
+    commit: &CommitClosure,
     slash_eligible: bool,
     link_url_sig: RwSignal<Option<String>>,
 ) -> CommandExecuted {
@@ -402,6 +405,11 @@ fn handle_key(
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             match s.as_str() {
                 "z" | "Z" => {
+                    // Flush any typed-but-uncommitted buffer first so the
+                    // undo stack has an entry to pop — typing alone records
+                    // nothing until a commit. `commit` is a no-op (records
+                    // nothing) when there is no pending change.
+                    commit();
                     if ms.shift() {
                         on_redo();
                     } else {
@@ -410,6 +418,7 @@ fn handle_key(
                     return CommandExecuted::Yes;
                 }
                 "y" | "Y" => {
+                    commit();
                     on_redo();
                     return CommandExecuted::Yes;
                 }

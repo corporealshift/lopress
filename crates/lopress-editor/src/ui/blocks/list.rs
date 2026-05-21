@@ -12,7 +12,7 @@
 
 use crate::actions::{split_item_at_with_id, BlockAction};
 use crate::model::style_span::StyleSpan;
-use crate::model::sync::rope_and_spans_to_runs;
+use crate::model::sync::{canonicalize_body, rope_and_spans_to_runs};
 use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun, ListItem};
 use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
@@ -54,15 +54,67 @@ fn collect_items(handles: &ItemHandles) -> Vec<ListItem> {
         .collect()
 }
 
-/// Emit a single `EditBlockBody` carrying the live state of every item in
-/// the list. Called as the `commit` closure passed to `mount_block_editor`,
-/// and from the structural-key callback's navigation branches that need
-/// the user's typed-but-uncommitted text flushed before focus moves away.
-fn emit_list_commit(handles: &ItemHandles, list_block_id: BlockId, on_action: &ActionSink) {
-    let new_items = collect_items(handles);
-    on_action(BlockAction::EditBlockBody {
-        block_id: list_block_id,
-        new_body: BlockBody::List(new_items),
+/// If `live` differs from the list block's body in the document model,
+/// emit an `EditBlockBody` committing it. Used to flush typed-but-
+/// uncommitted text into the model as its own undo entry — distinct from
+/// any structural change that follows. When `live` already matches the
+/// model this is a no-op (no emit, no rebuild, no undo entry).
+fn commit_live_if_changed(
+    live: &[ListItem],
+    list_block_id: BlockId,
+    on_action: &ActionSink,
+    current_doc: RwSignal<Option<EditorDoc>>,
+) {
+    let differs = current_doc.with_untracked(|maybe| {
+        maybe
+            .as_ref()
+            .and_then(|d| d.blocks.iter().find(|b| b.id == list_block_id))
+            // Compare in canonical form: `live` is canonical (collect_items
+            // produces canonical runs), so the stored body must be
+            // canonicalized too — otherwise a structurally-identical body
+            // looks like a change and emits a phantom no-op EditBlockBody.
+            .map(|b| {
+                !matches!(
+                    canonicalize_body(&b.body),
+                    BlockBody::List(items) if items.as_slice() == live
+                )
+            })
+            .unwrap_or(false)
+    });
+    if differs {
+        on_action(BlockAction::EditBlockBody {
+            block_id: list_block_id,
+            new_body: BlockBody::List(live.to_vec()),
+        });
+    }
+}
+
+/// Commit every item's live buffer into the model as one `EditBlockBody`
+/// (skipped when nothing changed). Called as the `commit` closure passed
+/// to `mount_block_editor` — so Ctrl+Z flushes pending typing before
+/// undoing — and from the structural-key navigation branches that move
+/// focus away from the list.
+fn emit_list_commit(
+    handles: &ItemHandles,
+    list_block_id: BlockId,
+    on_action: &ActionSink,
+    current_doc: RwSignal<Option<EditorDoc>>,
+) {
+    let live = collect_items(handles);
+    commit_live_if_changed(&live, list_block_id, on_action, current_doc);
+}
+
+/// Set `focus_target` on the next event-loop tick rather than immediately.
+///
+/// A list structural edit emits one or two `EditBlockBody` actions, each of
+/// which queues a `dyn_container` rebuild. If `focus_target` were set
+/// synchronously, the *first* rebuild's focus effect would consume it (it
+/// clears `focus_target` after focusing) and the *second* rebuild would
+/// have nothing to focus — the caret would vanish. Deferring the set until
+/// after the update phase means it lands once, after the final rebuild.
+fn defer_focus(focus_target: RwSignal<Option<BlockId>>, target_id: BlockId) {
+    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
+        focus_target.set(Some(target_id));
     });
 }
 
@@ -155,12 +207,18 @@ fn list_item_editor(
     handles.borrow_mut().push((item_id, editor_sig, spans_sig));
 
     // Batched commit: flush every item's live buffer into a fresh
-    // BlockBody::List and emit a single EditBlockBody. Used by the shared
-    // default handler before any focus-changing shortcut.
+    // BlockBody::List and emit a single EditBlockBody (skipped when nothing
+    // changed). Used by the shared default handler before Ctrl+Z/Y and
+    // focus-changing shortcuts.
     let commit_handles = Rc::clone(&handles);
     let commit_on_action = on_action.clone();
     let commit: CommitClosure = Rc::new(move || {
-        emit_list_commit(&commit_handles, list_block_id, &commit_on_action);
+        emit_list_commit(
+            &commit_handles,
+            list_block_id,
+            &commit_on_action,
+            current_doc,
+        );
     });
 
     // List-specific structural-key callback per spec section 2.
@@ -249,20 +307,20 @@ fn make_list_structural_key(
         if ctrl_or_cmd {
             match &kp.key {
                 KeyInput::Keyboard(Key::Named(NamedKey::Home), _) => {
-                    emit_list_commit(&handles, list_block_id, &on_action);
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
                     let first_id =
                         current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
                     if let Some(id) = first_id {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
                 KeyInput::Keyboard(Key::Named(NamedKey::End), _) => {
-                    emit_list_commit(&handles, list_block_id, &on_action);
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
                     let last_id =
                         current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
                     if let Some(id) = last_id {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
@@ -290,8 +348,8 @@ fn make_list_structural_key(
                 d.blocks.get(j).map(|b| b.id)
             });
             if let Some(id) = target_id {
-                emit_list_commit(&handles, list_block_id, &on_action);
-                focus_target.set(Some(id));
+                emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                defer_focus(focus_target, id);
             }
             return Some(CommandExecuted::Yes);
         }
@@ -300,20 +358,24 @@ fn make_list_structural_key(
             // Shift+Enter — soft line break within this item. Fall through.
             KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) if shift => None,
 
-            // Enter — split this item. Build the full new list body
-            // (capturing every item's live buffer) with the split applied,
-            // mint a stable id for the new item, emit EditBlockBody.
+            // Enter — split this item. First commit every item's live
+            // buffer as its own undo entry (so typed-but-uncommitted text
+            // is a separate undo step), then emit the split as a second
+            // entry. Undoing the Enter then restores the typed pre-split
+            // state, not the file-load state.
             KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) => {
                 let byte_offset =
                     editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
-                let mut new_items = collect_items(&handles);
+                let live = collect_items(&handles);
+                commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                let mut split = live;
                 let new_item_id = BlockId::new();
-                split_item_at_with_id(&mut new_items, item_index, byte_offset, Some(new_item_id));
+                split_item_at_with_id(&mut split, item_index, byte_offset, Some(new_item_id));
                 on_action(BlockAction::EditBlockBody {
                     block_id: list_block_id,
-                    new_body: BlockBody::List(new_items),
+                    new_body: BlockBody::List(split),
                 });
-                focus_target.set(Some(new_item_id));
+                defer_focus(focus_target, new_item_id);
                 Some(CommandExecuted::Yes)
             }
 
@@ -324,26 +386,28 @@ fn make_list_structural_key(
                 if offset != 0 {
                     return None; // default handler deletes a char
                 }
-                let mut new_items = collect_items(&handles);
+                let live = collect_items(&handles);
                 if item_index > 0 {
-                    // Merge this item into the previous: append cur runs
-                    // to prev, remove cur.
-                    let cur = new_items.remove(item_index);
-                    if let Some(prev) = new_items.get_mut(item_index - 1) {
+                    // Commit pending typing first (separate undo entry),
+                    // then merge this item into the previous one.
+                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    let mut merged = live;
+                    let cur = merged.remove(item_index);
+                    if let Some(prev) = merged.get_mut(item_index - 1) {
                         prev.runs.extend(cur.runs);
                     }
                     let prev_id = item_ids.get(item_index - 1).copied();
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
-                        new_body: BlockBody::List(new_items),
+                        new_body: BlockBody::List(merged),
                     });
                     if let Some(id) = prev_id {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
                 // First item, offset 0.
-                let cur_empty = new_items
+                let cur_empty = live
                     .first()
                     .map(|it| it.runs.iter().all(|r| r.text.is_empty()))
                     .unwrap_or(true);
@@ -353,21 +417,24 @@ fn make_list_structural_key(
                     // block).
                     return Some(CommandExecuted::Yes);
                 }
-                if new_items.len() <= 1 {
+                if live.len() <= 1 {
                     // Only item, and it's empty — remove the list block.
                     on_action(BlockAction::Delete {
                         block_id: list_block_id,
                     });
                 } else {
-                    // Empty first item with siblings — drop it, keep list.
-                    new_items.remove(0);
-                    let new_first_id = new_items.first().map(|it| it.id);
+                    // Empty first item with siblings — commit pending
+                    // typing in the other items, then drop the empty item.
+                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    let mut without_first = live;
+                    without_first.remove(0);
+                    let new_first_id = without_first.first().map(|it| it.id);
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
-                        new_body: BlockBody::List(new_items),
+                        new_body: BlockBody::List(without_first),
                     });
                     if let Some(id) = new_first_id {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                 }
                 Some(CommandExecuted::Yes)
@@ -383,9 +450,9 @@ fn make_list_structural_key(
                     return None; // within-item nav — default handler
                 }
                 if item_index > 0 {
-                    emit_list_commit(&handles, list_block_id, &on_action);
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
                     if let Some(id) = item_ids.get(item_index - 1).copied() {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                     Some(CommandExecuted::Yes)
                 } else {
@@ -405,9 +472,9 @@ fn make_list_structural_key(
                     return None;
                 }
                 if item_index + 1 < item_count {
-                    emit_list_commit(&handles, list_block_id, &on_action);
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
                     if let Some(id) = item_ids.get(item_index + 1).copied() {
-                        focus_target.set(Some(id));
+                        defer_focus(focus_target, id);
                     }
                     Some(CommandExecuted::Yes)
                 } else {
