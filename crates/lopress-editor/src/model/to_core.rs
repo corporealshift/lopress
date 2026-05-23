@@ -38,7 +38,7 @@ fn block_to_core(b: &EditorBlock) -> Block {
             text: Some(serialize_inline(runs)),
         },
         (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
-            r#type: "code_block".into(),
+            r#type: "code".into(),
             attrs: json!({ "lang": lang }),
             children: vec![],
             text: Some(text.clone()),
@@ -128,7 +128,7 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
             text: Some(serialize_inline(runs)),
         },
         (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
-            r#type: "code_block".into(),
+            r#type: "code".into(),
             attrs: json!({ "lang": lang }),
             children: vec![],
             text: Some(text.clone()),

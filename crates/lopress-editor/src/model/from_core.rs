@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 /// Convert a `lopress_core::Document` into the editor's working model,
 /// consulting `registry` for plugin-declared block types.
 ///
-/// Built-in types (`paragraph`, `heading`, `code_block`, `list`) are mapped
+/// Built-in types (`paragraph`, `heading`, `code`, `list`) are mapped
 /// directly. For any other type, the registry is consulted: when a matching
 /// `BlockDecl` is found the block is rendered with the editor implied by
 /// the plugin's `editor` field and `plugin: Some(PluginMeta { ... })` is
@@ -43,7 +43,7 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
             let text = b.text.as_deref().unwrap_or("");
             EditorBlock::heading(level, parse_inline(text))
         }
-        "code_block" => {
+        "code" => {
             let lang = b
                 .attrs
                 .get("lang")
