@@ -440,3 +440,216 @@ fn screenshot() -> Result<Vec<u8>, String> {
 fn screenshot() -> Result<Vec<u8>, String> {
     Err("screenshots only supported on Windows".to_string())
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::model::types::EditorBlock;
+
+    fn doc_one_paragraph() -> (EditorDoc, u64) {
+        let block = EditorBlock::paragraph(vec![InlineRun::plain("text")]);
+        let raw = block.id.raw();
+        let doc = EditorDoc {
+            blocks: vec![block],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        (doc, raw)
+    }
+
+    #[test]
+    fn edit_inline_translates_to_edit_block_body_inline() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::EditInline {
+            block_id: raw,
+            new_runs: vec![InlineRun::plain("new")],
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditBlockBody {
+                block_id,
+                new_body: BlockBody::Inline(runs),
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(runs, vec![InlineRun::plain("new")]);
+            }
+            other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_code_translates_to_edit_block_body_code() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::EditCode {
+            block_id: raw,
+            new_text: "fn main() {}".to_string(),
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditBlockBody {
+                block_id,
+                new_body: BlockBody::Code(text),
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(text, "fn main() {}");
+            }
+            other => panic!("expected EditBlockBody/Code, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn split_translates_with_new_block_id_none() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Split {
+            block_id: raw,
+            byte_offset: 5,
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Split {
+                block_id,
+                byte_offset,
+                new_block_id,
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(byte_offset, 5);
+                assert!(new_block_id.is_none());
+            }
+            other => panic!("expected Split, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_with_prev_translates() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::MergeWithPrev { block_id: raw };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::MergeWithPrev { block_id } => {
+                assert_eq!(block_id.raw(), raw);
+            }
+            other => panic!("expected MergeWithPrev, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_translates() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Delete { block_id: raw };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Delete { block_id } => {
+                assert_eq!(block_id.raw(), raw);
+            }
+            other => panic!("expected Delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn move_action_preserves_to_index() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Move {
+            block_id: raw,
+            to_index: 3,
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Move { block_id, to_index } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(to_index, 3);
+            }
+            other => panic!("expected Move, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_attrs_round_trips_map() {
+        let (doc, raw) = doc_one_paragraph();
+        let mut map = serde_json::Map::new();
+        map.insert("lang".into(), "rust".into());
+        map.insert("count".into(), 42.into());
+        let ctrl = CtrlAction::EditAttrs {
+            block_id: raw,
+            new_attrs: map.clone(),
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditAttrs {
+                block_id,
+                new_attrs,
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(new_attrs, map);
+            }
+            other => panic!("expected EditAttrs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn change_type_maps_each_kind() {
+        let (doc, raw) = doc_one_paragraph();
+        let cases = [
+            (CtrlBlockKind::Paragraph, BlockKind::Paragraph),
+            (CtrlBlockKind::Heading { level: 2 }, BlockKind::Heading(2)),
+            (
+                CtrlBlockKind::Code {
+                    lang: "rust".to_string(),
+                },
+                BlockKind::Code {
+                    lang: "rust".to_string(),
+                },
+            ),
+            (
+                CtrlBlockKind::List { ordered: true },
+                BlockKind::List { ordered: true },
+            ),
+        ];
+        for (ctrl_kind, expected_block_kind) in cases {
+            let ctrl = CtrlAction::ChangeType {
+                block_id: raw,
+                new_kind: ctrl_kind,
+            };
+            match ctrl.into_block_action(&doc).expect("known id translates") {
+                BlockAction::ChangeType { block_id, new_kind } => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(new_kind, expected_block_kind);
+                }
+                other => panic!("expected ChangeType, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn change_type_clamps_heading_level() {
+        let (doc, raw) = doc_one_paragraph();
+
+        // level 9 clamps to 6
+        let ctrl = CtrlAction::ChangeType {
+            block_id: raw,
+            new_kind: CtrlBlockKind::Heading { level: 9 },
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::ChangeType { new_kind, .. } => {
+                assert_eq!(new_kind, BlockKind::Heading(6));
+            }
+            other => panic!("expected ChangeType, got {other:?}"),
+        }
+
+        // level 0 clamps to 1
+        let ctrl = CtrlAction::ChangeType {
+            block_id: raw,
+            new_kind: CtrlBlockKind::Heading { level: 0 },
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::ChangeType { new_kind, .. } => {
+                assert_eq!(new_kind, BlockKind::Heading(1));
+            }
+            other => panic!("expected ChangeType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_block_id_returns_none() {
+        let (doc, _raw) = doc_one_paragraph();
+        let unknown_id = u64::MAX;
+        let ctrl = CtrlAction::Delete {
+            block_id: unknown_id,
+        };
+        assert!(ctrl.into_block_action(&doc).is_none());
+    }
+}
