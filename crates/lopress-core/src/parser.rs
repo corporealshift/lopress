@@ -218,7 +218,7 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
                 }
             }
             Block {
-                r#type: "code_block".into(),
+                r#type: "code".into(),
                 attrs: if lang.is_empty() {
                     json!({})
                 } else {
@@ -494,9 +494,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_fenced_code_block_with_language() {
+    fn parses_fenced_code_with_language() {
         let d = parse("```rust\nfn main() {}\n```\n").unwrap();
-        assert_eq!(types(&d.blocks), vec!["code_block"]);
+        assert_eq!(types(&d.blocks), vec!["code"]);
         assert_eq!(d.blocks[0].attrs, json!({"lang": "rust"}));
         assert_eq!(d.blocks[0].text.as_deref(), Some("fn main() {}\n"));
     }

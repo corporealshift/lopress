@@ -74,7 +74,7 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
                 }
             }
         }
-        "code_block" => {
+        "code" => {
             let lang = b.attrs.get("lang").and_then(|v| v.as_str()).unwrap_or("");
             out.push_str("```");
             out.push_str(lang);
