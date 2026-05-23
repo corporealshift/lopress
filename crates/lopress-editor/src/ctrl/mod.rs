@@ -116,6 +116,24 @@ impl CtrlAction {
             },
         })
     }
+
+    /// The raw `u64` block id this action targets. Every variant carries
+    /// one. Used to report which block was missing when translation fails.
+    // Needed by the /action HTTP handler in ui/mod.rs to report which
+    // block was not found when translation fails.
+    #[allow(dead_code)]
+    pub(crate) fn block_id(&self) -> u64 {
+        match self {
+            CtrlAction::Split { block_id, .. }
+            | CtrlAction::MergeWithPrev { block_id }
+            | CtrlAction::Delete { block_id }
+            | CtrlAction::Move { block_id, .. }
+            | CtrlAction::ChangeType { block_id, .. }
+            | CtrlAction::EditInline { block_id, .. }
+            | CtrlAction::EditCode { block_id, .. }
+            | CtrlAction::EditAttrs { block_id, .. } => *block_id,
+        }
+    }
 }
 
 // ── Doc state serialization ───────────────────────────────────────────────────
@@ -641,6 +659,62 @@ mod tests {
             }
             other => panic!("expected ChangeType, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn block_id_accessor_returns_each_variant_id() {
+        // Each variant gets a distinct id (1..=8) so a slipped match arm
+        // would produce the wrong value.
+        assert_eq!(
+            CtrlAction::Split {
+                block_id: 1,
+                byte_offset: 0
+            }
+            .block_id(),
+            1
+        );
+        assert_eq!(CtrlAction::MergeWithPrev { block_id: 2 }.block_id(), 2);
+        assert_eq!(CtrlAction::Delete { block_id: 3 }.block_id(), 3);
+        assert_eq!(
+            CtrlAction::Move {
+                block_id: 4,
+                to_index: 0
+            }
+            .block_id(),
+            4
+        );
+        assert_eq!(
+            CtrlAction::ChangeType {
+                block_id: 5,
+                new_kind: CtrlBlockKind::Paragraph
+            }
+            .block_id(),
+            5
+        );
+        assert_eq!(
+            CtrlAction::EditInline {
+                block_id: 6,
+                new_runs: vec![]
+            }
+            .block_id(),
+            6
+        );
+        assert_eq!(
+            CtrlAction::EditCode {
+                block_id: 7,
+                new_text: "".to_string()
+            }
+            .block_id(),
+            7
+        );
+        assert_eq!(
+            CtrlAction::EditAttrs {
+                block_id: 8,
+                new_attrs: serde_json::Map::new()
+            }
+            .block_id(),
+            8
+        );
     }
 
     #[test]
