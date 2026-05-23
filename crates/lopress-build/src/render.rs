@@ -42,7 +42,7 @@ fn write_block(
             }
             out.push_str("</blockquote>\n");
         }
-        "code_block" => {
+        "code" => {
             let lang = b.attrs.get("lang").and_then(|v| v.as_str()).unwrap_or("");
             let class = if lang.is_empty() {
                 String::new()
