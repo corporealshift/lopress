@@ -111,13 +111,29 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
     }
 }
 
-/// Build the native-editor view for an inline block.
+/// Caller-provided structural-key callback. Invoked first on every keypress;
+/// `Some(CommandExecuted::Yes)` short-circuits the shared default handling
+/// (Ctrl shortcuts, slash, Enter/Backspace/arrows). `None` falls through.
+/// Paragraphs pass a no-op that returns `None` for every key; list items use
+/// it to intercept item-level Enter / Backspace-at-0 / arrows.
+pub type StructuralKey =
+    Rc<dyn Fn(&KeyPress, floem::keyboard::Modifiers) -> Option<CommandExecuted>>;
+
+/// Caller-provided commit closure. Called by the shared handler before any
+/// focus-changing or block-jumping shortcut (Ctrl+Home/End, PageUp/Down,
+/// cross-block ↑/↓). Currently only consumed by the structural-key callers
+/// (lists need it batched); paragraphs flush their own buffer via
+/// `commit_from_editor` inside the shared handler, but plumb the closure
+/// through for symmetry. List items will use this in stage 4 task 3.
+pub type CommitClosure = Rc<dyn Fn()>;
+
+/// Build the native-editor view for an inline block (paragraph / heading).
 ///
-/// `focus_target`: when set to `block_id`, this block requests Floem focus.
-/// `current_doc`: needed by the key handler to find adjacent blocks for
-///   cross-block ↑/↓ navigation.
-/// `slash_eligible`: when true, typing `/` on an empty block opens the slash
-///   command menu instead of inserting the character (paragraphs only).
+/// Thin wrapper around `mount_block_editor` that supplies the paragraph's
+/// `commit` closure and a no-op `structural_key`. Behavior identical to the
+/// previous monolithic implementation; the extraction enables list items to
+/// share the same mount (stage 4 task 3) by providing their own
+/// `structural_key`.
 #[allow(clippy::too_many_arguments)]
 pub fn editable_inline(
     state: BlockEditorState,
@@ -132,14 +148,72 @@ pub fn editable_inline(
 ) -> impl IntoView {
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
+    let on_action_for_commit = on_action.clone();
+    let commit: CommitClosure = Rc::new(move || {
+        commit_from_editor(editor_sig, spans_sig, block_id, &on_action_for_commit);
+    });
+    let structural_key: StructuralKey = Rc::new(|_, _| None);
+    mount_block_editor(
+        state,
+        block_id,
+        block_id,
+        on_action,
+        focus_target,
+        focus_pub,
+        current_doc,
+        on_undo,
+        on_redo,
+        commit,
+        structural_key,
+        slash_eligible,
+    )
+}
+
+/// Shared editor mount. Owns the `editor_view` mount, focus tracking,
+/// pointer/keyboard event wiring, and the height-from-visual-lines styling.
+/// Calls `structural_key` first on every keypress; falls through to the
+/// shared default handler (Ctrl shortcuts, slash, Enter/Backspace/arrows)
+/// when `structural_key` returns `None`.
+///
+/// `block_id` is what `focus_target` reacts to and what the (now mostly
+/// unreached) default `handle_key` emits on. `publish_block_id` is what
+/// `focus_pub.block` reports when this editor becomes active — for list
+/// items it's the *list* block's id (the toolbar's "active block"), not
+/// the per-item id. Paragraphs pass the same id for both.
+#[allow(clippy::too_many_arguments)]
+pub fn mount_block_editor(
+    state: BlockEditorState,
+    block_id: BlockId,
+    publish_block_id: BlockId,
+    on_action: ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
+    focus_pub: FocusPublisher,
+    current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
+    _commit: CommitClosure,
+    structural_key: StructuralKey,
+    slash_eligible: bool,
+) -> impl IntoView {
+    let editor_sig = state.editor_sig;
+    let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
     let link_url_sig = state.link_url_sig;
 
     let on_action_for_key = on_action;
+    let commit_for_key = _commit;
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
     let combined_key = move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
+        // 1. Caller's structural-key callback. Short-circuits the shared
+        //    handler when the caller wants block-type-specific semantics
+        //    (list items override Enter/Backspace/arrows).
+        if let Some(result) = structural_key(kp, ms) {
+            return result;
+        }
+        // 2. Shared default handler — Ctrl shortcuts, slash, block-level
+        //    Enter/Backspace/arrow/PageUp/PageDown defaults.
         let result = handle_key(
             kp,
             ms,
@@ -152,12 +226,14 @@ pub fn editable_inline(
             current_doc,
             &on_undo,
             &on_redo,
+            &commit_for_key,
             slash_eligible,
             link_url_sig,
         );
         if result == CommandExecuted::Yes {
             result
         } else {
+            // 3. Floem's default editor handler — cursor movement, etc.
             default_kp_handler(kp, ms)
         }
     };
@@ -184,7 +260,19 @@ pub fn editable_inline(
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
             focused.set(false);
-            editor_sig.with_untracked(|ed| ed.editor_view_focus_lost.notify());
+            editor_sig.with_untracked(|ed| {
+                ed.editor_view_focus_lost.notify();
+                // Collapse any active selection to a caret on focus loss
+                // so the visual selection background does not linger when
+                // the user clicks into a sibling editor (e.g. another
+                // item in the same list).
+                use floem::views::editor::core::cursor::CursorMode;
+                use floem::views::editor::core::selection::Selection;
+                ed.cursor.update(|c| {
+                    let offset = c.offset();
+                    c.mode = CursorMode::Insert(Selection::caret(offset));
+                });
+            });
         })
         .on_event_cont(EventListener::PointerDown, move |event| {
             if let Event::PointerDown(pe) = event {
@@ -243,11 +331,14 @@ pub fn editable_inline(
             editor_sig.with_untracked(|ed| ed.window_origin.set(point));
         });
 
-    // Publish focus so the toolbar can reach our editor + spans.
+    // Publish focus so the toolbar can reach our editor + spans. For list
+    // items, `publish_block_id` is the list block's id (the toolbar slot
+    // is owned by the list, not the item); for paragraphs it equals
+    // `block_id`.
     create_effect(move |_| {
         let is_active = editor_sig.with(|ed| ed.active.get());
         if is_active {
-            focus_pub.block.set(Some(block_id));
+            focus_pub.block.set(Some(publish_block_id));
             focus_pub
                 .editor_and_spans
                 .set(Some((editor_sig, spans_sig, style_rev, link_url_sig)));
@@ -300,6 +391,7 @@ fn handle_key(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: &Rc<dyn Fn()>,
     on_redo: &Rc<dyn Fn()>,
+    commit: &CommitClosure,
     slash_eligible: bool,
     link_url_sig: RwSignal<Option<String>>,
 ) -> CommandExecuted {
@@ -313,6 +405,11 @@ fn handle_key(
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             match s.as_str() {
                 "z" | "Z" => {
+                    // Flush any typed-but-uncommitted buffer first so the
+                    // undo stack has an entry to pop — typing alone records
+                    // nothing until a commit. `commit` is a no-op (records
+                    // nothing) when there is no pending change.
+                    commit();
                     if ms.shift() {
                         on_redo();
                     } else {
@@ -321,6 +418,7 @@ fn handle_key(
                     return CommandExecuted::Yes;
                 }
                 "y" | "Y" => {
+                    commit();
                     on_redo();
                     return CommandExecuted::Yes;
                 }
@@ -398,6 +496,7 @@ fn handle_key(
             on_action(BlockAction::Split {
                 block_id,
                 byte_offset,
+                new_block_id: None,
             });
             CommandExecuted::Yes
         }
@@ -555,7 +654,10 @@ fn commit_from_editor(
     let spans = spans_sig.get_untracked();
     let rope = Rope::from(text.as_str());
     let new_runs = rope_and_spans_to_runs(&rope, &spans);
-    on_action(BlockAction::EditInline { block_id, new_runs });
+    on_action(BlockAction::EditBlockBody {
+        block_id,
+        new_body: crate::model::types::BlockBody::Inline(new_runs),
+    });
 }
 
 fn commit_and_jump_prev(

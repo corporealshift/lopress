@@ -36,7 +36,7 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | `/ping` | GET | Liveness check | `ok` |
 | `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}]}` |
 | `/screenshot` | GET | PNG of the window | `image/png` bytes; `503` if window not found |
-| `/action` | POST | Apply a `CtrlAction` to the doc | `ok` / `400 parse error: …` |
+| `/action` | POST | Apply a `CtrlAction` to the doc | `200 {"status":"dispatched"}` / `409 no_document` / `422 block_not_found` / `400 parse error` |
 | `/input` | POST | Inject text or a key chord | `ok` / `400` |
 | `/click` | POST | Click at client-area coords | `ok` / `400` |
 
@@ -55,7 +55,9 @@ Body is a JSON `CtrlAction` with a `"type"` discriminant. `block_id` is the raw 
 {"type":"EditAttrs","block_id":4,"new_attrs":{"lang":"rust"}}
 ```
 
-`new_kind` types: `Paragraph`, `Heading {level}`, `Code {lang}`, `List {ordered}`. An unknown `block_id` is silently dropped — the action just doesn't apply.
+`new_kind` types: `Paragraph`, `Heading {level}`, `Code {lang}`, `List {ordered}`.
+
+`/action` blocks until the editor reports an outcome and answers with JSON: `200 {"status":"dispatched"}` when the action reached a real block and was routed to the editor; `422 {"status":"block_not_found","block_id":N}` when the id does not exist in the open document; `409 {"status":"no_document"}` when no document is open. (`200`/dispatched does not guarantee the document changed — a no-op action such as `Move` to the same position still dispatches.) On Windows, `Invoke-RestMethod` throws on `4xx` codes — that thrown error is the signal the action did not apply; previously such cases were silently dropped with a `200 ok`.
 
 PowerShell example:
 ```powershell
@@ -101,7 +103,7 @@ Then `Read` the PNG to view it. Capturing briefly raises the window to topmost (
 
 - **Running `--release`** — the server is `#[cfg(debug_assertions)]`; nothing binds. Use `cargo run`.
 - **Reusing block ids** after a `Split`/`Delete`/`Merge`/`Move` — always re-`/state` first.
-- **Acting before a doc is open** — `/action` is a silent no-op when `doc_open` is false.
+- **Acting before a doc is open** — `/action` now returns `409 {"status":"no_document"}` when `doc_open` is false (no longer a silent no-op).
 - **Checking `/state` after `/input` typing** — buffered edits show in `/screenshot`, not `/state`, until committed.
 - **Typing into an unfocused block** — `/click` the target block first; `/input` types wherever the caret is.
 - **Forgetting the editor blocks the foreground** — `/screenshot`, `/click`, and `/input` briefly reorder/activate the window; that flicker is expected.

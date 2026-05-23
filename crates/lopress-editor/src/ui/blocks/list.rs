@@ -1,27 +1,122 @@
 //! Editable list rendering — the canonical `editor = "list"` implementation.
 //!
-//! Each `ListItem` gets its own native `BlockEditorState`. The view is a
-//! `v_stack` of `[bullet/number] [item editor]` rows. Per-item keys handle
-//! splitting, merging, and cross-item / cross-block navigation.
+//! Each `ListItem` gets its own native `BlockEditorState` mounted through
+//! the shared `mount_block_editor`. The view is a `v_stack` of
+//! `[bullet/number] [item editor]` rows. A per-list `ItemHandles` collects
+//! every item's editor signals so every structural list mutation (Enter to
+//! split, Backspace to merge, arrow at boundary, Ctrl+Home/End, etc.) can
+//! build a fresh `BlockBody::List` from the live buffer of *every* item and
+//! emit a single `EditBlockBody` — the data-loss bug from
+//! `docs/superpowers/ideas/2026-05-18-list-item-uncommitted-edit-loss.md`
+//! is therefore structurally impossible.
 
-use crate::actions::BlockAction;
-use crate::model::sync::rope_and_spans_to_runs;
-use crate::model::types::{BlockId, EditorDoc, ListItem};
-use crate::ui::blocks::inline_editor::{build_block_editor, ActionSink, FocusPublisher};
+use crate::actions::{split_item_at_with_id, BlockAction};
+use crate::model::style_span::StyleSpan;
+use crate::model::sync::{canonicalize_body, rope_and_spans_to_runs};
+use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun, ListItem};
+use crate::ui::blocks::inline_editor::{
+    build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
+    StructuralKey,
+};
 use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
 use floem::views::editor::gutter::GutterClass;
-use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
-use floem::views::editor::view::editor_container_view;
 use floem::views::editor::Editor;
 use floem::views::{h_stack, stack, text, v_stack_from_iter, Decorators};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
+use std::cell::RefCell;
 use std::rc::Rc;
+
+/// Per-list shared collection of every item's editor signals. Each
+/// `list_item_editor` call pushes its handle here at construction; the
+/// `commit` and `structural_key` closures walk the handles in order to
+/// build a fresh `BlockBody::List` from every item's live buffer.
+type ItemHandles = Rc<RefCell<Vec<(BlockId, RwSignal<Editor>, RwSignal<Vec<StyleSpan>>)>>>;
+
+/// Walk the per-item handles and synthesise a `Vec<ListItem>` from each
+/// item's live editor buffer. Item ids are preserved from the handle.
+fn collect_items(handles: &ItemHandles) -> Vec<ListItem> {
+    handles
+        .borrow()
+        .iter()
+        .map(|(item_id, editor_sig, spans_sig)| {
+            let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+            let spans = spans_sig.get_untracked();
+            let rope = Rope::from(text.as_str());
+            let runs = rope_and_spans_to_runs(&rope, &spans);
+            ListItem { id: *item_id, runs }
+        })
+        .collect()
+}
+
+/// If `live` differs from the list block's body in the document model,
+/// emit an `EditBlockBody` committing it. Used to flush typed-but-
+/// uncommitted text into the model as its own undo entry — distinct from
+/// any structural change that follows. When `live` already matches the
+/// model this is a no-op (no emit, no rebuild, no undo entry).
+fn commit_live_if_changed(
+    live: &[ListItem],
+    list_block_id: BlockId,
+    on_action: &ActionSink,
+    current_doc: RwSignal<Option<EditorDoc>>,
+) {
+    let differs = current_doc.with_untracked(|maybe| {
+        maybe
+            .as_ref()
+            .and_then(|d| d.blocks.iter().find(|b| b.id == list_block_id))
+            // Compare in canonical form: `live` is canonical (collect_items
+            // produces canonical runs), so the stored body must be
+            // canonicalized too — otherwise a structurally-identical body
+            // looks like a change and emits a phantom no-op EditBlockBody.
+            .map(|b| {
+                !matches!(
+                    canonicalize_body(&b.body),
+                    BlockBody::List(items) if items.as_slice() == live
+                )
+            })
+            .unwrap_or(false)
+    });
+    if differs {
+        on_action(BlockAction::EditBlockBody {
+            block_id: list_block_id,
+            new_body: BlockBody::List(live.to_vec()),
+        });
+    }
+}
+
+/// Commit every item's live buffer into the model as one `EditBlockBody`
+/// (skipped when nothing changed). Called as the `commit` closure passed
+/// to `mount_block_editor` — so Ctrl+Z flushes pending typing before
+/// undoing — and from the structural-key navigation branches that move
+/// focus away from the list.
+fn emit_list_commit(
+    handles: &ItemHandles,
+    list_block_id: BlockId,
+    on_action: &ActionSink,
+    current_doc: RwSignal<Option<EditorDoc>>,
+) {
+    let live = collect_items(handles);
+    commit_live_if_changed(&live, list_block_id, on_action, current_doc);
+}
+
+/// Set `focus_target` on the next event-loop tick rather than immediately.
+///
+/// A list structural edit emits one or two `EditBlockBody` actions, each of
+/// which queues a `dyn_container` rebuild. If `focus_target` were set
+/// synchronously, the *first* rebuild's focus effect would consume it (it
+/// clears `focus_target` after focusing) and the *second* rebuild would
+/// have nothing to focus — the caret would vanish. Deferring the set until
+/// after the update phase means it lands once, after the final rebuild.
+fn defer_focus(focus_target: RwSignal<Option<BlockId>>, target_id: BlockId) {
+    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
+        focus_target.set(Some(target_id));
+    });
+}
 
 /// Build the editable list view for a list block.
 #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
@@ -33,9 +128,12 @@ pub fn editable_list_view(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let item_ids: Rc<Vec<BlockId>> = Rc::new(items.iter().map(|it| it.id).collect());
     let count = items.len();
+    let handles: ItemHandles = Rc::new(RefCell::new(Vec::with_capacity(count)));
     let rows: Vec<AnyView> = items
         .iter()
         .enumerate()
@@ -52,10 +150,13 @@ pub fn editable_list_view(
                 idx,
                 count,
                 Rc::clone(&item_ids),
+                Rc::clone(&handles),
                 on_action.clone(),
                 focus_target,
                 focus_pub,
                 current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
             );
             h_stack((
                 text(prefix).style(|s| s.width(24.).font_size(15.)),
@@ -70,10 +171,10 @@ pub fn editable_list_view(
         .into_any()
 }
 
-/// One list item's native editor: a `BlockEditorState` plus a list-specific
-/// key handler for splitting, merging, and navigation.
-// `BODY_FONT_SIZE` is a small positive integer-valued constant, so the
-// f32->usize conversion is exact; line counts are tiny so usize->f32 is too.
+/// One list item: a `BlockEditorState` mounted through `mount_block_editor`
+/// with a list-specific structural-key callback (per spec section 2) and a
+/// batched-commit closure that constructs a complete `BlockBody::List`
+/// from every item's live buffer on demand.
 #[allow(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
@@ -81,83 +182,92 @@ pub fn editable_list_view(
     clippy::cast_sign_loss
 )]
 fn list_item_editor(
-    runs: &[crate::model::types::InlineRun],
-    block_id: BlockId,
+    runs: &[InlineRun],
+    list_block_id: BlockId,
     item_id: BlockId,
     item_index: usize,
     item_count: usize,
     item_ids: Rc<Vec<BlockId>>,
+    handles: ItemHandles,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
-    let style_rev = state.style_rev;
     let text_sig = state.text_sig;
-    let link_url_sig = state.link_url_sig;
 
-    let default_kp_handler = default_key_handler(editor_sig);
-    let on_action_for_key = on_action;
+    // Register this item's editor with the shared handles so every
+    // structural callback can read all items' live buffers.
+    handles.borrow_mut().push((item_id, editor_sig, spans_sig));
 
-    let view = editor_container_view(
+    // Batched commit: flush every item's live buffer into a fresh
+    // BlockBody::List and emit a single EditBlockBody (skipped when nothing
+    // changed). Used by the shared default handler before Ctrl+Z/Y and
+    // focus-changing shortcuts.
+    let commit_handles = Rc::clone(&handles);
+    let commit_on_action = on_action.clone();
+    let commit: CommitClosure = Rc::new(move || {
+        emit_list_commit(
+            &commit_handles,
+            list_block_id,
+            &commit_on_action,
+            current_doc,
+        );
+    });
+
+    // List-specific structural-key callback per spec section 2.
+    let structural_key = make_list_structural_key(
+        list_block_id,
+        item_index,
+        item_count,
+        Rc::clone(&item_ids),
+        Rc::clone(&handles),
         editor_sig,
-        move |_| editor_sig.with_untracked(|ed| ed.active.get()),
-        move |kp, ms| {
-            let result = handle_list_item_key(
-                kp,
-                ms,
-                editor_sig,
-                spans_sig,
-                block_id,
-                item_id,
-                item_index,
-                item_count,
-                &item_ids,
-                &on_action_for_key,
-                focus_target,
-                current_doc,
-            );
-            if result == CommandExecuted::Yes {
-                result
-            } else {
-                default_kp_handler(kp, ms)
-            }
-        },
+        on_action.clone(),
+        focus_target,
+        current_doc,
     );
 
-    // Publish focus: the list *block* (not the item) owns the toolbar slot,
-    // so report `block_id` while exposing this item's editor handles.
-    create_effect(move |_| {
-        let is_active = editor_sig.with(|ed| ed.active.get());
-        if is_active {
-            focus_pub.block.set(Some(block_id));
-            focus_pub
-                .editor_and_spans
-                .set(Some((editor_sig, spans_sig, style_rev, link_url_sig)));
-        }
-    });
+    let view = mount_block_editor(
+        state,
+        item_id,
+        list_block_id,
+        on_action,
+        focus_target,
+        focus_pub,
+        current_doc,
+        on_undo,
+        on_redo,
+        commit,
+        structural_key,
+        /* slash_eligible */ false,
+    );
 
-    // Programmatic focus when `focus_target` names this item. Item 0 also
-    // answers to the list *block* id, so navigation that lands on the list
-    // as a whole (Ctrl+Home/End, Page keys, cross-block arrows) puts the
-    // cursor in the first item instead of dropping it.
-    create_effect(move |_| {
-        let target = focus_target.get();
-        if target == Some(item_id) || (item_index == 0 && target == Some(block_id)) {
-            editor_sig.with_untracked(|ed| {
-                if let Some(view_id) = ed.editor_view_id.get_untracked() {
-                    view_id.request_focus();
-                    view_id.scroll_to(None);
-                }
-            });
-            focus_target.set(None);
-        }
-    });
+    // Item 0 also answers to the list *block* id, so navigation that lands
+    // on the list as a whole (cross-block ↑/↓ from above, Ctrl+Home if the
+    // list is the first block) puts the cursor in the first item.
+    if item_index == 0 {
+        create_effect(move |_| {
+            if focus_target.get() == Some(list_block_id) {
+                editor_sig.with_untracked(|ed| {
+                    if let Some(view_id) = ed.editor_view_id.get_untracked() {
+                        view_id.request_focus();
+                        view_id.scroll_to(None);
+                    }
+                });
+                focus_target.set(None);
+            }
+        });
+    }
 
+    // Per-item height styling: hide the editor gutter (the bullet prefix
+    // serves that role) and size to the visual line count.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
     stack((view,))
         .style(move |s| {
@@ -169,146 +279,213 @@ fn list_item_editor(
         .into_any()
 }
 
-/// Write the item's current editor text back to the document.
-fn commit_list_item(
-    editor_sig: RwSignal<Editor>,
-    spans_sig: RwSignal<Vec<crate::model::style_span::StyleSpan>>,
-    block_id: BlockId,
-    item_id: BlockId,
-    on_action: &ActionSink,
-) {
-    let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
-    let spans = spans_sig.get_untracked();
-    let rope = Rope::from(text.as_str());
-    let new_runs = rope_and_spans_to_runs(&rope, &spans);
-    on_action(BlockAction::EditListItem {
-        block_id,
-        item_id,
-        new_runs,
-    });
-}
-
-/// List-item key handling: Enter splits, Backspace-at-0 merges, ↑/↓ navigate.
+/// Build the list-item structural-key callback. Implements the keyboard-
+/// isolation behavior table from the spec's section 2: Enter never closes
+/// the list; arrows at list boundaries do nothing; empty first-item
+/// Backspace removes the item (or the list block, when it's the only item).
 #[allow(clippy::too_many_arguments)]
-fn handle_list_item_key(
-    kp: &KeyPress,
-    ms: floem::keyboard::Modifiers,
-    editor_sig: RwSignal<Editor>,
-    spans_sig: RwSignal<Vec<crate::model::style_span::StyleSpan>>,
-    block_id: BlockId,
-    item_id: BlockId,
+fn make_list_structural_key(
+    list_block_id: BlockId,
     item_index: usize,
     item_count: usize,
-    item_ids: &[BlockId],
-    on_action: &ActionSink,
+    item_ids: Rc<Vec<BlockId>>,
+    handles: ItemHandles,
+    editor_sig: RwSignal<Editor>,
+    on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     current_doc: RwSignal<Option<EditorDoc>>,
-) -> CommandExecuted {
+) -> StructuralKey {
     use floem::keyboard::{Key, NamedKey};
 
-    let shift = ms.shift();
-    let ctrl_or_cmd = ms.control() || ms.meta();
-    if ctrl_or_cmd {
-        // Ctrl/Cmd shortcuts are not handled at the item level; let the
-        // default editor handler deal with them.
-        return CommandExecuted::No;
-    }
+    Rc::new(move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
+        let shift = ms.shift();
+        let ctrl_or_cmd = ms.control() || ms.meta();
 
-    match &kp.key {
-        // Shift+Enter — soft line break within the item.
-        KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) if shift => {
-            editor_sig.with_untracked(|ed| {
-                ed.doc().receive_char(ed, "\n");
-            });
-            CommandExecuted::Yes
-        }
-
-        // Enter — commit, then split this item at the cursor.
-        KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) => {
-            let byte_offset =
-                editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
-            commit_list_item(editor_sig, spans_sig, block_id, item_id, on_action);
-            on_action(BlockAction::SplitListItem {
-                block_id,
-                item_id,
-                byte_offset,
-            });
-            CommandExecuted::Yes
-        }
-
-        // Backspace at offset 0 — merge with the previous item, or with the
-        // block before the list when this is the first item.
-        KeyInput::Keyboard(Key::Named(NamedKey::Backspace), _) => {
-            let offset = editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
-            if offset != 0 {
-                return CommandExecuted::No;
-            }
-            commit_list_item(editor_sig, spans_sig, block_id, item_id, on_action);
-            if item_index > 0 {
-                on_action(BlockAction::MergeListItemWithPrev { block_id, item_id });
-            } else {
-                on_action(BlockAction::MergeWithPrev { block_id });
-            }
-            CommandExecuted::Yes
-        }
-
-        // ↑ on the first visual line — move to the previous item, or to the
-        // block before the list.
-        KeyInput::Keyboard(Key::Named(NamedKey::ArrowUp), _) => {
-            let on_first = editor_sig.with_untracked(|ed| {
-                let offset = ed.cursor.with_untracked(|c| c.offset());
-                ed.vline_of_offset(offset, CursorAffinity::Backward).0 == 0
-            });
-            if !on_first {
-                return CommandExecuted::No;
-            }
-            commit_list_item(editor_sig, spans_sig, block_id, item_id, on_action);
-            if item_index > 0 {
-                if let Some(prev) = item_ids.get(item_index - 1) {
-                    focus_target.set(Some(*prev));
+        // Ctrl/Cmd modifier paths that commit-then-navigate. Ctrl+B/I/E/K
+        // and Ctrl+Z/Y fall through to the shared handler (they operate on
+        // the focused item's own editor / spans signals and do not commit).
+        if ctrl_or_cmd {
+            match &kp.key {
+                KeyInput::Keyboard(Key::Named(NamedKey::Home), _) => {
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    let first_id =
+                        current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
+                    if let Some(id) = first_id {
+                        defer_focus(focus_target, id);
+                    }
+                    return Some(CommandExecuted::Yes);
                 }
-            } else {
-                let prev_block = current_doc.with_untracked(|maybe| {
-                    let d = maybe.as_ref()?;
-                    let i = d.blocks.iter().position(|b| b.id == block_id)?;
-                    i.checked_sub(1).and_then(|j| d.blocks.get(j)).map(|b| b.id)
+                KeyInput::Keyboard(Key::Named(NamedKey::End), _) => {
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    let last_id =
+                        current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
+                    if let Some(id) = last_id {
+                        defer_focus(focus_target, id);
+                    }
+                    return Some(CommandExecuted::Yes);
+                }
+                _ => return None,
+            }
+        }
+
+        // PageUp / PageDown — 10-block jump. Commit first.
+        if matches!(
+            &kp.key,
+            KeyInput::Keyboard(Key::Named(NamedKey::PageUp | NamedKey::PageDown), _)
+        ) {
+            let forward = matches!(
+                &kp.key,
+                KeyInput::Keyboard(Key::Named(NamedKey::PageDown), _)
+            );
+            let target_id = current_doc.with_untracked(|maybe| {
+                let d = maybe.as_ref()?;
+                let i = d.blocks.iter().position(|b| b.id == list_block_id)?;
+                let j = if forward {
+                    (i + 10).min(d.blocks.len().saturating_sub(1))
+                } else {
+                    i.saturating_sub(10)
+                };
+                d.blocks.get(j).map(|b| b.id)
+            });
+            if let Some(id) = target_id {
+                emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                defer_focus(focus_target, id);
+            }
+            return Some(CommandExecuted::Yes);
+        }
+
+        match &kp.key {
+            // Shift+Enter — soft line break within this item. Fall through.
+            KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) if shift => None,
+
+            // Enter — split this item. First commit every item's live
+            // buffer as its own undo entry (so typed-but-uncommitted text
+            // is a separate undo step), then emit the split as a second
+            // entry. Undoing the Enter then restores the typed pre-split
+            // state, not the file-load state.
+            KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) => {
+                let byte_offset =
+                    editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
+                let live = collect_items(&handles);
+                commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                let mut split = live;
+                let new_item_id = BlockId::new();
+                split_item_at_with_id(&mut split, item_index, byte_offset, Some(new_item_id));
+                on_action(BlockAction::EditBlockBody {
+                    block_id: list_block_id,
+                    new_body: BlockBody::List(split),
                 });
-                if let Some(id) = prev_block {
-                    focus_target.set(Some(id));
-                }
+                defer_focus(focus_target, new_item_id);
+                Some(CommandExecuted::Yes)
             }
-            CommandExecuted::Yes
-        }
 
-        // ↓ on the last visual line — move to the next item, or to the block
-        // after the list.
-        KeyInput::Keyboard(Key::Named(NamedKey::ArrowDown), _) => {
-            let on_last = editor_sig.with_untracked(|ed| {
-                let offset = ed.cursor.with_untracked(|c| c.offset());
-                let vline = ed.vline_of_offset(offset, CursorAffinity::Forward);
-                vline.0 == ed.last_vline().0
-            });
-            if !on_last {
-                return CommandExecuted::No;
-            }
-            commit_list_item(editor_sig, spans_sig, block_id, item_id, on_action);
-            if item_index + 1 < item_count {
-                if let Some(next) = item_ids.get(item_index + 1) {
-                    focus_target.set(Some(*next));
+            // Backspace.
+            KeyInput::Keyboard(Key::Named(NamedKey::Backspace), _) => {
+                let offset =
+                    editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
+                if offset != 0 {
+                    return None; // default handler deletes a char
                 }
-            } else {
-                let next_block = current_doc.with_untracked(|maybe| {
-                    let d = maybe.as_ref()?;
-                    let i = d.blocks.iter().position(|b| b.id == block_id)?;
-                    d.blocks.get(i + 1).map(|b| b.id)
+                let live = collect_items(&handles);
+                if item_index > 0 {
+                    // Commit pending typing first (separate undo entry),
+                    // then merge this item into the previous one.
+                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    let mut merged = live;
+                    let cur = merged.remove(item_index);
+                    if let Some(prev) = merged.get_mut(item_index - 1) {
+                        prev.runs.extend(cur.runs);
+                    }
+                    let prev_id = item_ids.get(item_index - 1).copied();
+                    on_action(BlockAction::EditBlockBody {
+                        block_id: list_block_id,
+                        new_body: BlockBody::List(merged),
+                    });
+                    if let Some(id) = prev_id {
+                        defer_focus(focus_target, id);
+                    }
+                    return Some(CommandExecuted::Yes);
+                }
+                // First item, offset 0.
+                let cur_empty = live
+                    .first()
+                    .map(|it| it.runs.iter().all(|r| r.text.is_empty()))
+                    .unwrap_or(true);
+                if !cur_empty {
+                    // Non-empty first item: consume, no-op (keyboard
+                    // isolation — don't lift content into the previous
+                    // block).
+                    return Some(CommandExecuted::Yes);
+                }
+                if live.len() <= 1 {
+                    // Only item, and it's empty — remove the list block.
+                    on_action(BlockAction::Delete {
+                        block_id: list_block_id,
+                    });
+                } else {
+                    // Empty first item with siblings — commit pending
+                    // typing in the other items, then drop the empty item.
+                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    let mut without_first = live;
+                    without_first.remove(0);
+                    let new_first_id = without_first.first().map(|it| it.id);
+                    on_action(BlockAction::EditBlockBody {
+                        block_id: list_block_id,
+                        new_body: BlockBody::List(without_first),
+                    });
+                    if let Some(id) = new_first_id {
+                        defer_focus(focus_target, id);
+                    }
+                }
+                Some(CommandExecuted::Yes)
+            }
+
+            // ↑.
+            KeyInput::Keyboard(Key::Named(NamedKey::ArrowUp), _) => {
+                let on_first = editor_sig.with_untracked(|ed| {
+                    let offset = ed.cursor.with_untracked(|c| c.offset());
+                    ed.vline_of_offset(offset, CursorAffinity::Backward).0 == 0
                 });
-                if let Some(id) = next_block {
-                    focus_target.set(Some(id));
+                if !on_first {
+                    return None; // within-item nav — default handler
+                }
+                if item_index > 0 {
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    if let Some(id) = item_ids.get(item_index - 1).copied() {
+                        defer_focus(focus_target, id);
+                    }
+                    Some(CommandExecuted::Yes)
+                } else {
+                    // First item, first vline — keyboard-isolated.
+                    Some(CommandExecuted::Yes)
                 }
             }
-            CommandExecuted::Yes
-        }
 
-        _ => CommandExecuted::No,
-    }
+            // ↓.
+            KeyInput::Keyboard(Key::Named(NamedKey::ArrowDown), _) => {
+                let on_last = editor_sig.with_untracked(|ed| {
+                    let offset = ed.cursor.with_untracked(|c| c.offset());
+                    let vline = ed.vline_of_offset(offset, CursorAffinity::Forward);
+                    vline.0 == ed.last_vline().0
+                });
+                if !on_last {
+                    return None;
+                }
+                if item_index + 1 < item_count {
+                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    if let Some(id) = item_ids.get(item_index + 1).copied() {
+                        defer_focus(focus_target, id);
+                    }
+                    Some(CommandExecuted::Yes)
+                } else {
+                    // Last item, last vline — keyboard-isolated.
+                    Some(CommandExecuted::Yes)
+                }
+            }
+
+            // Anything else — fall through to the shared default handler
+            // (character insertion, etc.).
+            _ => None,
+        }
+    })
 }

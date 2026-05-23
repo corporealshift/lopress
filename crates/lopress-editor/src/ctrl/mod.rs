@@ -78,6 +78,7 @@ impl CtrlAction {
             } => BlockAction::Split {
                 block_id: find(doc, block_id)?,
                 byte_offset,
+                new_block_id: None,
             },
             CtrlAction::MergeWithPrev { block_id } => BlockAction::MergeWithPrev {
                 block_id: find(doc, block_id)?,
@@ -98,13 +99,13 @@ impl CtrlAction {
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
                 },
             },
-            CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditInline {
+            CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_runs,
+                new_body: crate::model::types::BlockBody::Inline(new_runs),
             },
-            CtrlAction::EditCode { block_id, new_text } => BlockAction::EditCode {
+            CtrlAction::EditCode { block_id, new_text } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_text,
+                new_body: crate::model::types::BlockBody::Code(new_text),
             },
             CtrlAction::EditAttrs {
                 block_id,
@@ -115,7 +116,71 @@ impl CtrlAction {
             },
         })
     }
+
+    /// The raw `u64` block id this action targets. Every variant carries
+    /// one. Used to report which block was missing when translation fails.
+    pub(crate) fn block_id(&self) -> u64 {
+        match self {
+            CtrlAction::Split { block_id, .. }
+            | CtrlAction::MergeWithPrev { block_id }
+            | CtrlAction::Delete { block_id }
+            | CtrlAction::Move { block_id, .. }
+            | CtrlAction::ChangeType { block_id, .. }
+            | CtrlAction::EditInline { block_id, .. }
+            | CtrlAction::EditCode { block_id, .. }
+            | CtrlAction::EditAttrs { block_id, .. } => *block_id,
+        }
+    }
 }
+
+// ── Action result (HTTP API) ──────────────────────────────────────────────────
+
+/// Outcome of routing a `CtrlAction`, reported back to the blocked HTTP
+/// handler so the caller learns whether the action reached a real block.
+///
+/// `Dispatched` means the action named an existing block and was routed to
+/// the editor's `on_action` chokepoint. It does **not** guarantee the
+/// document changed — a no-op action (e.g. `Move` to the same position)
+/// still counts as dispatched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CtrlActionResult {
+    Dispatched,
+    NoDocument,
+    BlockNotFound { block_id: u64 },
+}
+
+impl CtrlActionResult {
+    /// HTTP status code and JSON body to return for this outcome.
+    pub(crate) fn http_response_parts(&self) -> (u16, String) {
+        match self {
+            CtrlActionResult::Dispatched => (
+                200,
+                serde_json::json!({ "status": "dispatched" }).to_string(),
+            ),
+            CtrlActionResult::NoDocument => (
+                409,
+                serde_json::json!({
+                    "status": "no_document",
+                    "detail": "no document is open",
+                })
+                .to_string(),
+            ),
+            CtrlActionResult::BlockNotFound { block_id } => (
+                422,
+                serde_json::json!({
+                    "status": "block_not_found",
+                    "block_id": *block_id,
+                })
+                .to_string(),
+            ),
+        }
+    }
+}
+
+/// What travels the `/action` channel: the parsed action plus a one-shot
+/// reply sender the UI thread uses to report the outcome back to the
+/// blocked HTTP handler.
+pub(crate) type CtrlActionEnvelope = (CtrlAction, Sender<CtrlActionResult>);
 
 // ── Doc state serialization ───────────────────────────────────────────────────
 
@@ -186,11 +251,11 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlAction>) {
+pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlActionEnvelope>) {
     let snapshot: Arc<Mutex<String>> = Arc::new(Mutex::new(
         r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string(),
     ));
-    let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlAction>();
+    let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlActionEnvelope>();
 
     let handle = CtrlHandle {
         snapshot: Arc::clone(&snapshot),
@@ -206,7 +271,7 @@ pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlAction>) {
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
-fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlAction>) {
+fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlActionEnvelope>) {
     let server = match tiny_http::Server::http("127.0.0.1:7878") {
         Ok(s) => s,
         Err(e) => {
@@ -230,7 +295,7 @@ fn handle_request(
     method: &str,
     url: &str,
     snapshot: &Arc<Mutex<String>>,
-    action_tx: &Sender<CtrlAction>,
+    action_tx: &Sender<CtrlActionEnvelope>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     match (method, url) {
         ("GET", "/ping") => text_response("ok", 200),
@@ -256,8 +321,25 @@ fn handle_request(
             }
             match serde_json::from_str::<CtrlAction>(&body) {
                 Ok(action) => {
-                    let _ = action_tx.send(action);
-                    text_response("ok", 200)
+                    // Round-trip: hand the action to the UI thread with a
+                    // one-shot reply channel, then block until it reports
+                    // the outcome (or 2 s elapse). The serve loop is
+                    // single-threaded, so other endpoints wait during this
+                    // window — acceptable for a debug tool, and the UI
+                    // normally answers within a frame.
+                    let (reply_tx, reply_rx) = crossbeam_channel::bounded::<CtrlActionResult>(1);
+                    if action_tx.send((action, reply_tx)).is_err() {
+                        return text_response("editor channel closed", 503);
+                    }
+                    match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                        Ok(result) => {
+                            let (code, json) = result.http_response_parts();
+                            tiny_http::Response::from_string(json)
+                                .with_header(json_header())
+                                .with_status_code(code)
+                        }
+                        Err(_) => text_response("editor did not respond", 504),
+                    }
                 }
                 Err(e) => text_response(&format!("parse error: {e}"), 400),
             }
@@ -438,4 +520,297 @@ fn screenshot() -> Result<Vec<u8>, String> {
 #[cfg(not(target_os = "windows"))]
 fn screenshot() -> Result<Vec<u8>, String> {
     Err("screenshots only supported on Windows".to_string())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::model::types::EditorBlock;
+
+    fn doc_one_paragraph() -> (EditorDoc, u64) {
+        let block = EditorBlock::paragraph(vec![InlineRun::plain("text")]);
+        let raw = block.id.raw();
+        let doc = EditorDoc {
+            blocks: vec![block],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        (doc, raw)
+    }
+
+    #[test]
+    fn edit_inline_translates_to_edit_block_body_inline() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::EditInline {
+            block_id: raw,
+            new_runs: vec![InlineRun::plain("new")],
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditBlockBody {
+                block_id,
+                new_body: BlockBody::Inline(runs),
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(runs, vec![InlineRun::plain("new")]);
+            }
+            other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_code_translates_to_edit_block_body_code() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::EditCode {
+            block_id: raw,
+            new_text: "fn main() {}".to_string(),
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditBlockBody {
+                block_id,
+                new_body: BlockBody::Code(text),
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(text, "fn main() {}");
+            }
+            other => panic!("expected EditBlockBody/Code, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn split_translates_with_new_block_id_none() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Split {
+            block_id: raw,
+            byte_offset: 5,
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Split {
+                block_id,
+                byte_offset,
+                new_block_id,
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(byte_offset, 5);
+                assert!(new_block_id.is_none());
+            }
+            other => panic!("expected Split, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_with_prev_translates() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::MergeWithPrev { block_id: raw };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::MergeWithPrev { block_id } => {
+                assert_eq!(block_id.raw(), raw);
+            }
+            other => panic!("expected MergeWithPrev, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_translates() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Delete { block_id: raw };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Delete { block_id } => {
+                assert_eq!(block_id.raw(), raw);
+            }
+            other => panic!("expected Delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn move_action_preserves_to_index() {
+        let (doc, raw) = doc_one_paragraph();
+        let ctrl = CtrlAction::Move {
+            block_id: raw,
+            to_index: 3,
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::Move { block_id, to_index } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(to_index, 3);
+            }
+            other => panic!("expected Move, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_attrs_round_trips_map() {
+        let (doc, raw) = doc_one_paragraph();
+        let mut map = serde_json::Map::new();
+        map.insert("lang".into(), "rust".into());
+        map.insert("count".into(), 42.into());
+        let ctrl = CtrlAction::EditAttrs {
+            block_id: raw,
+            new_attrs: map.clone(),
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::EditAttrs {
+                block_id,
+                new_attrs,
+            } => {
+                assert_eq!(block_id.raw(), raw);
+                assert_eq!(new_attrs, map);
+            }
+            other => panic!("expected EditAttrs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn change_type_maps_each_kind() {
+        let (doc, raw) = doc_one_paragraph();
+        let cases = [
+            (CtrlBlockKind::Paragraph, BlockKind::Paragraph),
+            (CtrlBlockKind::Heading { level: 2 }, BlockKind::Heading(2)),
+            (
+                CtrlBlockKind::Code {
+                    lang: "rust".to_string(),
+                },
+                BlockKind::Code {
+                    lang: "rust".to_string(),
+                },
+            ),
+            (
+                CtrlBlockKind::List { ordered: true },
+                BlockKind::List { ordered: true },
+            ),
+        ];
+        for (ctrl_kind, expected_block_kind) in cases {
+            let ctrl = CtrlAction::ChangeType {
+                block_id: raw,
+                new_kind: ctrl_kind,
+            };
+            match ctrl.into_block_action(&doc).expect("known id translates") {
+                BlockAction::ChangeType { block_id, new_kind } => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(new_kind, expected_block_kind);
+                }
+                other => panic!("expected ChangeType, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn change_type_clamps_heading_level() {
+        let (doc, raw) = doc_one_paragraph();
+
+        // level 9 clamps to 6
+        let ctrl = CtrlAction::ChangeType {
+            block_id: raw,
+            new_kind: CtrlBlockKind::Heading { level: 9 },
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::ChangeType { new_kind, .. } => {
+                assert_eq!(new_kind, BlockKind::Heading(6));
+            }
+            other => panic!("expected ChangeType, got {other:?}"),
+        }
+
+        // level 0 clamps to 1
+        let ctrl = CtrlAction::ChangeType {
+            block_id: raw,
+            new_kind: CtrlBlockKind::Heading { level: 0 },
+        };
+        match ctrl.into_block_action(&doc).expect("known id translates") {
+            BlockAction::ChangeType { new_kind, .. } => {
+                assert_eq!(new_kind, BlockKind::Heading(1));
+            }
+            other => panic!("expected ChangeType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_action_result_dispatched_http_parts() {
+        let (code, body) = CtrlActionResult::Dispatched.http_response_parts();
+        assert_eq!(code, 200);
+        assert!(body.contains(r#""status":"dispatched""#));
+    }
+
+    #[test]
+    fn ctrl_action_result_no_document_http_parts() {
+        let (code, body) = CtrlActionResult::NoDocument.http_response_parts();
+        assert_eq!(code, 409);
+        assert!(body.contains(r#""status":"no_document""#));
+        assert!(body.contains(r#""detail":"no document is open""#));
+    }
+
+    #[test]
+    fn ctrl_action_result_block_not_found_http_parts() {
+        let id: u64 = 42;
+        let (code, body) = CtrlActionResult::BlockNotFound { block_id: id }.http_response_parts();
+        assert_eq!(code, 422);
+        assert!(body.contains(r#""status":"block_not_found""#));
+        assert!(body.contains(r#""block_id":42"#));
+    }
+
+    #[test]
+    fn block_id_accessor_returns_each_variant_id() {
+        // Each variant gets a distinct id (1..=8) so a slipped match arm
+        // would produce the wrong value.
+        assert_eq!(
+            CtrlAction::Split {
+                block_id: 1,
+                byte_offset: 0
+            }
+            .block_id(),
+            1
+        );
+        assert_eq!(CtrlAction::MergeWithPrev { block_id: 2 }.block_id(), 2);
+        assert_eq!(CtrlAction::Delete { block_id: 3 }.block_id(), 3);
+        assert_eq!(
+            CtrlAction::Move {
+                block_id: 4,
+                to_index: 0
+            }
+            .block_id(),
+            4
+        );
+        assert_eq!(
+            CtrlAction::ChangeType {
+                block_id: 5,
+                new_kind: CtrlBlockKind::Paragraph
+            }
+            .block_id(),
+            5
+        );
+        assert_eq!(
+            CtrlAction::EditInline {
+                block_id: 6,
+                new_runs: vec![]
+            }
+            .block_id(),
+            6
+        );
+        assert_eq!(
+            CtrlAction::EditCode {
+                block_id: 7,
+                new_text: "".to_string()
+            }
+            .block_id(),
+            7
+        );
+        assert_eq!(
+            CtrlAction::EditAttrs {
+                block_id: 8,
+                new_attrs: serde_json::Map::new()
+            }
+            .block_id(),
+            8
+        );
+    }
+
+    #[test]
+    fn unknown_block_id_returns_none() {
+        let (doc, _raw) = doc_one_paragraph();
+        let unknown_id = u64::MAX;
+        let ctrl = CtrlAction::Delete {
+            block_id: unknown_id,
+        };
+        assert!(ctrl.into_block_action(&doc).is_none());
+    }
 }

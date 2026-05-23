@@ -46,7 +46,9 @@ pub(crate) fn root_view(
     ctx: AppContext,
     settings_signal: RwSignal<Settings>,
     #[cfg(debug_assertions)] ctrl_handle: crate::ctrl::CtrlHandle,
-    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlActionEnvelope,
+    >,
 ) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
@@ -102,7 +104,7 @@ pub(crate) fn root_view(
         std::cell::RefCell<
             Option<(
                 crate::ctrl::CtrlHandle,
-                crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+                crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
             )>,
         >,
     > = Rc::new(std::cell::RefCell::new(Some((ctrl_handle, ctrl_action_rx))));
@@ -134,29 +136,31 @@ pub(crate) fn root_view(
 /// The block a just-applied undo/redo action should restore focus to.
 fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
     match action {
-        BlockAction::EditInline { block_id, .. }
-        | BlockAction::EditCode { block_id, .. }
-        | BlockAction::Split { block_id, .. }
+        BlockAction::Split { block_id, .. }
         | BlockAction::MergeWithPrev { block_id }
         | BlockAction::ChangeType { block_id, .. }
         | BlockAction::EditAttrs { block_id, .. }
         | BlockAction::Move { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
         BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
-        BlockAction::EditListItem { block_id, .. }
-        | BlockAction::SplitListItem { block_id, .. }
-        | BlockAction::MergeListItemWithPrev { block_id, .. } => Some(*block_id),
+        BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
     }
 }
 
-/// The id of the item immediately after `item_id` in `block_id`'s list.
-fn list_item_after(doc: &EditorDoc, block_id: BlockId, item_id: BlockId) -> Option<BlockId> {
-    let block = doc.blocks.iter().find(|b| b.id == block_id)?;
-    let crate::model::types::BlockBody::List(items) = &block.body else {
-        return None;
-    };
-    let pos = items.iter().position(|it| it.id == item_id)?;
-    items.get(pos + 1).map(|it| it.id)
+/// Which block should hold focus after `action` is applied to `doc`
+/// (`doc` is the state *before* the apply). Most actions keep their target
+/// block alive, so `focus_block_for` suffices — but `MergeWithPrev` deletes
+/// its target (folds it into the predecessor), so focus must land on the
+/// surviving predecessor, looked up here while the target still exists.
+fn focus_after_apply(doc: Option<&EditorDoc>, action: &BlockAction) -> Option<BlockId> {
+    match action {
+        BlockAction::MergeWithPrev { block_id } => {
+            let d = doc?;
+            let i = d.blocks.iter().position(|b| b.id == *block_id)?;
+            i.checked_sub(1).and_then(|j| d.blocks.get(j)).map(|b| b.id)
+        }
+        _ => focus_block_for(action),
+    }
 }
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
@@ -166,7 +170,7 @@ fn editing_view(
     current_doc: RwSignal<Option<EditorDoc>>,
     #[cfg(debug_assertions)] ctrl: Option<(
         crate::ctrl::CtrlHandle,
-        crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+        crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
     )>,
 ) -> impl IntoView {
     // Snapshot the workspace once at view-build time. Sidebar actions
@@ -253,16 +257,9 @@ fn editing_view(
             slash_menu_open.set(None);
         }
 
-        // Push to undo stack before apply (using pre-state). Nested closure
-        // avoids cloning the entire EditorDoc — push_before_apply takes the
-        // pre-state by reference, and compute_inverse clones just the
-        // affected block.
-        current_doc.with_untracked(|maybe| {
-            if let Some(d) = maybe {
-                undo_stack.update(|s| s.push_before_apply(d, &action));
-            }
-        });
-
+        // Pre-focus must read pre-apply state (the block before the one
+        // being merged into its predecessor). Capture it before the apply
+        // mutates the doc.
         let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
             (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
                 .blocks
@@ -273,35 +270,20 @@ fn editing_view(
                 .map(|b| b.id),
             _ => None,
         });
+
+        // Apply the action; capture the returned (canonical, inverse) pair
+        // and push it onto the undo stack. apply returns None for
+        // unrecordable cases (UI-only, no-op, or stage-1-unrecordable
+        // structural splits / first-block delete).
         let action_for_apply = action.clone();
+        let mut recorded: Option<(BlockAction, BlockAction)> = None;
         current_doc.update(|maybe| {
             if let Some(d) = maybe {
-                apply(d, action_for_apply);
+                recorded = apply(d, action_for_apply);
             }
         });
-
-        // Fix Split inverse now that post-state has the new block id.
-        if let BlockAction::Split { block_id, .. } = &action {
-            let new_id = current_doc.with_untracked(|maybe| {
-                let d = maybe.as_ref()?;
-                let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                d.blocks.get(i + 1).map(|b| b.id)
-            });
-            if let Some(new_id) = new_id {
-                undo_stack.update(|s| s.fix_split_inverse(new_id));
-            }
-        }
-
-        // Fix SplitListItem inverse now that the new item id exists.
-        if let BlockAction::SplitListItem {
-            block_id, item_id, ..
-        } = &action
-        {
-            let new_item_id = current_doc
-                .with_untracked(|maybe| list_item_after(maybe.as_ref()?, *block_id, *item_id));
-            if let Some(new_item_id) = new_item_id {
-                undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
-            }
+        if let Some((canonical, inverse)) = recorded {
+            undo_stack.update(|s| s.push_after_apply(canonical, inverse));
         }
 
         let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
@@ -311,12 +293,6 @@ fn editing_view(
                 .position(|b| b.id == *block_id)
                 .and_then(|i| d.blocks.get(i + 1))
                 .map(|b| b.id),
-            (
-                BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                },
-                Some(d),
-            ) => list_item_after(d, *block_id, *item_id),
             _ => None,
         });
         let change_type_focus = match &action {
@@ -349,40 +325,20 @@ fn editing_view(
                 popped = s.pop_undo();
             });
             if let Some(action) = popped {
-                let focus_id = focus_block_for(&action);
+                // Compute focus from the pre-apply doc — MergeWithPrev
+                // deletes its target, so focus must resolve to the
+                // surviving predecessor before the apply runs.
+                let focus_id =
+                    current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
-                        apply(d, action_for_apply);
+                        let _ = apply(d, action_for_apply);
                     }
                 });
-                // Undoing a MergeWithPrev re-applies a Split, which mints a
-                // fresh BlockId for the recreated block. Point the redo
-                // entry's MergeWithPrev at that new id.
-                if let BlockAction::Split { block_id, .. } = &action {
-                    let new_id = current_doc.with_untracked(|maybe| {
-                        let d = maybe.as_ref()?;
-                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                        d.blocks.get(i + 1).map(|b| b.id)
-                    });
-                    if let Some(new_id) = new_id {
-                        undo_stack.update(|s| s.fix_merge_redo(new_id));
-                    }
-                }
-                // Undoing a MergeListItemWithPrev re-applies a SplitListItem,
-                // minting a fresh item id; point the redo entry's
-                // MergeListItemWithPrev at it.
-                if let BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                } = &action
-                {
-                    let new_item_id = current_doc.with_untracked(|maybe| {
-                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
-                    });
-                    if let Some(new_item_id) = new_item_id {
-                        undo_stack.update(|s| s.fix_merge_list_item_redo(new_item_id));
-                    }
-                }
+                // No post-apply id surgery: Split / SplitListItem in stored
+                // entries carry new_block_id: Some(...), so re-applying them
+                // is id-stable without patching the redo entry.
                 if let Some(id) = focus_id {
                     floem::action::exec_after(Duration::from_millis(0), move |_| {
                         focus_target.set(Some(id));
@@ -401,38 +357,15 @@ fn editing_view(
                 popped = s.pop_redo();
             });
             if let Some(action) = popped {
-                let focus_id = focus_block_for(&action);
+                let focus_id =
+                    current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
-                        apply(d, action_for_apply);
+                        let _ = apply(d, action_for_apply);
                     }
                 });
-                // Redoing a Split mints a fresh BlockId; refresh the undo
-                // entry's MergeWithPrev inverse to target it.
-                if let BlockAction::Split { block_id, .. } = &action {
-                    let new_id = current_doc.with_untracked(|maybe| {
-                        let d = maybe.as_ref()?;
-                        let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-                        d.blocks.get(i + 1).map(|b| b.id)
-                    });
-                    if let Some(new_id) = new_id {
-                        undo_stack.update(|s| s.fix_split_inverse(new_id));
-                    }
-                }
-                // Redoing a SplitListItem mints a fresh item id; refresh the
-                // undo entry's MergeListItemWithPrev inverse to target it.
-                if let BlockAction::SplitListItem {
-                    block_id, item_id, ..
-                } = &action
-                {
-                    let new_item_id = current_doc.with_untracked(|maybe| {
-                        list_item_after(maybe.as_ref()?, *block_id, *item_id)
-                    });
-                    if let Some(new_item_id) = new_item_id {
-                        undo_stack.update(|s| s.fix_split_list_item_inverse(new_item_id));
-                    }
-                }
+                // No post-apply id surgery for the same reason as on_undo.
                 if let Some(id) = focus_id {
                     floem::action::exec_after(Duration::from_millis(0), move |_| {
                         focus_target.set(Some(id));
@@ -583,12 +516,28 @@ fn editing_view(
 
         let action_read = create_signal_from_channel(ctrl_action_rx);
         create_effect(move |_| {
-            if let Some(ctrl_action) = action_read.get() {
-                let block_action =
-                    current_doc.with_untracked(|d| ctrl_action.into_block_action(d.as_ref()?));
-                if let Some(action) = block_action {
-                    on_action_for_ctrl(action);
-                }
+            if let Some((ctrl_action, reply_tx)) = action_read.get() {
+                let block_id = ctrl_action.block_id();
+                // Translate against the current doc. into_block_action's
+                // only failure mode is an unknown block id; a missing doc
+                // is detected separately so the caller gets a precise
+                // result. on_action MUST run outside with_untracked — it
+                // calls current_doc.update() and would re-borrow the signal.
+                let translated: Result<BlockAction, crate::ctrl::CtrlActionResult> = current_doc
+                    .with_untracked(|maybe| match maybe.as_ref() {
+                        None => Err(crate::ctrl::CtrlActionResult::NoDocument),
+                        Some(doc) => ctrl_action
+                            .into_block_action(doc)
+                            .ok_or(crate::ctrl::CtrlActionResult::BlockNotFound { block_id }),
+                    });
+                let result = match translated {
+                    Ok(action) => {
+                        on_action_for_ctrl(action);
+                        crate::ctrl::CtrlActionResult::Dispatched
+                    }
+                    Err(failure) => failure,
+                };
+                let _ = reply_tx.send(result);
             }
         });
     }

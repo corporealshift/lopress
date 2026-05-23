@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::to_core::doc_to_core;
@@ -36,6 +41,7 @@ fn split_paragraph_at_middle() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 5,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -52,6 +58,7 @@ fn split_at_end_creates_empty_trailing_block() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 2,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -69,6 +76,7 @@ fn split_heading_keeps_level() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 5,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -85,6 +93,7 @@ fn split_unknown_block_is_noop() {
         BlockAction::Split {
             block_id: BlockId::new(),
             byte_offset: 1,
+            new_block_id: None,
         },
     );
     assert_eq!(doc.blocks.len(), 1);
@@ -277,29 +286,29 @@ fn change_paragraph_to_code_flattens_runs() {
 }
 
 #[test]
-fn edit_inline_replaces_runs() {
+fn edit_block_body_inline_replaces_runs() {
     let (id, a) = paragraph_with_id("old");
     let mut doc = doc_with(vec![a]);
     apply(
         &mut doc,
-        BlockAction::EditInline {
+        BlockAction::EditBlockBody {
             block_id: id,
-            new_runs: vec![InlineRun::plain("new")],
+            new_body: BlockBody::Inline(vec![InlineRun::plain("new")]),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
 }
 
 #[test]
-fn edit_code_replaces_text() {
+fn edit_block_body_code_replaces_text() {
     let block = EditorBlock::code("rust".into(), "old".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::EditCode {
+        BlockAction::EditBlockBody {
             block_id: id,
-            new_text: "new".into(),
+            new_body: BlockBody::Code("new".into()),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -315,6 +324,7 @@ fn split_code_block_inserts_newline() {
         BlockAction::Split {
             block_id: id,
             byte_offset: 8,
+            new_block_id: None,
         },
     );
     // Code block does not split; a newline is inserted at offset.
@@ -366,4 +376,365 @@ fn change_type_to_list_serializes_as_native_list() {
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "list");
     assert_eq!(core.blocks[0].children[0].r#type, "list_item");
+}
+
+#[test]
+fn split_with_new_block_id_uses_provided_id() {
+    let (id, block) = paragraph_with_id("hello world");
+    let mut doc = doc_with(vec![block]);
+    let target_id = BlockId::new();
+    apply(
+        &mut doc,
+        BlockAction::Split {
+            block_id: id,
+            byte_offset: 5,
+            new_block_id: Some(target_id),
+        },
+    );
+    assert_eq!(doc.blocks.len(), 2);
+    assert_eq!(doc.blocks[1].id, target_id);
+}
+
+#[test]
+fn split_with_new_block_id_none_mints_fresh_id() {
+    let (id, block) = paragraph_with_id("hello world");
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::Split {
+            block_id: id,
+            byte_offset: 5,
+            new_block_id: None,
+        },
+    );
+    assert_eq!(doc.blocks.len(), 2);
+    assert_ne!(doc.blocks[1].id, doc.blocks[0].id);
+}
+/// For every recordable action, `apply` must return the inverse action that
+/// would restore the doc. Applying that inverse to the post-state must
+/// reproduce the original pre-state.
+mod inverse_symmetry {
+    use super::*;
+
+    #[test]
+    fn split_round_trip_id_stable() {
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let before_len = doc.blocks.len();
+        let before_text = run_text(&doc.blocks[0]);
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 5,
+                new_block_id: None,
+            },
+        )
+        .expect("Split must record an inverse");
+
+        // Canonical must carry the minted id.
+        let minted_id = match &canonical {
+            BlockAction::Split {
+                new_block_id: Some(nid),
+                ..
+            } => *nid,
+            _ => panic!("canonical Split must have a concrete new_block_id"),
+        };
+        assert_eq!(doc.blocks[1].id, minted_id);
+
+        // Apply the inverse; doc must restore the pre-state content. The
+        // run *structure* may differ (split+merge of plain runs leaves two
+        // adjacent runs instead of one consolidated run) — compare flat
+        // text, which is what "restored to pre-state" means semantically.
+        let _ = apply(&mut doc, inverse).expect("inverse must record");
+        assert_eq!(doc.blocks.len(), before_len);
+        assert_eq!(run_text(&doc.blocks[0]), before_text);
+    }
+
+    #[test]
+    fn split_redo_uses_same_id() {
+        // Apply Split -> undo (apply the inverse) -> re-apply the canonical
+        // Split -> the new block must have the SAME id as the first time,
+        // because canonical carries it.
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 5,
+                new_block_id: None,
+            },
+        )
+        .expect("Split must record");
+        let original_new_id = doc.blocks[1].id;
+
+        // Undo.
+        let _ = apply(&mut doc, inverse).expect("inverse must record");
+        assert_eq!(doc.blocks.len(), 1);
+
+        // Redo the canonical form.
+        let _ = apply(&mut doc, canonical).expect("canonical re-apply must record");
+        assert_eq!(doc.blocks.len(), 2);
+        assert_eq!(
+            doc.blocks[1].id, original_new_id,
+            "redo must reuse the original new_block_id"
+        );
+    }
+
+    #[test]
+    fn open_slash_menu_returns_none() {
+        let (id, block) = paragraph_with_id("anything");
+        let mut doc = doc_with(vec![block]);
+        let result = apply(&mut doc, BlockAction::OpenSlashMenu { block_id: id });
+        assert!(result.is_none(), "OpenSlashMenu is UI-only, unrecorded");
+    }
+
+    /// Snapshot a doc's block content as a list of (id, flat-text) tuples.
+    /// Stable across inverse round-trips for the non-lossy variants — runs
+    /// may consolidate differently, but the text and id sequence must match.
+    fn snapshot(doc: &EditorDoc) -> Vec<(BlockId, String, &'static str)> {
+        doc.blocks
+            .iter()
+            .map(|b| {
+                let (text, tag) = match &b.body {
+                    BlockBody::Inline(runs) => {
+                        (runs.iter().map(|r| r.text.as_str()).collect(), "inline")
+                    }
+                    BlockBody::Code(t) => (t.clone(), "code"),
+                    BlockBody::List(items) => (
+                        items
+                            .iter()
+                            .map(|it| -> String {
+                                it.runs.iter().map(|r| r.text.as_str()).collect()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        "list",
+                    ),
+                    BlockBody::Opaque(_) => (String::new(), "opaque"),
+                };
+                (b.id, text, tag)
+            })
+            .collect()
+    }
+
+    /// Apply `action` then its returned inverse, asserting the doc returns
+    /// to its pre-state snapshot. The shape of the inverse is also checked
+    /// to be non-trivial (apply must have recorded something).
+    fn assert_round_trip(doc: &mut EditorDoc, action: BlockAction) {
+        let before = snapshot(doc);
+        let (_canonical, inverse) = apply(doc, action).expect("action must record");
+        let _ = apply(doc, inverse).expect("inverse must record");
+        assert_eq!(snapshot(doc), before);
+    }
+
+    #[test]
+    fn merge_with_prev_round_trip() {
+        let (_id_a, a) = paragraph_with_id("hello ");
+        let (id_b, b) = paragraph_with_id("world");
+        let mut doc = doc_with(vec![a, b]);
+        assert_round_trip(&mut doc, BlockAction::MergeWithPrev { block_id: id_b });
+    }
+
+    #[test]
+    fn delete_round_trip() {
+        let (_id_a, a) = paragraph_with_id("anchor");
+        let (id_b, b) = paragraph_with_id("victim");
+        let mut doc = doc_with(vec![a, b]);
+        assert_round_trip(&mut doc, BlockAction::Delete { block_id: id_b });
+    }
+
+    #[test]
+    fn insert_after_round_trip() {
+        let (id_a, a) = paragraph_with_id("anchor");
+        let mut doc = doc_with(vec![a]);
+        let new_block = EditorBlock::paragraph(vec![InlineRun::plain("inserted")]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::InsertAfter {
+                anchor: id_a,
+                new_block,
+            },
+        );
+    }
+
+    #[test]
+    fn move_round_trip_forward() {
+        let (id_a, a) = paragraph_with_id("a");
+        let (_id_b, b) = paragraph_with_id("b");
+        let (_id_c, c) = paragraph_with_id("c");
+        let mut doc = doc_with(vec![a, b, c]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Move {
+                block_id: id_a,
+                to_index: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn move_round_trip_backward() {
+        let (_id_a, a) = paragraph_with_id("a");
+        let (_id_b, b) = paragraph_with_id("b");
+        let (id_c, c) = paragraph_with_id("c");
+        let mut doc = doc_with(vec![a, b, c]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Move {
+                block_id: id_c,
+                to_index: 0,
+            },
+        );
+    }
+
+    #[test]
+    fn change_type_paragraph_heading_round_trip() {
+        // Paragraph↔Heading conversions are body-preserving (both Inline),
+        // so this round-trip should be lossless.
+        let (id, block) = paragraph_with_id("title");
+        let mut doc = doc_with(vec![block]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::ChangeType {
+                block_id: id,
+                new_kind: BlockKind::Heading(2),
+            },
+        );
+    }
+
+    #[test]
+    fn edit_block_body_inline_round_trip() {
+        let (id, block) = paragraph_with_id("hello world");
+        let mut doc = doc_with(vec![block]);
+        let new_body = BlockBody::Inline(vec![InlineRun::plain("entirely different content")]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_block_body_code_round_trip() {
+        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
+        block.body = BlockBody::Code("fn main() {}".to_string());
+        block.kind = BlockKind::Code {
+            lang: String::new(),
+        };
+        let id = block.id;
+        let mut doc = doc_with(vec![block]);
+        let new_body = BlockBody::Code("fn other() { /* ... */ }".to_string());
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_block_body_list_round_trip() {
+        use lopress_editor::model::types::ListItem;
+        let it0 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("first")],
+        };
+        let it1 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("second")],
+        };
+        let list = EditorBlock::list(false, vec![it0, it1]);
+        let id = list.id;
+        let mut doc = doc_with(vec![list]);
+        let new_body = BlockBody::List(vec![
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("entirely")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("different")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("items")],
+            },
+        ]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::EditBlockBody {
+                block_id: id,
+                new_body,
+            },
+        );
+    }
+
+    #[test]
+    fn split_code_block_is_now_recordable() {
+        let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
+        block.body = BlockBody::Code("foobar".to_string());
+        block.kind = BlockKind::Code {
+            lang: String::new(),
+        };
+        let id = block.id;
+        let mut doc = doc_with(vec![block]);
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 3,
+                new_block_id: None,
+            },
+        );
+        // After undo, the Code body should be restored to "foobar".
+        match &doc.blocks[0].body {
+            BlockBody::Code(text) => assert_eq!(text, "foobar"),
+            _ => panic!("expected Code body"),
+        }
+    }
+
+    #[test]
+    fn split_list_block_is_now_recordable() {
+        use lopress_editor::model::types::ListItem;
+        let it0 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("ab")],
+        };
+        let it1 = ListItem {
+            id: BlockId::new(),
+            runs: vec![InlineRun::plain("cd")],
+        };
+        let original_item_ids = vec![it0.id, it1.id];
+        let list = EditorBlock::list(false, vec![it0, it1]);
+        let block_id = list.id;
+        let mut doc = doc_with(vec![list]);
+        // Top-level Split on the list at flat-offset 4: item 0 has 2 chars
+        // + 1 newline = cumulative 3, so offset 4 lands inside item 1 at
+        // local-offset 1 (between 'c' and 'd').
+        assert_round_trip(
+            &mut doc,
+            BlockAction::Split {
+                block_id,
+                byte_offset: 4,
+                new_block_id: None,
+            },
+        );
+        // After undo, the list should have its original two items with their
+        // original ids restored.
+        match &doc.blocks[0].body {
+            BlockBody::List(items) => {
+                let ids: Vec<_> = items.iter().map(|it| it.id).collect();
+                assert_eq!(
+                    ids, original_item_ids,
+                    "undo must restore the original item ids"
+                );
+            }
+            _ => panic!("expected List body"),
+        }
+    }
 }
