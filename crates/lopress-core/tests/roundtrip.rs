@@ -65,3 +65,18 @@ proptest! {
         prop_assert_eq!(once, twice);
     }
 }
+
+/// Sanity check: a fenced code block round-trips through parse → serialize
+/// with the type name preserved end-to-end. Today this asserts `"code"` and
+/// will FAIL until the parser is renamed in Task 2 — that failure is the
+/// point of this characterization test.
+#[test]
+fn code_fence_round_trips() {
+    let src = "```rust\nfn main() {}\n```\n";
+    let doc = parse(src).unwrap();
+    assert_eq!(doc.blocks[0].r#type, "code");
+    assert_eq!(doc.blocks[0].attrs, json!({ "lang": "rust" }));
+    assert_eq!(doc.blocks[0].text.as_deref(), Some("fn main() {}\n"));
+    let out = serialize(&doc);
+    assert_eq!(out, src);
+}
