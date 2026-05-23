@@ -46,7 +46,9 @@ pub(crate) fn root_view(
     ctx: AppContext,
     settings_signal: RwSignal<Settings>,
     #[cfg(debug_assertions)] ctrl_handle: crate::ctrl::CtrlHandle,
-    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+    #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlActionEnvelope,
+    >,
 ) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
@@ -102,7 +104,7 @@ pub(crate) fn root_view(
         std::cell::RefCell<
             Option<(
                 crate::ctrl::CtrlHandle,
-                crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+                crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
             )>,
         >,
     > = Rc::new(std::cell::RefCell::new(Some((ctrl_handle, ctrl_action_rx))));
@@ -168,7 +170,7 @@ fn editing_view(
     current_doc: RwSignal<Option<EditorDoc>>,
     #[cfg(debug_assertions)] ctrl: Option<(
         crate::ctrl::CtrlHandle,
-        crossbeam_channel::Receiver<crate::ctrl::CtrlAction>,
+        crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
     )>,
 ) -> impl IntoView {
     // Snapshot the workspace once at view-build time. Sidebar actions
@@ -514,12 +516,28 @@ fn editing_view(
 
         let action_read = create_signal_from_channel(ctrl_action_rx);
         create_effect(move |_| {
-            if let Some(ctrl_action) = action_read.get() {
-                let block_action =
-                    current_doc.with_untracked(|d| ctrl_action.into_block_action(d.as_ref()?));
-                if let Some(action) = block_action {
-                    on_action_for_ctrl(action);
-                }
+            if let Some((ctrl_action, reply_tx)) = action_read.get() {
+                let block_id = ctrl_action.block_id();
+                // Translate against the current doc. into_block_action's
+                // only failure mode is an unknown block id; a missing doc
+                // is detected separately so the caller gets a precise
+                // result. on_action MUST run outside with_untracked — it
+                // calls current_doc.update() and would re-borrow the signal.
+                let translated: Result<BlockAction, crate::ctrl::CtrlActionResult> = current_doc
+                    .with_untracked(|maybe| match maybe.as_ref() {
+                        None => Err(crate::ctrl::CtrlActionResult::NoDocument),
+                        Some(doc) => ctrl_action
+                            .into_block_action(doc)
+                            .ok_or(crate::ctrl::CtrlActionResult::BlockNotFound { block_id }),
+                    });
+                let result = match translated {
+                    Ok(action) => {
+                        on_action_for_ctrl(action);
+                        crate::ctrl::CtrlActionResult::Dispatched
+                    }
+                    Err(failure) => failure,
+                };
+                let _ = reply_tx.send(result);
             }
         });
     }

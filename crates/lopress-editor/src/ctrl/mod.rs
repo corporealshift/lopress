@@ -184,6 +184,11 @@ impl CtrlActionResult {
     }
 }
 
+/// What travels the `/action` channel: the parsed action plus a one-shot
+/// reply sender the UI thread uses to report the outcome back to the
+/// blocked HTTP handler.
+pub(crate) type CtrlActionEnvelope = (CtrlAction, Sender<CtrlActionResult>);
+
 // ── Doc state serialization ───────────────────────────────────────────────────
 
 pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::Path>) -> String {
@@ -253,11 +258,11 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlAction>) {
+pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlActionEnvelope>) {
     let snapshot: Arc<Mutex<String>> = Arc::new(Mutex::new(
         r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string(),
     ));
-    let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlAction>();
+    let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlActionEnvelope>();
 
     let handle = CtrlHandle {
         snapshot: Arc::clone(&snapshot),
@@ -273,7 +278,7 @@ pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlAction>) {
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
-fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlAction>) {
+fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlActionEnvelope>) {
     let server = match tiny_http::Server::http("127.0.0.1:7878") {
         Ok(s) => s,
         Err(e) => {
@@ -297,7 +302,7 @@ fn handle_request(
     method: &str,
     url: &str,
     snapshot: &Arc<Mutex<String>>,
-    action_tx: &Sender<CtrlAction>,
+    action_tx: &Sender<CtrlActionEnvelope>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     match (method, url) {
         ("GET", "/ping") => text_response("ok", 200),
@@ -323,8 +328,25 @@ fn handle_request(
             }
             match serde_json::from_str::<CtrlAction>(&body) {
                 Ok(action) => {
-                    let _ = action_tx.send(action);
-                    text_response("ok", 200)
+                    // Round-trip: hand the action to the UI thread with a
+                    // one-shot reply channel, then block until it reports
+                    // the outcome (or 2 s elapse). The serve loop is
+                    // single-threaded, so other endpoints wait during this
+                    // window — acceptable for a debug tool, and the UI
+                    // normally answers within a frame.
+                    let (reply_tx, reply_rx) = crossbeam_channel::bounded::<CtrlActionResult>(1);
+                    if action_tx.send((action, reply_tx)).is_err() {
+                        return text_response("editor channel closed", 503);
+                    }
+                    match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                        Ok(result) => {
+                            let (code, json) = result.http_response_parts();
+                            tiny_http::Response::from_string(json)
+                                .with_header(json_header())
+                                .with_status_code(code)
+                        }
+                        Err(_) => text_response("editor did not respond", 504),
+                    }
                 }
                 Err(e) => text_response(&format!("parse error: {e}"), 400),
             }
