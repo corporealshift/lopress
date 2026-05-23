@@ -136,6 +136,54 @@ impl CtrlAction {
     }
 }
 
+// ── Action result (HTTP API) ──────────────────────────────────────────────────
+
+/// Outcome of routing a `CtrlAction`, reported back to the blocked HTTP
+/// handler so the caller learns whether the action reached a real block.
+///
+/// `Dispatched` means the action named an existing block and was routed to
+/// the editor's `on_action` chokepoint. It does **not** guarantee the
+/// document changed — a no-op action (e.g. `Move` to the same position)
+/// still counts as dispatched.
+// Used by the /action HTTP handler in ui/mod.rs to construct HTTP responses.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CtrlActionResult {
+    Dispatched,
+    NoDocument,
+    BlockNotFound { block_id: u64 },
+}
+
+impl CtrlActionResult {
+    /// HTTP status code and JSON body to return for this outcome.
+    // Used by the /action HTTP handler in ui/mod.rs to construct responses.
+    #[allow(dead_code)]
+    pub(crate) fn http_response_parts(&self) -> (u16, String) {
+        match self {
+            CtrlActionResult::Dispatched => (
+                200,
+                serde_json::json!({ "status": "dispatched" }).to_string(),
+            ),
+            CtrlActionResult::NoDocument => (
+                409,
+                serde_json::json!({
+                    "status": "no_document",
+                    "detail": "no document is open",
+                })
+                .to_string(),
+            ),
+            CtrlActionResult::BlockNotFound { block_id } => (
+                422,
+                serde_json::json!({
+                    "status": "block_not_found",
+                    "block_id": *block_id,
+                })
+                .to_string(),
+            ),
+        }
+    }
+}
+
 // ── Doc state serialization ───────────────────────────────────────────────────
 
 pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::Path>) -> String {
@@ -659,6 +707,30 @@ mod tests {
             }
             other => panic!("expected ChangeType, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ctrl_action_result_dispatched_http_parts() {
+        let (code, body) = CtrlActionResult::Dispatched.http_response_parts();
+        assert_eq!(code, 200);
+        assert!(body.contains(r#""status":"dispatched""#));
+    }
+
+    #[test]
+    fn ctrl_action_result_no_document_http_parts() {
+        let (code, body) = CtrlActionResult::NoDocument.http_response_parts();
+        assert_eq!(code, 409);
+        assert!(body.contains(r#""status":"no_document""#));
+        assert!(body.contains(r#""detail":"no document is open""#));
+    }
+
+    #[test]
+    fn ctrl_action_result_block_not_found_http_parts() {
+        let id: u64 = 42;
+        let (code, body) = CtrlActionResult::BlockNotFound { block_id: id }.http_response_parts();
+        assert_eq!(code, 422);
+        assert!(body.contains(r#""status":"block_not_found""#));
+        assert!(body.contains(r#""block_id":42"#));
     }
 
     #[test]
