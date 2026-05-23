@@ -35,7 +35,7 @@ fn paragraph_round_trips_via_document_equality() {
 }
 
 #[test]
-fn code_block_round_trips_with_language() {
+fn code_round_trips_with_language() {
     let src = "```rust\nfn main() {}\n```\n";
     let core = parse(src).unwrap();
     let editor = doc_from_core(&core, &PluginRegistry::default());

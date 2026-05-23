@@ -315,7 +315,7 @@ fn edit_block_body_code_replaces_text() {
 }
 
 #[test]
-fn split_code_block_inserts_newline() {
+fn split_code_inserts_newline() {
     let block = EditorBlock::code("rust".into(), "fn main() {}".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
@@ -675,7 +675,7 @@ mod inverse_symmetry {
     }
 
     #[test]
-    fn split_code_block_is_now_recordable() {
+    fn split_code_is_now_recordable() {
         let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
         block.body = BlockBody::Code("foobar".to_string());
         block.kind = BlockKind::Code {
