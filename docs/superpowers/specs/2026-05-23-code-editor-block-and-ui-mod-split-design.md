@@ -3,19 +3,52 @@
 **Date:** 2026-05-23
 **Status:** approved (implementation not started)
 
-This spec covers two related but separable changes shipping together on the
+This spec covers three changes shipping together on the
 `feat/code-editor-block` branch:
 
-1. The **code editor block** — turning the read-only code block into an editable
+1. A **rename of the core block type `code_block` to `code`** — to remove the
+   awkward two-name split (`code` everywhere new, `code_block` in core / build
+   / editor model). The list block uses a single name throughout; code should
+   too. Pure internal-type-name change; no `.md` source file changes.
+2. The **code editor block** — turning the read-only code block into an editable
    block using the existing base-plugin / editor-registry infrastructure that
    the list block already uses.
-2. A **decomposition of `crates/lopress-editor/src/ui/mod.rs`** — a pure refactor
+3. A **decomposition of `crates/lopress-editor/src/ui/mod.rs`** — a pure refactor
    to break the ~666-line file (with a ~400-line `editing_view` function) into
    small sibling modules organized by responsibility.
 
-The refactor is in scope because the editor-pane work touches `ui/mod.rs` enough
-to make the size pain obvious. The two changes share a branch but are distinguishable
-as separate concerns in this spec.
+The rename is the foundation for #2 (the new manifest's `native` field needs a
+clean single name to claim). The refactor is grouped in because the editor-pane
+work touches `ui/mod.rs` enough to make the size pain obvious. The three changes
+share a branch but are distinguishable as separate concerns in this spec.
+
+---
+
+## 0. Rename core block type `code_block` → `code`
+
+The lopress-core parser emits `Block { r#type: "code_block", ... }` for fenced
+code blocks today, and the serializer reads that same `"code_block"` string when
+writing markdown back out. Every downstream layer (lopress-build's renderer,
+lopress-editor's `from_core` / `to_core`, tests) carries the `code_block`
+literal through. Renaming the type to `"code"` collapses to a single name that
+mirrors the list block (which uses `"list"` end-to-end).
+
+This is a string-rename refactor across these files, all atomically:
+
+- `crates/lopress-core/src/parser.rs` — line ~221 emit site; line ~499 test.
+- `crates/lopress-core/src/serializer.rs` — line ~77 match arm.
+- `crates/lopress-build/src/render.rs` — line ~45 match arm.
+- `crates/lopress-editor/src/model/from_core.rs` — line ~46 match arm
+  (this arm is then removed entirely in Section 2; the rename to `"code"`
+  is intermediate state but still needed for the rename to be self-consistent).
+- `crates/lopress-editor/src/model/to_core.rs` — lines ~41 and ~131 emit sites.
+- `crates/lopress-editor/tests/*` and `crates/lopress-core/tests/*` — any
+  string literal `"code_block"`.
+
+No `.md` source file content changes — the type name is internal to
+lopress-core's block IR, never written to markdown. Round-trip integration
+tests (`crates/lopress-build/tests/build_integration.rs` and friends) prove
+the markdown stays byte-identical.
 
 ---
 
@@ -36,24 +69,23 @@ version = "0.1.0"
 [[blocks]]
 name    = "code"
 editor  = "code"
-native  = "code_block"
+native  = "code"
 builtin = true
 
 [blocks.attrs]
 lang = { type = "string", ui = "text" }
 ```
 
-`native = "code_block"` matches the core type emitted by the markdown parser
-(`b.r#type == "code_block"`) so `registry.native_block("code_block")` resolves
-to this declaration — exactly how list's manifest uses `native = "list"` to
-claim core type `"list"`.
+After the Section 0 rename, the markdown parser emits `b.r#type == "code"`, so
+`registry.native_block("code")` resolves to this declaration — exactly how
+list's manifest uses `native = "list"` to claim core type `"list"`.
 
-For this lookup to actually fire, the hardcoded `"code_block"` arm in
+For this lookup to actually fire, the (renamed) hardcoded `"code"` arm in
 `crates/lopress-editor/src/model/from_core.rs::block_from_core` must be
 removed (the list block has no hardcoded arm for the same reason). After
 removal, markdown code blocks fall through to the `other =>` branch, hit
-`registry.native_block("code_block")`, and are dispatched to a new code arm
-in `native_block_from_core` (see Section 2).
+`registry.native_block("code")`, and are dispatched to a new code arm in
+`native_block_from_core` (see Section 2).
 
 ---
 
@@ -65,11 +97,11 @@ plugin attrs map at three points: load, save, and live edit.
 
 ### Load — `from_core`
 
-The hardcoded `"code_block"` arm in `block_from_core` is removed (see Section
-1). Markdown code blocks then route through `registry.native_block("code_block")
-→ native_block_from_core(b, decl)`. That dispatcher gets a new
-`Some("code") => native_code_from_core(b, decl)` arm, parallel to the
-existing `Some("list") => native_list_from_core(b, decl)`.
+The hardcoded `"code"` arm in `block_from_core` (renamed from `"code_block"`
+in Section 0) is removed. Markdown code blocks then route through
+`registry.native_block("code") → native_block_from_core(b, decl)`. That
+dispatcher gets a new `Some("code") => native_code_from_core(b, decl)` arm,
+parallel to the existing `Some("list") => native_list_from_core(b, decl)`.
 
 `native_code_from_core` parses `lang` from `b.attrs["lang"]` and `text` from
 `b.text`, then builds an `EditorBlock` with:
@@ -88,14 +120,14 @@ This stamps PluginMeta at load — analogous to `native_list_from_core` mirrorin
 
 Once `from_core` mints PluginMeta for code blocks, every loaded code block has
 `b.plugin.is_some()`, so `block_to_core` routes through `native_block_to_core`
-(because `meta.native == "code_block"`).
+(because `meta.native == "code"`).
 
 `native_block_to_core` currently has only a `BlockBody::List` arm. It gains a
 `BlockBody::Code(text)` arm that:
 
 - reads `lang` from `meta.attrs["lang"]` as the source of truth (the editor
   may have edited the attr without yet mirroring back into `kind.lang`),
-- emits `Block { type: "code_block", attrs: json!({ "lang": lang }), text:
+- emits `Block { type: "code", attrs: json!({ "lang": lang }), text:
   Some(text.clone()), children: vec![] }`.
 
 The existing `(BlockKind::Code { lang }, BlockBody::Code(text))` arm at the
@@ -352,7 +384,8 @@ Target line count for `editing_view`: ~80 lines.
   - Round-trip: `to_core(from_core(doc))` of a document containing a code fence preserves lang and body text byte-for-byte.
   - After `from_core`, mutating `plugin.attrs["lang"] = "python"` and serializing via `to_core` produces a `code_block` with `attrs.lang == "python"` (proves `native_block_to_core` reads attrs, not `kind.lang`).
   - Applying `EditAttrs { new_attrs: { "lang": "python" } }` to a code block in `actions::apply` updates `plugin.attrs["lang"]` AND mirrors `lang` into `BlockKind::Code.lang`.
-- New unit-ish tests for the registry: `editor_for("code").is_some()`. Plus `PluginRegistry::load_base_plugins` test extended: `reg.block("code")` and `reg.native_block("code_block")` both resolve to the new plugin's code decl.
+- New unit-ish tests for the registry: `editor_for("code").is_some()`. Plus `PluginRegistry::load_base_plugins` test extended: `reg.block("code")` and `reg.native_block("code")` both resolve to the new plugin's code decl.
+- The Section 0 rename is covered by the existing round-trip integration tests in `crates/lopress-build/tests/build_integration.rs` and `crates/lopress-core/tests/roundtrip.rs` — markdown with fenced code blocks must still produce byte-identical output after the rename.
 - The `ui/mod.rs` split is a no-behaviour-change refactor; `cargo check` + the existing test suite passing is the bar. No new tests required for the move itself.
 - Manual verification via the editor GUI (in scope but not a test gate): open a document with a code fence, edit the body, edit the lang, undo/redo each, save and reopen, observe contents preserved.
 
@@ -373,6 +406,8 @@ Target line count for `editing_view`: ~80 lines.
 6. **Tab key (Q6):** *Chosen:* two spaces. *Rejected:* (a) four spaces — fine, but two is the more common Rust/web default; (b) hard tab — Floem's monospace tab rendering is untested here, risk of quirks.
 
 7. **`ui/mod.rs` decomposition (Q7):** *Chosen:* extract into sibling modules organized by responsibility (focus, undo/redo, action sink, save pipeline, etc.) — each module a thin set of free functions taking signals as args. *Rejected:* (a) extract only the obvious bits and keep `editing_view` together — leaves the file ~300 lines, doesn't address the root pain; (b) introduce an `EditorPaneState` struct that owns the signals and exposes methods — fights Floem's owned-`Rc` closure idiom and adds an abstraction layer the rest of the codebase doesn't use.
+
+8. **Core block type name (post-review correction):** *Chosen:* rename core's `code_block` to `code` everywhere — the list block uses a single `"list"` name end-to-end, code should too. *Rejected:* use `"code_block"` in the new manifest (cheaper diff but the editor key `editor = "code_block"` is ugly and inconsistent with the list precedent). The rename is internal-only — `.md` source files do not change.
 
 ---
 
