@@ -1,8 +1,34 @@
 # List items lose uncommitted edits on a structural action
 
 **Date:** 2026-05-18
-**Status:** bug — root cause found, fix deferred
+**Status:** resolved 2026-05-22 — structurally impossible after stage 4
 **Severity:** data loss (typed text discarded)
+
+## Resolution
+
+Fixed by the list-editor-unification refactor
+(`docs/superpowers/specs/2026-05-20-list-editor-unification-and-generic-undo-design.md`),
+specifically stage 4 (commits `14a31bd` … `62eb887`).
+
+The bug is now **structurally impossible**: list mutations no longer flow
+through item-scoped actions like `EditListItem` / `SplitListItem` /
+`MergeListItemWithPrev` (all deleted in `62eb887`). Every list edit is a
+single `BlockAction::EditBlockBody { block_id, new_body: BlockBody::List(_) }`
+carrying the **complete** new list body. The commit closure in
+`crates/lopress-editor/src/ui/blocks/list.rs` (`commit_list_from_handles`)
+walks every item's live editor handles, builds a fresh `BlockBody::List`
+from each item's current buffer, and emits a single `EditBlockBody`. The
+structural-key callback runs that commit before any Enter/Backspace
+structural change, so no path mutates a list without first capturing every
+item's typed text. There is no longer a "focused item committed, others
+not" failure mode by construction.
+
+The `CommitListItems` action proposed below was never built — collapsing
+to one `EditBlockBody` variant subsumed it.
+
+Original report below kept for context.
+
+---
 
 ## Symptom
 
