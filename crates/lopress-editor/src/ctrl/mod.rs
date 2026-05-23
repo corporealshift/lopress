@@ -119,9 +119,6 @@ impl CtrlAction {
 
     /// The raw `u64` block id this action targets. Every variant carries
     /// one. Used to report which block was missing when translation fails.
-    // Needed by the /action HTTP handler in ui/mod.rs to report which
-    // block was not found when translation fails.
-    #[allow(dead_code)]
     pub(crate) fn block_id(&self) -> u64 {
         match self {
             CtrlAction::Split { block_id, .. }
@@ -145,8 +142,6 @@ impl CtrlAction {
 /// the editor's `on_action` chokepoint. It does **not** guarantee the
 /// document changed — a no-op action (e.g. `Move` to the same position)
 /// still counts as dispatched.
-// Used by the /action HTTP handler in ui/mod.rs to construct HTTP responses.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CtrlActionResult {
     Dispatched,
@@ -156,8 +151,6 @@ pub(crate) enum CtrlActionResult {
 
 impl CtrlActionResult {
     /// HTTP status code and JSON body to return for this outcome.
-    // Used by the /action HTTP handler in ui/mod.rs to construct responses.
-    #[allow(dead_code)]
     pub(crate) fn http_response_parts(&self) -> (u16, String) {
         match self {
             CtrlActionResult::Dispatched => (
