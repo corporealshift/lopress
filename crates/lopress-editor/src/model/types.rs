@@ -117,6 +117,26 @@ impl PluginMeta {
             native: Some("list".to_string()),
         }
     }
+
+    /// The canonical `PluginMeta` for a built-in code block.
+    ///
+    /// Mirrors what `from_core` stamps for a `code` core block, so a code
+    /// created inside the editor (e.g. via `ChangeType` from the toolbar or
+    /// slash menu) carries the same plugin identity as one loaded from disk.
+    /// `attr_decls` is empty: the code block is `builtin`, so the attr form
+    /// is suppressed.
+    pub fn code(lang: &str) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("lang".to_string(), Value::String(lang.to_string()));
+        Self {
+            block_type_name: "code".to_string(),
+            attrs,
+            attr_decls: Vec::new(),
+            builtin: true,
+            editor: Some("code".to_string()),
+            native: Some("code".to_string()),
+        }
+    }
 }
 
 impl EditorBlock {

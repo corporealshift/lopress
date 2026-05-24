@@ -8,7 +8,7 @@
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, PluginMeta,
+    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use serde_json::{json, Value};
 
@@ -738,6 +738,254 @@ mod inverse_symmetry {
             _ => panic!("expected List body"),
         }
     }
+}
+
+// ============================================================================
+// ChangeType conversion-arm tests — covering all 12 directions.
+// The Inline→Inline cases (Paragraph↔Heading) are already tested above.
+// The Inline→Code and Inline→List cases are tested above.
+// The remaining 8 directions were broken (body/plugin mismatch) and are
+// exercised here.
+// ============================================================================
+
+#[test]
+fn change_type_code_to_paragraph_converts_body_to_inline() {
+    let block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::Paragraph));
+    assert!(
+        matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "fn main() {}"),
+        "body must be Inline with the original code text"
+    );
+    assert!(b.plugin.is_none(), "plugin must be cleared for Paragraph");
+}
+
+#[test]
+fn change_type_code_to_heading_converts_body_to_inline() {
+    let block = EditorBlock::code("python".into(), "print('hello')".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(2),
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::Heading(2)));
+    assert!(
+        matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "print('hello')"),
+        "body must be Inline with the original code text"
+    );
+    assert!(b.plugin.is_none(), "plugin must be cleared for Heading");
+}
+
+#[test]
+fn change_type_code_to_list_converts_body_to_list() {
+    let block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: false },
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::List { ordered: false }));
+    match &b.body {
+        BlockBody::List(items) => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(
+                items[0].runs.iter().map(|r| r.text.as_str()).collect::<String>(),
+                "fn main() {}"
+            );
+        }
+        _ => panic!("body must be List"),
+    }
+    let meta = b
+        .plugin
+        .as_ref()
+        .expect("a list block must carry PluginMeta");
+    assert_eq!(meta.block_type_name, "list");
+}
+
+#[test]
+fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
+    // Changing the lang on an existing code block must update both
+    // BlockKind::Code.lang AND plugin.attrs["lang"].
+    let mut block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    // Stamp a PluginMeta manually (simulating a block loaded via from_core).
+    block.plugin = Some(PluginMeta::code("rust"));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code {
+                lang: "python".into(),
+            },
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(&b.kind, BlockKind::Code { lang } if lang == "python"));
+    assert!(
+        matches!(&b.body, BlockBody::Code(t) if t == "fn main() {}"),
+        "code text must be preserved"
+    );
+    let meta = b
+        .plugin
+        .as_ref()
+        .expect("code block must carry PluginMeta");
+    assert_eq!(
+        meta.attrs.get("lang").and_then(Value::as_str),
+        Some("python"),
+        "plugin.attrs[\"lang\"] must mirror the new lang"
+    );
+}
+
+#[test]
+fn change_type_list_to_paragraph_converts_body_to_inline() {
+    let it = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("first item")],
+    };
+    let mut block = EditorBlock::list(false, vec![it]);
+    // Stamp list PluginMeta (matching what from_core produces).
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::Paragraph));
+    assert!(
+        matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first item"),
+        "body must be Inline with flattened list item text"
+    );
+    assert!(b.plugin.is_none(), "plugin must be cleared for Paragraph");
+}
+
+#[test]
+fn change_type_list_to_heading_converts_body_to_inline() {
+    let it0 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("first")],
+    };
+    let it1 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("second")],
+    };
+    let mut block = EditorBlock::list(true, vec![it0, it1]);
+    block.plugin = Some(PluginMeta::list(true));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(3),
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::Heading(3)));
+    assert!(
+        matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first\nsecond"),
+        "body must be Inline with joined list item texts"
+    );
+    assert!(b.plugin.is_none(), "plugin must be cleared for Heading");
+}
+
+#[test]
+fn change_type_list_to_code_converts_body_to_code() {
+    let it0 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("line1")],
+    };
+    let it1 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("line2")],
+    };
+    let mut block = EditorBlock::list(false, vec![it0, it1]);
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code {
+                lang: "bash".into(),
+            },
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(&b.kind, BlockKind::Code { lang } if lang == "bash"));
+    assert!(
+        matches!(&b.body, BlockBody::Code(t) if t == "line1\nline2"),
+        "code body must be joined list item texts"
+    );
+    let meta = b
+        .plugin
+        .as_ref()
+        .expect("code block must carry PluginMeta");
+    assert_eq!(meta.block_type_name, "code");
+}
+
+#[test]
+fn change_type_list_to_list_updates_ordered_and_mirrors_into_plugin() {
+    // Toggling ordered on an existing list must update BlockKind::List.ordered
+    // AND plugin.attrs["ordered"].
+    let it = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("item")],
+    };
+    let mut block = EditorBlock::list(false, vec![it]);
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: true },
+        },
+    );
+    let b = &doc.blocks[0];
+    assert!(matches!(b.kind, BlockKind::List { ordered: true }));
+    match &b.body {
+        BlockBody::List(items) => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].runs, vec![InlineRun::plain("item")]);
+        }
+        _ => panic!("body must be List"),
+    }
+    let meta = b
+        .plugin
+        .as_ref()
+        .expect("list block must carry PluginMeta");
+    assert_eq!(
+        meta.attrs.get("ordered").and_then(Value::as_bool),
+        Some(true),
+        "plugin.attrs[\"ordered\"] must mirror the new ordered flag"
+    );
 }
 
 #[test]
