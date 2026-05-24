@@ -3,7 +3,7 @@
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::sidebar::{new_doc_stub, unique_untitled_path};
-use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
+use floem::reactive::{RwSignal, SignalUpdate};
 use lopress_gui_host::{DocumentRef, WorkspaceSummary};
 use std::cell::RefCell;
 use std::path::PathBuf;

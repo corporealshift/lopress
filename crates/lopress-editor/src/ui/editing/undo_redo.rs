@@ -5,10 +5,10 @@
 /// from the stack, resolve the focus target from the pre-apply doc, apply
 /// the inverse action, and mark dirty.
 
-use crate::actions::{apply, BlockAction};
+use crate::actions::apply;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::ui::editing::focus::focus_after_apply;
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
 use std::rc::Rc;
 use std::time::Duration;
 

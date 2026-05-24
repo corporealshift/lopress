@@ -8,8 +8,8 @@
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use floem::action::debounce_action;
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use lopress_gui_host::{BuildStatus, DocumentRef, ServeStatus};
+use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
+use lopress_gui_host::{BuildStatus, ServeStatus};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -81,7 +81,7 @@ pub fn start_save_pipeline(
         let dc = dirty_counter;
         let ds = dirty_sig;
         let ses = save_error_sig;
-        let bs = build_status_sig;
+        let _bs = build_status_sig;
         debounce_action(dc, Duration::from_millis(500), move || {
             let doc = match current_doc.with_untracked(|d| d.clone()) {
                 Some(d) => d,

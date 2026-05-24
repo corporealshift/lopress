@@ -12,19 +12,14 @@ pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
 
-use floem::action::debounce_action;
 use floem::event::{Event, EventListener};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
 use floem::IntoView;
-use lopress_core::perf;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
-use crate::actions::{apply, BlockAction};
-use crate::ui::editing::focus;
 use crate::ui::editing::pane_key;
 use crate::ui::editing::new_doc;
 use crate::ui::editing::save_pipeline;
@@ -32,12 +27,11 @@ use crate::ui::editing::{action_sink, ctrl_wire, undo_redo};
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
-use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::dnd::DndState;
-use crate::ui::footer::{footer_view, start_build_status_poll, start_serve_status_poll};
+use crate::ui::footer::footer_view;
 use crate::ui::inspector::inspector_view;
-use crate::ui::sidebar::{new_doc_stub, sidebar_view, unique_untitled_path};
-use lopress_gui_host::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};
+use crate::ui::sidebar::sidebar_view;
+use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
 
 /// Maximum number of recent workspaces to retain.

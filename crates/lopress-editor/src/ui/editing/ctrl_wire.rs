@@ -8,12 +8,11 @@
 
 use crate::actions::BlockAction;
 use crate::ctrl::{CtrlActionResult, CtrlHandle};
-use crate::model::types::{BlockId, EditorDoc};
+use crate::model::types::EditorDoc;
 use crate::ui::blocks::inline_editor::ActionSink;
 use floem::ext_event::create_signal_from_channel;
-use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalWith};
 use std::path::PathBuf;
-use std::rc::Rc;
 
 /// Wire up the debug ctrl handle and action channel.
 ///
