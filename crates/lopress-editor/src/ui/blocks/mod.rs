@@ -124,9 +124,17 @@ pub fn block_view(
             Rc::clone(&on_redo),
         )
         .into_any(),
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
-            code::render_code(lang, text).into_any()
-        }
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
+            text,
+            lang,
+            block.id,
+            on_action.clone(),
+            focus_target,
+            focus_pub,
+            current_doc,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
+        ),
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
             opaque::render_opaque(type_name, value).into_any()
         }
