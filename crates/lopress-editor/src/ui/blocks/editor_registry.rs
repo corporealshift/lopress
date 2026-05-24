@@ -10,7 +10,7 @@
 
 use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use crate::ui::blocks::list;
+use crate::ui::blocks::{code_editor, list};
 use floem::reactive::RwSignal;
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
@@ -35,6 +35,7 @@ pub type EditorWidget = fn(&EditorContext) -> AnyView;
 pub fn editor_for(key: &str) -> Option<EditorWidget> {
     match key {
         "list" => Some(list_editor_widget),
+        "code" => Some(code_editor_widget),
         _ => None,
     }
 }
@@ -66,6 +67,33 @@ fn list_editor_widget(ctx: &EditorContext) -> AnyView {
     )
 }
 
+/// The `editor = "code"` widget. Extracts `body` from the block's
+/// `BlockBody::Code`, reads `lang` from the manifest-driven `PluginMeta.attrs`,
+/// and calls `code_editor::editable_code_view`.
+fn code_editor_widget(ctx: &EditorContext) -> AnyView {
+    let BlockBody::Code(body) = &ctx.block.body else {
+        return floem::views::empty().into_any();
+    };
+    let lang = ctx
+        .block
+        .plugin
+        .as_ref()
+        .and_then(|m| m.attrs.get("lang"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    code_editor::editable_code_view(
+        body,
+        lang,
+        ctx.block.id,
+        ctx.on_action.clone(),
+        ctx.focus_target,
+        ctx.focus_pub,
+        ctx.current_doc,
+        Rc::clone(&ctx.on_undo),
+        Rc::clone(&ctx.on_redo),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +101,7 @@ mod tests {
     #[test]
     fn editor_for_resolves_list_and_rejects_unknown() {
         assert!(editor_for("list").is_some());
+        assert!(editor_for("code").is_some());
         assert!(editor_for("paragraph").is_none());
         assert!(editor_for("bogus").is_none());
     }
