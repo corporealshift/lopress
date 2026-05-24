@@ -8,8 +8,9 @@
 use lopress_editor::actions::{apply, BlockAction};
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun,
+    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, PluginMeta,
 };
+use serde_json::{json, Value};
 
 fn doc_with(blocks: Vec<EditorBlock>) -> EditorDoc {
     EditorDoc {
@@ -737,4 +738,52 @@ mod inverse_symmetry {
             _ => panic!("expected List body"),
         }
     }
+}
+
+#[test]
+fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
+    // Applying EditAttrs on a code block must update plugin.attrs["lang"]
+    // AND mirror the new lang into BlockKind::Code.lang.
+    let mut block = EditorBlock::code("rust".into(), "fn main() {}".to_string());
+    // Stamp a PluginMeta manually (simulating a block loaded via from_core).
+    let mut attrs = serde_json::Map::new();
+    attrs.insert("lang".to_string(), serde_json::Value::String("rust".to_string()));
+    block.plugin = Some(PluginMeta {
+        block_type_name: "code".to_string(),
+        attrs: attrs.clone(),
+        attr_decls: vec![],
+        builtin: true,
+        editor: Some("code".to_string()),
+        native: Some("code".to_string()),
+    });
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+
+    // Apply the edit.
+    let mut new_attrs = serde_json::Map::new();
+    new_attrs.insert("lang".to_string(), serde_json::Value::String("python".to_string()));
+    apply(
+        &mut doc,
+        BlockAction::EditAttrs {
+            block_id: id,
+            new_attrs: new_attrs.clone(),
+        },
+    );
+
+    // Verify attrs updated.
+    let meta = doc.blocks[0].plugin.as_ref().expect("plugin meta must exist");
+    assert_eq!(
+        meta.attrs.get("lang").and_then(Value::as_str),
+        Some("python")
+    );
+
+    // Verify kind.lang mirrored.
+    assert!(matches!(
+        &doc.blocks[0].kind,
+        BlockKind::Code { lang } if lang == "python"
+    ));
+
+    // Verify to_core emits the new lang.
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].attrs, json!({ "lang": "python" }));
 }

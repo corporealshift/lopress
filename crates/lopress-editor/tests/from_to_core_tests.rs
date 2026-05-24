@@ -23,7 +23,7 @@ use lopress_editor::model::types::{
     BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use lopress_plugin::PluginRegistry;
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[test]
 fn paragraph_round_trips_via_document_equality() {
@@ -254,4 +254,112 @@ fn heading_levels_round_trip() {
     assert_eq!(levels, vec![1, 2, 3, 4, 5, 6]);
 
     assert_eq!(doc_to_core(&editor), core);
+}
+
+#[test]
+fn code_block_carries_plugin_meta_after_from_core() {
+    // A code block loaded from markdown must carry PluginMeta after the
+    // migration to the native plugin path — proving the registry lookup
+    // fires and native_code_from_core stamps the meta.
+    let src = "```rust\nfn main() {}\n```\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+
+    let block = &editor.blocks[0];
+    assert!(
+        block.plugin.is_some(),
+        "loaded code block must carry PluginMeta"
+    );
+    let meta = block.plugin.as_ref().unwrap();
+    assert_eq!(meta.block_type_name, "code");
+    assert_eq!(
+        meta.attrs.get("lang").and_then(Value::as_str),
+        Some("rust")
+    );
+    assert!(meta.builtin);
+    assert_eq!(meta.editor.as_deref(), Some("code"));
+    assert_eq!(meta.native.as_deref(), Some("code"));
+    assert!(matches!(&block.kind, BlockKind::Code { lang } if lang == "rust"));
+    assert!(matches!(&block.body, BlockBody::Code(t) if t == "fn main() {}\n"));
+}
+
+#[test]
+fn code_round_trip_via_native_path() {
+    // After the from_core→to_core round-trip, the document must equal the
+    // original — proving the native plugin path (not the removed hardcoded
+    // arm) handles both directions.
+    let src = "```python\nprint('hello')\n```\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back, core);
+}
+
+#[test]
+fn code_attrs_lang_mutation_serializes_correctly() {
+    // Mutating plugin.attrs["lang"] before to_core must change the output —
+    // proving native_block_to_core reads attrs (the source of truth), not
+    // kind.lang.
+    let src = "```rust\nfn main() {}\n```\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let mut editor = doc_from_core(&core, &registry);
+
+    // Mutate the lang in attrs.
+    if let Some(meta) = editor.blocks[0].plugin.as_mut() {
+        meta.attrs.insert("lang".to_string(), Value::String("python".to_string()));
+    }
+
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back.blocks[0].r#type, "code");
+    assert_eq!(
+        core_back.blocks[0].attrs,
+        json!({ "lang": "python" })
+    );
+    assert_eq!(
+        core_back.blocks[0].text.as_deref(),
+        Some("fn main() {}\n")
+    );
+}
+
+#[test]
+fn pluginless_code_block_round_trips() {
+    // Code blocks created at runtime via EditorBlock::code(...) have
+    // plugin: None and serialize via the bottom-half BlockKind::Code arm
+    // in block_to_core (retained as the fallback). This test proves the
+    // round-trip still works for such blocks.
+    let block = EditorBlock::code("go".into(), "package main\n".to_string());
+    let doc = EditorDoc {
+        front_matter: FrontMatter::default(),
+        blocks: vec![block],
+    };
+
+    // Verify plugin-less.
+    assert!(doc.blocks[0].plugin.is_none());
+
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "code");
+    assert_eq!(core.blocks[0].attrs, json!({ "lang": "go" }));
+    assert_eq!(core.blocks[0].text.as_deref(), Some("package main\n"));
+
+    // Round-trip back through from_core: without the registry the block
+    // falls through to the catch-all and becomes Opaque — that's expected.
+    // The important thing is to_core produces the right shape.
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor_back = doc_from_core(&core, &registry);
+    // The code block now has PluginMeta (loaded through the registry path).
+    assert!(
+        editor_back.blocks[0].plugin.is_some(),
+        "loaded code block must carry PluginMeta"
+    );
+    assert!(matches!(
+        &editor_back.blocks[0].kind,
+        BlockKind::Code { lang } if lang == "go"
+    ));
 }
