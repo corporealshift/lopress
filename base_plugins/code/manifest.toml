@@ -1,0 +1,13 @@
+# Built-in "base" plugin: the code block, dogfooding the plugin infrastructure.
+# Embedded at compile time via include_str! — see PluginRegistry::load_base_plugins.
+name    = "lopress-code"
+version = "0.1.0"
+
+[[blocks]]
+name    = "code"
+editor  = "code"
+native  = "code"
+builtin = true
+
+[blocks.attrs]
+lang = { type = "string", ui = "text" }
