@@ -23,7 +23,8 @@ use floem::views::editor::gutter::GutterClass;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
-use floem::views::{empty, h_stack, label, stack, Decorators};
+use floem::event::EventListener;
+use floem::views::{dyn_container, empty, h_stack, label, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
@@ -273,6 +274,9 @@ pub fn editable_code_view(
         commit.clone(),
     );
 
+    // Clone for the lang widget before mount_block_editor consumes on_action.
+    let lang_on_action = on_action.clone();
+
     // Mount the editor. slash_eligible: false — "/" does not open the slash
     // menu inside a code body.
     let editor_view = mount_block_editor(
@@ -290,16 +294,56 @@ pub fn editable_code_view(
         /* slash_eligible */ false,
     );
 
-    // Lang label in the top-right corner.
-    let lang_label_text = lang.to_string();
-    let lang_label = label(move || lang_label_text.clone()).style(|s| {
-        s.color(Color::rgb8(120, 120, 120))
-            .font_size(11.)
-            .padding_horiz(8.)
-            .padding_vert(2.)
-    });
+    // Lang label in the top-right corner — clickable to edit inline.
+    let lang_sig: RwSignal<String> = RwSignal::new(lang.to_string());
+    let editing_lang: RwSignal<bool> = RwSignal::new(false);
 
-    let header = h_stack((empty().style(|s| s.flex_grow(1.0)), lang_label));
+    let lang_widget = dyn_container(
+        move || editing_lang.get(),
+        move |is_editing| {
+            if is_editing {
+                let buf = RwSignal::new(lang_sig.get_untracked());
+                let on_action = lang_on_action.clone();
+                text_input(buf)
+                    .on_event_stop(EventListener::FocusLost, move |_| {
+                        let new_lang = buf.get_untracked();
+                        if new_lang != lang_sig.get_untracked() {
+                            let mut new_attrs = serde_json::Map::new();
+                            new_attrs.insert(
+                                "lang".to_string(),
+                                serde_json::Value::String(new_lang.clone()),
+                            );
+                            on_action(BlockAction::EditAttrs {
+                                block_id,
+                                new_attrs,
+                            });
+                            lang_sig.set(new_lang);
+                        }
+                        editing_lang.set(false);
+                    })
+                    .style(|s| {
+                        s.font_size(11.)
+                            .padding_horiz(8.)
+                            .padding_vert(2.)
+                            .min_width(60.)
+                    })
+                    .into_any()
+            } else {
+                label(move || lang_sig.get())
+                    .on_click_stop(move |_| editing_lang.set(true))
+                    .style(|s| {
+                        s.color(Color::rgb8(120, 120, 120))
+                            .font_size(11.)
+                            .padding_horiz(8.)
+                            .padding_vert(2.)
+                            .cursor(floem::style::CursorStyle::Pointer)
+                    })
+                    .into_any()
+            }
+        },
+    );
+
+    let header = h_stack((empty().style(|s| s.flex_grow(1.0)), lang_widget));
 
     // Body: wrap the mounted editor in a stack that hides the gutter and
     // applies monospace font + padding. Height tracks the visual line count.
