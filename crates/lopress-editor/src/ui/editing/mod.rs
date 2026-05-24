@@ -6,3 +6,4 @@
 
 pub mod focus;
 pub mod pane_key;
+pub mod new_doc;
