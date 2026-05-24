@@ -43,16 +43,6 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
             let text = b.text.as_deref().unwrap_or("");
             EditorBlock::heading(level, parse_inline(text))
         }
-        "code" => {
-            let lang = b
-                .attrs
-                .get("lang")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let text = b.text.clone().unwrap_or_default();
-            EditorBlock::code(lang, text)
-        }
         other => {
             if let Some((_plugin, decl)) = registry.native_block(other) {
                 native_block_from_core(b, decl)
@@ -153,12 +143,13 @@ fn list_items_from_block(b: &Block) -> Vec<ListItem> {
 }
 
 /// Build an `EditorBlock` for a block type that claims a native markdown
-/// construct. Dispatches on the editor key's implied body shape. `list` is
-/// the only native type migrated so far; any other native editor key is
-/// unreachable today and degrades to `Opaque` for a verbatim round-trip.
+/// construct. Dispatches on the editor key's implied body shape. `list` and
+/// `code` are the native types migrated so far; any other native editor key
+/// is unreachable today and degrades to `Opaque` for a verbatim round-trip.
 fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     match decl.editor.as_deref() {
         Some("list") => native_list_from_core(b, decl),
+        Some("code") => native_code_from_core(b, decl),
         _ => EditorBlock::opaque(
             b.r#type.clone(),
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
@@ -220,4 +211,31 @@ fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
         ),
     }
+}
+
+/// Native-code body parser. Parses `lang` from the block's attrs and `text`
+/// from `b.text`, then stamps `PluginMeta` so the block routes through the
+/// plugin view (when the editable widget lands in Stage 2) and serializes
+/// back via `to_core`'s native branch.
+fn native_code_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    let lang = b
+        .attrs
+        .get("lang")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let text = b.text.clone().unwrap_or_default();
+
+    let mut block = EditorBlock::code(lang.clone(), text);
+    let mut attrs = Map::new();
+    attrs.insert("lang".to_string(), Value::String(lang));
+    block.plugin = Some(PluginMeta {
+        block_type_name: decl.name.clone(),
+        attrs,
+        attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+        builtin: decl.builtin,
+        editor: decl.editor.clone(),
+        native: decl.native.clone(),
+    });
+    block
 }

@@ -63,7 +63,7 @@ fn block_to_core(b: &EditorBlock) -> Block {
 }
 
 /// Serialize a `native`-claiming plugin block to its core markdown form.
-/// Dispatches on the body shape; `list` is the only native type today.
+/// Dispatches on the body shape; `list` and `code` are the native types today.
 fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> Block {
     match &b.body {
         BlockBody::List(items) => {
@@ -90,6 +90,19 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                     })
                     .collect(),
                 text: None,
+            }
+        }
+        BlockBody::Code(text) => {
+            let lang = meta
+                .attrs
+                .get("lang")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            Block {
+                r#type: core_type.to_string(),
+                attrs: json!({ "lang": lang }),
+                children: vec![],
+                text: Some(text.clone()),
             }
         }
         // Other body shapes belong to native types not yet migrated; emit a
