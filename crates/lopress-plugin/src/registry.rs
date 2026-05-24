@@ -67,7 +67,10 @@ impl PluginRegistry {
     /// removed by the user. Call this before loading user plugins so base
     /// blocks win any name collision.
     pub fn load_base_plugins(&mut self) -> Result<(), PluginError> {
-        const BASE_MANIFESTS: &[&str] = &[include_str!("../../../base_plugins/list/manifest.toml")];
+        const BASE_MANIFESTS: &[&str] = &[
+            include_str!("../../../base_plugins/list/manifest.toml"),
+            include_str!("../../../base_plugins/code/manifest.toml"),
+        ];
         for src in BASE_MANIFESTS {
             let manifest = parse_manifest_str(src)?;
             self.insert(LoadedPlugin {
@@ -94,6 +97,20 @@ mod tests {
         assert!(decl.attrs.contains_key("ordered"));
         let (_, native_decl) = reg.native_block("list").expect("list claims native list");
         assert_eq!(native_decl.name, "list");
+    }
+
+    #[test]
+    fn load_base_plugins_registers_the_code_block() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_, decl) = reg.block("code").expect("code block registered");
+        assert!(decl.builtin);
+        assert_eq!(decl.editor.as_deref(), Some("code"));
+        assert_eq!(decl.native.as_deref(), Some("code"));
+        assert!(decl.attrs.contains_key("lang"));
+        let (_, native_decl) =
+            reg.native_block("code").expect("code claims native code");
+        assert_eq!(native_decl.name, "code");
     }
 
     #[test]
