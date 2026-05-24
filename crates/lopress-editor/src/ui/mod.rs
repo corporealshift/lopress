@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use crate::actions::{apply, BlockAction};
 use crate::ui::editing::focus;
+use crate::ui::editing::pane_key;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -365,16 +366,7 @@ fn editing_view(
     // the id list and trigger a rebuild. Block-kind changes (toolbar
     // P/H1/H2/Code/UL/OL buttons) do too — discriminant comparison covers
     // Heading(1) vs Heading(2), List{ordered:false} vs ordered:true, etc.
-    let pane_key = move || {
-        current_doc.with(|d| {
-            d.as_ref().map(|d| {
-                d.blocks
-                    .iter()
-                    .map(|b| (b.id, kind_tag(&b.kind), b.plugin.is_some()))
-                    .collect::<Vec<_>>()
-            })
-        })
-    };
+    let pane_key = pane_key::build_pane_key(current_doc);
     let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
         Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
             Some(doc) => editor_pane::editor_pane(
@@ -542,30 +534,6 @@ fn editing_view(
 enum StateTag {
     Welcome,
     Editing,
-}
-
-/// Compact equality tag for `BlockKind` used by the editor-pane rebuild key.
-/// `Eq` is fine; this is just a discriminator (Heading(1) vs Heading(2),
-/// List{ordered:false} vs ordered:true, etc.) so we trigger a pane rebuild
-/// when the toolbar's type buttons swap a block's kind.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum KindTag {
-    Paragraph,
-    Heading(u8),
-    Code,
-    List { ordered: bool },
-    Opaque,
-}
-
-fn kind_tag(k: &crate::model::types::BlockKind) -> KindTag {
-    use crate::model::types::BlockKind;
-    match k {
-        BlockKind::Paragraph => KindTag::Paragraph,
-        BlockKind::Heading(level) => KindTag::Heading(*level),
-        BlockKind::Code { .. } => KindTag::Code,
-        BlockKind::List { ordered } => KindTag::List { ordered: *ordered },
-        BlockKind::Opaque { .. } => KindTag::Opaque,
-    }
 }
 
 /// Whether a "+ New …" sidebar action targets the Posts or Pages directory.

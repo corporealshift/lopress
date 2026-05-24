@@ -5,3 +5,4 @@
 //! exports a free function that `editing_view` calls.
 
 pub mod focus;
+pub mod pane_key;
