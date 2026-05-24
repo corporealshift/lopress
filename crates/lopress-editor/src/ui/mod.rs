@@ -28,6 +28,7 @@ use crate::ui::editing::focus;
 use crate::ui::editing::pane_key;
 use crate::ui::editing::new_doc;
 use crate::ui::editing::save_pipeline;
+use crate::ui::editing::{action_sink, undo_redo};
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -208,137 +209,12 @@ fn editing_view(
     // ── Save pipeline ────────────────────────────────────────────────────
     let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
 
-    // Chokepoint: every block-tree mutation routes through here. Pre/post
-    // lookups derive the block to focus after structural actions.
-    let on_action_mark_dirty = Rc::clone(&save.mark_dirty);
-    let on_action: ActionSink = Rc::new(move |action: BlockAction| {
-        let _t = perf::span("editor.on_action");
-        if let BlockAction::OpenSlashMenu { block_id } = action {
-            slash_menu_open.set(Some(block_id));
-            return;
-        }
-        if slash_menu_open.get_untracked().is_some() {
-            slash_menu_open.set(None);
-        }
-
-        // Pre-focus must read pre-apply state (the block before the one
-        // being merged into its predecessor). Capture it before the apply
-        // mutates the doc.
-        let pre_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
-            (BlockAction::MergeWithPrev { block_id }, Some(d)) => d
-                .blocks
-                .iter()
-                .position(|b| b.id == *block_id)
-                .filter(|&i| i > 0)
-                .and_then(|i| d.blocks.get(i - 1))
-                .map(|b| b.id),
-            _ => None,
-        });
-
-        // Apply the action; capture the returned (canonical, inverse) pair
-        // and push it onto the undo stack. apply returns None for
-        // unrecordable cases (UI-only, no-op, or stage-1-unrecordable
-        // structural splits / first-block delete).
-        let action_for_apply = action.clone();
-        let mut recorded: Option<(BlockAction, BlockAction)> = None;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                recorded = apply(d, action_for_apply);
-            }
-        });
-        if let Some((canonical, inverse)) = recorded {
-            undo_stack.update(|s| s.push_after_apply(canonical, inverse));
-        }
-
-        let post_focus = current_doc.with_untracked(|maybe| match (&action, maybe) {
-            (BlockAction::Split { block_id, .. }, Some(d)) => d
-                .blocks
-                .iter()
-                .position(|b| b.id == *block_id)
-                .and_then(|i| d.blocks.get(i + 1))
-                .map(|b| b.id),
-            _ => None,
-        });
-        let change_type_focus = match &action {
-            BlockAction::ChangeType { block_id, .. } => Some(*block_id),
-            _ => None,
-        };
-        // A freshly inserted block (e.g. the empty-document "add block"
-        // button) should take focus so the caret lands in it immediately.
-        let insert_focus = match &action {
-            BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
-            _ => None,
-        };
-        if let Some(id) = pre_focus
-            .or(post_focus)
-            .or(change_type_focus)
-            .or(insert_focus)
-        {
-            floem::action::exec_after(Duration::from_millis(0), move |_| {
-                focus_target.set(Some(id));
-            });
-        }
-        on_action_mark_dirty();
-    });
-
-    let on_undo: Rc<dyn Fn()> = {
-        let mark_dirty = Rc::clone(&save.mark_dirty);
-        Rc::new(move || {
-            let mut popped = None;
-            undo_stack.update(|s| {
-                popped = s.pop_undo();
-            });
-            if let Some(action) = popped {
-                // Compute focus from the pre-apply doc — MergeWithPrev
-                // deletes its target, so focus must resolve to the
-                // surviving predecessor before the apply runs.
-                let focus_id =
-                    current_doc.with_untracked(|m| focus::focus_after_apply(m.as_ref(), &action));
-                let action_for_apply = action.clone();
-                current_doc.update(|maybe| {
-                    if let Some(d) = maybe {
-                        let _ = apply(d, action_for_apply);
-                    }
-                });
-                // No post-apply id surgery: Split / SplitListItem in stored
-                // entries carry new_block_id: Some(...), so re-applying them
-                // is id-stable without patching the redo entry.
-                if let Some(id) = focus_id {
-                    floem::action::exec_after(Duration::from_millis(0), move |_| {
-                        focus_target.set(Some(id));
-                    });
-                }
-                mark_dirty();
-            }
-        })
-    };
-
-    let on_redo: Rc<dyn Fn()> = {
-        let mark_dirty = Rc::clone(&save.mark_dirty);
-        Rc::new(move || {
-            let mut popped = None;
-            undo_stack.update(|s| {
-                popped = s.pop_redo();
-            });
-            if let Some(action) = popped {
-                let focus_id =
-                    current_doc.with_untracked(|m| focus::focus_after_apply(m.as_ref(), &action));
-                let action_for_apply = action.clone();
-                current_doc.update(|maybe| {
-                    if let Some(d) = maybe {
-                        let _ = apply(d, action_for_apply);
-                    }
-                });
-                // No post-apply id surgery for the same reason as on_undo.
-                if let Some(id) = focus_id {
-                    floem::action::exec_after(Duration::from_millis(0), move |_| {
-                        focus_target.set(Some(id));
-                    });
-                }
-                mark_dirty();
-            }
-        })
-    };
+    // ── Action sink + undo/redo closures ───────────────────────────────
+    let on_action = action_sink::build_action_sink(
+        current_doc, focus_target, slash_menu_open, undo_stack, Rc::clone(&save.mark_dirty),
+    );
+    let on_undo = undo_redo::build_undo(undo_stack, current_doc, focus_target, Rc::clone(&save.mark_dirty));
+    let on_redo = undo_redo::build_redo(undo_stack, current_doc, focus_target, Rc::clone(&save.mark_dirty));
 
     // Cloned for the debug ctrl wiring near the end of this function;
     // `on_action` itself is moved into the dyn_container view closure.
