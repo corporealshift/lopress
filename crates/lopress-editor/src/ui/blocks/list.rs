@@ -18,6 +18,7 @@ use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
     StructuralKey,
 };
+use crate::ui::editing::focus::defer_focus;
 use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
@@ -102,20 +103,6 @@ fn emit_list_commit(
 ) {
     let live = collect_items(handles);
     commit_live_if_changed(&live, list_block_id, on_action, current_doc);
-}
-
-/// Set `focus_target` on the next event-loop tick rather than immediately.
-///
-/// A list structural edit emits one or two `EditBlockBody` actions, each of
-/// which queues a `dyn_container` rebuild. If `focus_target` were set
-/// synchronously, the *first* rebuild's focus effect would consume it (it
-/// clears `focus_target` after focusing) and the *second* rebuild would
-/// have nothing to focus — the caret would vanish. Deferring the set until
-/// after the update phase means it lands once, after the final rebuild.
-fn defer_focus(focus_target: RwSignal<Option<BlockId>>, target_id: BlockId) {
-    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
-        focus_target.set(Some(target_id));
-    });
 }
 
 /// Build the editable list view for a list block.

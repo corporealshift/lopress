@@ -6,9 +6,6 @@
 //! and a code-specific structural-key callback. The view wraps the mounted
 //! editor in a frame with a corner lang label, monospace font, and height
 //! sized to the visual-line count.
-//!
-//! `defer_focus` is a private duplicate of `list.rs`'s version. It will be
-//! unified with the shared `focus::defer_focus` in Stage 3.
 
 use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun};
@@ -17,6 +14,7 @@ use crate::ui::blocks::inline_editor::{
     StructuralKey,
 };
 use crate::ui::blocks::paragraph::MONO_FAMILY;
+use crate::ui::editing::focus::defer_focus;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
@@ -225,16 +223,6 @@ fn make_code_structural_key(
             _ => None,
         }
     })
-}
-
-/// Set `focus_target` on the next event-loop tick rather than immediately.
-///
-/// Private duplicate of `list.rs`'s version. Will be unified with the shared
-/// `focus::defer_focus` in Stage 3.
-fn defer_focus(focus_target: RwSignal<Option<BlockId>>, target_id: BlockId) {
-    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
-        focus_target.set(Some(target_id));
-    });
 }
 
 /// Build the editable code block view.

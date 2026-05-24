@@ -2,6 +2,7 @@
 
 pub mod blocks;
 pub mod dnd;
+pub mod editing;
 pub mod editor_pane;
 pub mod footer;
 pub mod inspector;
@@ -23,6 +24,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::actions::{apply, BlockAction};
+use crate::ui::editing::focus;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -131,36 +133,6 @@ pub(crate) fn root_view(
         },
     )
     .style(|s| s.width_full().height_full())
-}
-
-/// The block a just-applied undo/redo action should restore focus to.
-fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
-    match action {
-        BlockAction::Split { block_id, .. }
-        | BlockAction::MergeWithPrev { block_id }
-        | BlockAction::ChangeType { block_id, .. }
-        | BlockAction::EditAttrs { block_id, .. }
-        | BlockAction::Move { block_id, .. } => Some(*block_id),
-        BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
-        BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
-        BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
-    }
-}
-
-/// Which block should hold focus after `action` is applied to `doc`
-/// (`doc` is the state *before* the apply). Most actions keep their target
-/// block alive, so `focus_block_for` suffices — but `MergeWithPrev` deletes
-/// its target (folds it into the predecessor), so focus must land on the
-/// surviving predecessor, looked up here while the target still exists.
-fn focus_after_apply(doc: Option<&EditorDoc>, action: &BlockAction) -> Option<BlockId> {
-    match action {
-        BlockAction::MergeWithPrev { block_id } => {
-            let d = doc?;
-            let i = d.blocks.iter().position(|b| b.id == *block_id)?;
-            i.checked_sub(1).and_then(|j| d.blocks.get(j)).map(|b| b.id)
-        }
-        _ => focus_block_for(action),
-    }
 }
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
@@ -329,7 +301,7 @@ fn editing_view(
                 // deletes its target, so focus must resolve to the
                 // surviving predecessor before the apply runs.
                 let focus_id =
-                    current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
+                    current_doc.with_untracked(|m| focus::focus_after_apply(m.as_ref(), &action));
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
@@ -358,7 +330,7 @@ fn editing_view(
             });
             if let Some(action) = popped {
                 let focus_id =
-                    current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
+                    current_doc.with_untracked(|m| focus::focus_after_apply(m.as_ref(), &action));
                 let action_for_apply = action.clone();
                 current_doc.update(|maybe| {
                     if let Some(d) = maybe {
