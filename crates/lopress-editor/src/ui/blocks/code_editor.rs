@@ -312,7 +312,7 @@ pub fn editable_code_view(
                 .font_size(13.)
                 .padding(10.)
                 .width_full()
-                .height(lines * line_height)
+                .height(lines * line_height + 20.)
         });
 
     // Outer frame: same styling as the read-only `code::render_code`.
