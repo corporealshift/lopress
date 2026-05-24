@@ -9,6 +9,7 @@ use crate::model::sync::canonicalize_body;
 use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
+use serde_json::Value;
 
 /// One discrete edit. Each variant maps to one function below.
 #[derive(Debug, Clone)]
@@ -133,6 +134,24 @@ fn apply_edit_attrs(
         .unwrap_or_default();
     if let Some(meta) = block.plugin.as_mut() {
         meta.attrs = new_attrs.clone();
+    }
+    // Mirror `lang` from attrs into BlockKind::Code.lang so that subsequent
+    // serialization (or any inspection of `block.kind` between edit and save)
+    // sees the canonical lang. The list block has no equivalent mirror because
+    // BlockKind::List carries `ordered`, which is already the source of truth
+    // for the serializer's native arm; for code, attrs is the source of truth,
+    // and kind.lang is the mirror.
+    if let BlockKind::Code { .. } = &block.kind {
+        if let Some(new_lang) = block
+            .plugin
+            .as_ref()
+            .and_then(|m| m.attrs.get("lang"))
+            .and_then(Value::as_str)
+        {
+            block.kind = BlockKind::Code {
+                lang: new_lang.to_string(),
+            };
+        }
     }
     Some((
         BlockAction::EditAttrs {
