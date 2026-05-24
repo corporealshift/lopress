@@ -202,6 +202,7 @@ pub fn mount_block_editor(
 
     let on_action_for_key = on_action;
     let commit_for_key = _commit;
+    let commit_on_focus_lost = Rc::clone(&commit_for_key);
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
@@ -273,6 +274,15 @@ pub fn mount_block_editor(
                     c.mode = CursorMode::Insert(Selection::caret(offset));
                 });
             });
+            // Flush any typed-but-uncommitted buffer back to the model.
+            // Required because Floem's `dyn_container` always rebuilds the
+            // editor pane when `current_doc.update()` fires (e.g. an
+            // EditAttrs on this block from the lang field), and that
+            // rebuild reconstructs each block editor from the model body.
+            // Without this commit, focusing away from a block discards
+            // any typed text that wasn't already committed via a
+            // structural key (Enter/Backspace/arrows).
+            commit_on_focus_lost();
         })
         .on_event_cont(EventListener::PointerDown, move |event| {
             if let Event::PointerDown(pe) = event {
