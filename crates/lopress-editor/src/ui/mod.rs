@@ -27,6 +27,7 @@ use crate::actions::{apply, BlockAction};
 use crate::ui::editing::focus;
 use crate::ui::editing::pane_key;
 use crate::ui::editing::new_doc;
+use crate::ui::editing::save_pipeline;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -204,23 +205,12 @@ fn editing_view(
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let dnd = DndState::new();
 
-    // ── Save-debounce signals ────────────────────────────────────────────
-    // `dirty_counter` bumps on every legitimate edit; `debounce_action`
-    // watches it and runs the save closure 500 ms after the last bump.
-    // `dirty_sig` / `save_error_sig` drive the footer's status display.
-    let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
-    let dirty_sig: RwSignal<bool> = RwSignal::new(false);
-    let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
-    let dirty_counter: RwSignal<u64> = RwSignal::new(0);
-
-    let mark_dirty: Rc<dyn Fn()> = Rc::new(move || {
-        dirty_sig.set(true);
-        dirty_counter.update(|n| *n = n.wrapping_add(1));
-    });
+    // ── Save pipeline ────────────────────────────────────────────────────
+    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
 
     // Chokepoint: every block-tree mutation routes through here. Pre/post
     // lookups derive the block to focus after structural actions.
-    let on_action_mark_dirty = Rc::clone(&mark_dirty);
+    let on_action_mark_dirty = Rc::clone(&save.mark_dirty);
     let on_action: ActionSink = Rc::new(move |action: BlockAction| {
         let _t = perf::span("editor.on_action");
         if let BlockAction::OpenSlashMenu { block_id } = action {
@@ -292,7 +282,7 @@ fn editing_view(
     });
 
     let on_undo: Rc<dyn Fn()> = {
-        let mark_dirty = Rc::clone(&mark_dirty);
+        let mark_dirty = Rc::clone(&save.mark_dirty);
         Rc::new(move || {
             let mut popped = None;
             undo_stack.update(|s| {
@@ -324,7 +314,7 @@ fn editing_view(
     };
 
     let on_redo: Rc<dyn Fn()> = {
-        let mark_dirty = Rc::clone(&mark_dirty);
+        let mark_dirty = Rc::clone(&save.mark_dirty);
         Rc::new(move || {
             let mut popped = None;
             undo_stack.update(|s| {
@@ -395,71 +385,14 @@ fn editing_view(
     })
     .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
-    let inspector = inspector_view(current_doc, current_path, Rc::clone(&mark_dirty));
-
-    let serve_status_sig: RwSignal<ServeStatus> = RwSignal::new(ServeStatus::Starting);
-
-    {
-        let editing_for_poll = Rc::clone(&editing);
-        let session_reader: Rc<dyn Fn() -> BuildStatus> = Rc::new(move || {
-            editing_for_poll
-                .borrow()
-                .as_ref()
-                .map(|s| s.session.build_status())
-                .unwrap_or(BuildStatus::Idle)
-        });
-        start_build_status_poll(session_reader, build_status_sig);
-    }
-
-    {
-        let editing_for_poll = Rc::clone(&editing);
-        let serve_reader: Rc<dyn Fn() -> ServeStatus> = Rc::new(move || {
-            editing_for_poll
-                .borrow()
-                .as_ref()
-                .map(|s| s.session.serve_status())
-                .unwrap_or(ServeStatus::Starting)
-        });
-        start_serve_status_poll(serve_reader, serve_status_sig);
-    }
-
-    // Debounced save+rebuild. `debounce_action` resets its internal timer on
-    // every counter bump and fires the closure 500 ms after the last bump.
-    {
-        let editing_for_save = Rc::clone(&editing);
-        debounce_action(dirty_counter, Duration::from_millis(500), move || {
-            let doc = match current_doc.with_untracked(|d| d.clone()) {
-                Some(d) => d,
-                None => return,
-            };
-            let result = {
-                let guard = editing_for_save.borrow();
-                match guard.as_ref() {
-                    Some(state) => state.save_doc(&doc),
-                    None => return,
-                }
-            };
-            match result {
-                Ok(()) => {
-                    dirty_sig.set(false);
-                    save_error_sig.set(None);
-                    if let Some(state) = editing_for_save.borrow().as_ref() {
-                        state.session.rebuild();
-                    }
-                }
-                Err(msg) => {
-                    save_error_sig.set(Some(msg));
-                }
-            }
-        });
-    }
+    let inspector = inspector_view(current_doc, current_path, Rc::clone(&save.mark_dirty));
 
     let footer = footer_view(
-        build_status_sig,
-        dirty_sig,
-        save_error_sig,
+        save.build_status_sig,
+        save.dirty_sig,
+        save.save_error_sig,
         current_doc,
-        serve_status_sig,
+        save.serve_status_sig,
     );
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
@@ -517,7 +450,7 @@ fn editing_view(
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
             // Force-flush any unsaved edits before the window dies.
-            if !dirty_sig.get_untracked() {
+            if !save.dirty_sig.get_untracked() {
                 return;
             }
             let doc = match current_doc.with_untracked(|d| d.clone()) {
