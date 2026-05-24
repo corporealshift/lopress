@@ -14,7 +14,7 @@
 use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use crate::ui::blocks::{code, heading, list, paragraph};
+use crate::ui::blocks::{code_editor, heading, list, paragraph};
 use crate::ui::dnd::DndState;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -349,7 +349,18 @@ fn render_body(
         )
         .into_any(),
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
-            code::render_code(lang, text).into_any()
+            code_editor::editable_code_view(
+                text,
+                lang,
+                block_id,
+                on_action,
+                focus_target,
+                focus_pub,
+                current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
+            )
+            .into_any()
         }
         (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
             items,
