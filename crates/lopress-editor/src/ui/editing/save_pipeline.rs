@@ -81,7 +81,6 @@ pub fn start_save_pipeline(
         let dc = dirty_counter;
         let ds = dirty_sig;
         let ses = save_error_sig;
-        let _bs = build_status_sig;
         debounce_action(dc, Duration::from_millis(500), move || {
             let doc = match current_doc.with_untracked(|d| d.clone()) {
                 Some(d) => d,
