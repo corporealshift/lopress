@@ -10,3 +10,5 @@ pub mod new_doc;
 pub mod save_pipeline;
 pub mod action_sink;
 pub mod undo_redo;
+#[cfg(debug_assertions)]
+pub mod ctrl_wire;

@@ -28,7 +28,7 @@ use crate::ui::editing::focus;
 use crate::ui::editing::pane_key;
 use crate::ui::editing::new_doc;
 use crate::ui::editing::save_pipeline;
-use crate::ui::editing::{action_sink, undo_redo};
+use crate::ui::editing::{action_sink, ctrl_wire, undo_redo};
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -274,46 +274,7 @@ fn editing_view(
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
     #[cfg(debug_assertions)]
     if let Some((ctrl_handle, ctrl_action_rx)) = ctrl {
-        use floem::ext_event::create_signal_from_channel;
-        use floem::reactive::create_effect;
-
-        let snap = ctrl_handle.snapshot.clone();
-        create_effect(move |_| {
-            let json = current_doc.with(|maybe| {
-                crate::ctrl::serialize_state(
-                    maybe.as_ref(),
-                    current_path.get_untracked().as_deref(),
-                )
-            });
-            *snap.lock().unwrap_or_else(|e| e.into_inner()) = json;
-        });
-
-        let action_read = create_signal_from_channel(ctrl_action_rx);
-        create_effect(move |_| {
-            if let Some((ctrl_action, reply_tx)) = action_read.get() {
-                let block_id = ctrl_action.block_id();
-                // Translate against the current doc. into_block_action's
-                // only failure mode is an unknown block id; a missing doc
-                // is detected separately so the caller gets a precise
-                // result. on_action MUST run outside with_untracked — it
-                // calls current_doc.update() and would re-borrow the signal.
-                let translated: Result<BlockAction, crate::ctrl::CtrlActionResult> = current_doc
-                    .with_untracked(|maybe| match maybe.as_ref() {
-                        None => Err(crate::ctrl::CtrlActionResult::NoDocument),
-                        Some(doc) => ctrl_action
-                            .into_block_action(doc)
-                            .ok_or(crate::ctrl::CtrlActionResult::BlockNotFound { block_id }),
-                    });
-                let result = match translated {
-                    Ok(action) => {
-                        on_action_for_ctrl(action);
-                        crate::ctrl::CtrlActionResult::Dispatched
-                    }
-                    Err(failure) => failure,
-                };
-                let _ = reply_tx.send(result);
-            }
-        });
+        ctrl_wire::wire_ctrl(ctrl_handle, ctrl_action_rx, current_doc, current_path, on_action_for_ctrl);
     }
 
     // `min_height(0)` lets these flex items shrink below their content height
