@@ -1035,3 +1035,195 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].attrs, json!({ "lang": "python" }));
 }
+
+// ============================================================================
+// ChangeType round-trip tests — confirm body shape survives to_core.
+// ============================================================================
+
+#[test]
+fn change_type_code_to_paragraph_round_trips() {
+    let block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "paragraph");
+    assert_eq!(core.blocks[0].text.as_deref(), Some("fn main() {}"));
+}
+
+#[test]
+fn change_type_code_to_heading_round_trips() {
+    let block = EditorBlock::code("python".into(), "print('hello')".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(2),
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "heading");
+    assert_eq!(core.blocks[0].text.as_deref(), Some("print('hello')"));
+}
+
+#[test]
+fn change_type_code_to_list_round_trips() {
+    let block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: false },
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "list");
+    assert_eq!(core.blocks[0].children.len(), 1);
+    assert_eq!(
+        core.blocks[0].children[0].children[0].text.as_deref(),
+        Some("fn main() {}")
+    );
+}
+
+#[test]
+fn change_type_code_to_code_new_lang_round_trips() {
+    let mut block = EditorBlock::code("rust".into(), "fn main() {}".into());
+    block.plugin = Some(PluginMeta::code("rust"));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code {
+                lang: "python".into(),
+            },
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "code");
+    assert_eq!(
+        core.blocks[0].attrs,
+        json!({ "lang": "python" })
+    );
+    assert_eq!(
+        core.blocks[0].text.as_deref(),
+        Some("fn main() {}")
+    );
+}
+
+#[test]
+fn change_type_list_to_paragraph_round_trips() {
+    let it = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("first item")],
+    };
+    let mut block = EditorBlock::list(false, vec![it]);
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "paragraph");
+    assert_eq!(core.blocks[0].text.as_deref(), Some("first item"));
+}
+
+#[test]
+fn change_type_list_to_heading_round_trips() {
+    let it0 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("first")],
+    };
+    let it1 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("second")],
+    };
+    let mut block = EditorBlock::list(true, vec![it0, it1]);
+    block.plugin = Some(PluginMeta::list(true));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(3),
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "heading");
+    assert_eq!(core.blocks[0].text.as_deref(), Some("first\nsecond"));
+}
+
+#[test]
+fn change_type_list_to_code_round_trips() {
+    let it0 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("line1")],
+    };
+    let it1 = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("line2")],
+    };
+    let mut block = EditorBlock::list(false, vec![it0, it1]);
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code {
+                lang: "bash".into(),
+            },
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "code");
+    assert_eq!(
+        core.blocks[0].attrs,
+        json!({ "lang": "bash" })
+    );
+    assert_eq!(core.blocks[0].text.as_deref(), Some("line1\nline2"));
+}
+
+#[test]
+fn change_type_list_to_list_ordered_toggle_round_trips() {
+    let it = ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain("item")],
+    };
+    let mut block = EditorBlock::list(false, vec![it]);
+    block.plugin = Some(PluginMeta::list(false));
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: true },
+        },
+    );
+    let core = doc_to_core(&doc);
+    assert_eq!(core.blocks[0].r#type, "list");
+    assert_eq!(core.blocks[0].attrs, json!({ "ordered": true }));
+    assert_eq!(
+        core.blocks[0].children[0].children[0].text.as_deref(),
+        Some("item")
+    );
+}
