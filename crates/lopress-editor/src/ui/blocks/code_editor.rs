@@ -24,7 +24,7 @@ use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
 use floem::event::EventListener;
-use floem::views::{dyn_container, empty, h_stack, label, stack, text_input, Decorators};
+use floem::views::{empty, h_stack, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
@@ -294,56 +294,50 @@ pub fn editable_code_view(
         /* slash_eligible */ false,
     );
 
-    // Lang label in the top-right corner — clickable to edit inline.
+    // Lang input in the top-right corner. An always-on `text_input` bound
+    // to `lang_sig`; styled to look like a plain corner label until focused,
+    // when it grows a subtle border. On FocusLost we commit the new lang
+    // via `EditAttrs` (deferred so the click that moves focus has fully
+    // settled before any signal mutation lands).
     let lang_sig: RwSignal<String> = RwSignal::new(lang.to_string());
-    let editing_lang: RwSignal<bool> = RwSignal::new(false);
+    let lang_committed: RwSignal<String> = RwSignal::new(lang.to_string());
+    let lang_input = text_input(lang_sig)
+        .on_event_stop(EventListener::FocusLost, move |_| {
+            let on_action = lang_on_action.clone();
+            floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
+                let new_lang = lang_sig.get_untracked();
+                if new_lang != lang_committed.get_untracked() {
+                    let mut new_attrs = serde_json::Map::new();
+                    new_attrs.insert(
+                        "lang".to_string(),
+                        serde_json::Value::String(new_lang.clone()),
+                    );
+                    on_action(BlockAction::EditAttrs {
+                        block_id,
+                        new_attrs,
+                    });
+                    lang_committed.set(new_lang);
+                }
+            });
+        })
+        .style(|s| {
+            s.color(Color::rgb8(120, 120, 120))
+                .font_size(11.)
+                .padding_horiz(6.)
+                .padding_vert(0.)
+                .min_width(60.)
+                .border(0.0)
+                .background(Color::TRANSPARENT)
+                .cursor(floem::style::CursorStyle::Text)
+                .hover(|s| s.background(Color::rgb8(235, 235, 235)))
+                .focus(|s| {
+                    s.border(1.0)
+                        .border_color(Color::rgb8(180, 180, 180))
+                        .background(Color::WHITE)
+                })
+        });
 
-    let lang_widget = dyn_container(
-        move || editing_lang.get(),
-        move |is_editing| {
-            if is_editing {
-                let buf = RwSignal::new(lang_sig.get_untracked());
-                let on_action = lang_on_action.clone();
-                text_input(buf)
-                    .on_event_stop(EventListener::FocusLost, move |_| {
-                        let new_lang = buf.get_untracked();
-                        if new_lang != lang_sig.get_untracked() {
-                            let mut new_attrs = serde_json::Map::new();
-                            new_attrs.insert(
-                                "lang".to_string(),
-                                serde_json::Value::String(new_lang.clone()),
-                            );
-                            on_action(BlockAction::EditAttrs {
-                                block_id,
-                                new_attrs,
-                            });
-                            lang_sig.set(new_lang);
-                        }
-                        editing_lang.set(false);
-                    })
-                    .style(|s| {
-                        s.font_size(11.)
-                            .padding_horiz(8.)
-                            .padding_vert(2.)
-                            .min_width(60.)
-                    })
-                    .into_any()
-            } else {
-                label(move || lang_sig.get())
-                    .on_click_stop(move |_| editing_lang.set(true))
-                    .style(|s| {
-                        s.color(Color::rgb8(120, 120, 120))
-                            .font_size(11.)
-                            .padding_horiz(8.)
-                            .padding_vert(2.)
-                            .cursor(floem::style::CursorStyle::Pointer)
-                    })
-                    .into_any()
-            }
-        },
-    );
-
-    let header = h_stack((empty().style(|s| s.flex_grow(1.0)), lang_widget));
+    let header = h_stack((empty().style(|s| s.flex_grow(1.0)), lang_input));
 
     // Body: wrap the mounted editor in a stack that hides the gutter and
     // applies monospace font + padding. Height tracks the visual line count.
