@@ -5,7 +5,6 @@
 //! The signals are created here from the block's initial runs; later tasks
 //! will fold edits back into the document model.
 
-pub mod code;
 pub mod code_editor;
 pub mod editor_registry;
 pub mod heading;
