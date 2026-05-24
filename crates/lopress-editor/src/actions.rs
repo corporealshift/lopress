@@ -431,14 +431,56 @@ fn apply_change_type(
     let block = doc.blocks.get_mut(idx)?;
     let old_kind = block.kind.clone();
     match (&new_kind, &block.body) {
-        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_)) => {
+        // ── To Inline (Paragraph / Heading) ──────────────────────────────
+        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_runs)) => {
+            // Body shape already matches — just update kind.
             block.kind = new_kind.clone();
         }
+        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Code(text)) => {
+            block.kind = new_kind.clone();
+            block.body = BlockBody::Inline(vec![InlineRun::plain(text.clone())]);
+            block.plugin = None;
+        }
+        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::List(items)) => {
+            block.kind = new_kind.clone();
+            // Flatten: join each item's runs text with '\n', wrap in a single
+            // InlineRun.  Loses item boundaries — same lossy direction as the
+            // inverse (undo restores via snapshot).
+            let text: String = items
+                .iter()
+                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            block.body = BlockBody::Inline(vec![InlineRun::plain(text)]);
+            block.plugin = None;
+        }
+
+        // ── To Code ──────────────────────────────────────────────────────
         (BlockKind::Code { lang }, BlockBody::Inline(runs)) => {
             let text: String = runs.iter().map(|r| r.text.clone()).collect();
             block.kind = BlockKind::Code { lang: lang.clone() };
             block.body = BlockBody::Code(text);
+            block.plugin = Some(PluginMeta::code(lang));
         }
+        (BlockKind::Code { lang }, BlockBody::Code(_text)) => {
+            // Only lang changes — update kind.lang and mirror into plugin.
+            block.kind = BlockKind::Code { lang: lang.clone() };
+            if let Some(meta) = block.plugin.as_mut() {
+                meta.attrs.insert("lang".into(), Value::String(lang.clone()));
+            }
+        }
+        (BlockKind::Code { lang }, BlockBody::List(items)) => {
+            let text: String = items
+                .iter()
+                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            block.kind = BlockKind::Code { lang: lang.clone() };
+            block.body = BlockBody::Code(text);
+            block.plugin = Some(PluginMeta::code(lang));
+        }
+
+        // ── To List ──────────────────────────────────────────────────────
         (BlockKind::List { ordered }, BlockBody::Inline(runs)) => {
             block.kind = BlockKind::List { ordered: *ordered };
             block.body = BlockBody::List(vec![ListItem {
@@ -450,6 +492,28 @@ fn apply_change_type(
             // loaded lists; do the same for one created here.
             block.plugin = Some(PluginMeta::list(*ordered));
         }
+        (BlockKind::List { ordered }, BlockBody::Code(text)) => {
+            // Split text on '\n', one ListItem per line.
+            let items: Vec<ListItem> = text
+                .split('\n')
+                .map(|line| ListItem {
+                    id: BlockId::new(),
+                    runs: vec![InlineRun::plain(line.to_string())],
+                })
+                .collect();
+            block.kind = BlockKind::List { ordered: *ordered };
+            block.body = BlockBody::List(items);
+            block.plugin = Some(PluginMeta::list(*ordered));
+        }
+        (BlockKind::List { ordered }, BlockBody::List(_items)) => {
+            // Items already match — just update the ordered flag and mirror.
+            block.kind = BlockKind::List { ordered: *ordered };
+            if let Some(meta) = block.plugin.as_mut() {
+                meta.attrs.insert("ordered".into(), Value::Bool(*ordered));
+            }
+        }
+
+        // ── Opaque / fallback ────────────────────────────────────────────
         _ => {
             block.kind = new_kind.clone();
         }
