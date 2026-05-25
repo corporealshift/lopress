@@ -274,10 +274,7 @@ fn code_block_carries_plugin_meta_after_from_core() {
     );
     let meta = block.plugin.as_ref().unwrap();
     assert_eq!(meta.block_type_name, "code");
-    assert_eq!(
-        meta.attrs.get("lang").and_then(Value::as_str),
-        Some("rust")
-    );
+    assert_eq!(meta.attrs.get("lang").and_then(Value::as_str), Some("rust"));
     assert!(meta.builtin);
     assert_eq!(meta.editor.as_deref(), Some("code"));
     assert_eq!(meta.native.as_deref(), Some("code"));
@@ -312,19 +309,14 @@ fn code_attrs_lang_mutation_serializes_correctly() {
 
     // Mutate the lang in attrs.
     if let Some(meta) = editor.blocks[0].plugin.as_mut() {
-        meta.attrs.insert("lang".to_string(), Value::String("python".to_string()));
+        meta.attrs
+            .insert("lang".to_string(), Value::String("python".to_string()));
     }
 
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back.blocks[0].r#type, "code");
-    assert_eq!(
-        core_back.blocks[0].attrs,
-        json!({ "lang": "python" })
-    );
-    assert_eq!(
-        core_back.blocks[0].text.as_deref(),
-        Some("fn main() {}\n")
-    );
+    assert_eq!(core_back.blocks[0].attrs, json!({ "lang": "python" }));
+    assert_eq!(core_back.blocks[0].text.as_deref(), Some("fn main() {}\n"));
 }
 
 #[test]

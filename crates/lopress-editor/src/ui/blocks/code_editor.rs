@@ -15,6 +15,7 @@ use crate::ui::blocks::inline_editor::{
 };
 use crate::ui::blocks::paragraph::MONO_FAMILY;
 use crate::ui::editing::focus::defer_focus;
+use floem::event::EventListener;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
@@ -23,7 +24,6 @@ use floem::views::editor::gutter::GutterClass;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
-use floem::event::EventListener;
 use floem::views::{empty, h_stack, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
@@ -257,12 +257,7 @@ pub fn editable_code_view(
     // Code-specific commit closure: read buffer, compare with model, emit
     // EditBlockBody { Code } on diff.
     let commit_on_action = on_action.clone();
-    let commit = make_code_commit(
-        block_id,
-        editor_sig,
-        commit_on_action,
-        current_doc,
-    );
+    let commit = make_code_commit(block_id, editor_sig, commit_on_action, current_doc);
 
     // Code-specific structural-key callback.
     let structural_key = make_code_structural_key(
@@ -342,16 +337,15 @@ pub fn editable_code_view(
     // Body: wrap the mounted editor in a stack that hides the gutter and
     // applies monospace font + padding. Height tracks the visual line count.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
-    let body_view = stack((editor_view,))
-        .style(move |s| {
-            let lines = text_sig.get().split('\n').count().max(1) as f32;
-            s.class(GutterClass, |s| s.hide())
-                .font_family(MONO_FAMILY.to_string())
-                .font_size(13.)
-                .padding(10.)
-                .width_full()
-                .height(lines * line_height + 20.)
-        });
+    let body_view = stack((editor_view,)).style(move |s| {
+        let lines = text_sig.get().split('\n').count().max(1) as f32;
+        s.class(GutterClass, |s| s.hide())
+            .font_family(MONO_FAMILY.to_string())
+            .font_size(13.)
+            .padding(10.)
+            .width_full()
+            .height(lines * line_height + 20.)
+    });
 
     // Outer frame: same styling as the read-only `code::render_code`.
     stack((header, body_view))

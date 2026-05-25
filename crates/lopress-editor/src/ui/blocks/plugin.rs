@@ -348,20 +348,18 @@ fn render_body(
             on_redo,
         )
         .into_any(),
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
-            code_editor::editable_code_view(
-                text,
-                lang,
-                block_id,
-                on_action,
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
-            )
-            .into_any()
-        }
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
+            text,
+            lang,
+            block_id,
+            on_action,
+            focus_target,
+            focus_pub,
+            current_doc,
+            Rc::clone(&on_undo),
+            Rc::clone(&on_redo),
+        )
+        .into_any(),
         (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
             items,
             block_id,

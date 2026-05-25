@@ -31,10 +31,7 @@ pub fn wire_ctrl(
     let snap = ctrl_handle.snapshot.clone();
     create_effect(move |_| {
         let json = current_doc.with(|maybe| {
-            crate::ctrl::serialize_state(
-                maybe.as_ref(),
-                current_path.get_untracked().as_deref(),
-            )
+            crate::ctrl::serialize_state(maybe.as_ref(), current_path.get_untracked().as_deref())
         });
         *snap.lock().unwrap_or_else(|e| e.into_inner()) = json;
     });
@@ -48,8 +45,8 @@ pub fn wire_ctrl(
             // is detected separately so the caller gets a precise
             // result. on_action MUST run outside with_untracked — it
             // calls current_doc.update() and would re-borrow the signal.
-            let translated: Result<BlockAction, CtrlActionResult> = current_doc
-                .with_untracked(|maybe| match maybe.as_ref() {
+            let translated: Result<BlockAction, CtrlActionResult> =
+                current_doc.with_untracked(|maybe| match maybe.as_ref() {
                     None => Err(CtrlActionResult::NoDocument),
                     Some(doc) => ctrl_action
                         .into_block_action(doc)

@@ -18,8 +18,8 @@ use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
     StructuralKey,
 };
-use crate::ui::editing::focus::defer_focus;
 use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
+use crate::ui::editing::focus::defer_focus;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;

@@ -93,11 +93,7 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
             }
         }
         BlockBody::Code(text) => {
-            let lang = meta
-                .attrs
-                .get("lang")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let lang = meta.attrs.get("lang").and_then(Value::as_str).unwrap_or("");
             Block {
                 r#type: core_type.to_string(),
                 attrs: json!({ "lang": lang }),

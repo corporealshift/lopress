@@ -808,7 +808,11 @@ fn change_type_code_to_list_converts_body_to_list() {
         BlockBody::List(items) => {
             assert_eq!(items.len(), 1);
             assert_eq!(
-                items[0].runs.iter().map(|r| r.text.as_str()).collect::<String>(),
+                items[0]
+                    .runs
+                    .iter()
+                    .map(|r| r.text.as_str())
+                    .collect::<String>(),
                 "fn main() {}"
             );
         }
@@ -845,10 +849,7 @@ fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
         matches!(&b.body, BlockBody::Code(t) if t == "fn main() {}"),
         "code text must be preserved"
     );
-    let meta = b
-        .plugin
-        .as_ref()
-        .expect("code block must carry PluginMeta");
+    let meta = b.plugin.as_ref().expect("code block must carry PluginMeta");
     assert_eq!(
         meta.attrs.get("lang").and_then(Value::as_str),
         Some("python"),
@@ -942,10 +943,7 @@ fn change_type_list_to_code_converts_body_to_code() {
         matches!(&b.body, BlockBody::Code(t) if t == "line1\nline2"),
         "code body must be joined list item texts"
     );
-    let meta = b
-        .plugin
-        .as_ref()
-        .expect("code block must carry PluginMeta");
+    let meta = b.plugin.as_ref().expect("code block must carry PluginMeta");
     assert_eq!(meta.block_type_name, "code");
 }
 
@@ -977,10 +975,7 @@ fn change_type_list_to_list_updates_ordered_and_mirrors_into_plugin() {
         }
         _ => panic!("body must be List"),
     }
-    let meta = b
-        .plugin
-        .as_ref()
-        .expect("list block must carry PluginMeta");
+    let meta = b.plugin.as_ref().expect("list block must carry PluginMeta");
     assert_eq!(
         meta.attrs.get("ordered").and_then(Value::as_bool),
         Some(true),
@@ -995,7 +990,10 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
     let mut block = EditorBlock::code("rust".into(), "fn main() {}".to_string());
     // Stamp a PluginMeta manually (simulating a block loaded via from_core).
     let mut attrs = serde_json::Map::new();
-    attrs.insert("lang".to_string(), serde_json::Value::String("rust".to_string()));
+    attrs.insert(
+        "lang".to_string(),
+        serde_json::Value::String("rust".to_string()),
+    );
     block.plugin = Some(PluginMeta {
         block_type_name: "code".to_string(),
         attrs: attrs.clone(),
@@ -1009,7 +1007,10 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
 
     // Apply the edit.
     let mut new_attrs = serde_json::Map::new();
-    new_attrs.insert("lang".to_string(), serde_json::Value::String("python".to_string()));
+    new_attrs.insert(
+        "lang".to_string(),
+        serde_json::Value::String("python".to_string()),
+    );
     apply(
         &mut doc,
         BlockAction::EditAttrs {
@@ -1019,7 +1020,10 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
     );
 
     // Verify attrs updated.
-    let meta = doc.blocks[0].plugin.as_ref().expect("plugin meta must exist");
+    let meta = doc.blocks[0]
+        .plugin
+        .as_ref()
+        .expect("plugin meta must exist");
     assert_eq!(
         meta.attrs.get("lang").and_then(Value::as_str),
         Some("python")
@@ -1112,14 +1116,8 @@ fn change_type_code_to_code_new_lang_round_trips() {
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
-    assert_eq!(
-        core.blocks[0].attrs,
-        json!({ "lang": "python" })
-    );
-    assert_eq!(
-        core.blocks[0].text.as_deref(),
-        Some("fn main() {}")
-    );
+    assert_eq!(core.blocks[0].attrs, json!({ "lang": "python" }));
+    assert_eq!(core.blocks[0].text.as_deref(), Some("fn main() {}"));
 }
 
 #[test]
@@ -1195,10 +1193,7 @@ fn change_type_list_to_code_round_trips() {
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
-    assert_eq!(
-        core.blocks[0].attrs,
-        json!({ "lang": "bash" })
-    );
+    assert_eq!(core.blocks[0].attrs, json!({ "lang": "bash" }));
     assert_eq!(core.blocks[0].text.as_deref(), Some("line1\nline2"));
 }
 

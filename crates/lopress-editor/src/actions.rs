@@ -466,7 +466,8 @@ fn apply_change_type(
             // Only lang changes — update kind.lang and mirror into plugin.
             block.kind = BlockKind::Code { lang: lang.clone() };
             if let Some(meta) = block.plugin.as_mut() {
-                meta.attrs.insert("lang".into(), Value::String(lang.clone()));
+                meta.attrs
+                    .insert("lang".into(), Value::String(lang.clone()));
             }
         }
         (BlockKind::Code { lang }, BlockBody::List(items)) => {

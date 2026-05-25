@@ -108,8 +108,7 @@ mod tests {
         assert_eq!(decl.editor.as_deref(), Some("code"));
         assert_eq!(decl.native.as_deref(), Some("code"));
         assert!(decl.attrs.contains_key("lang"));
-        let (_, native_decl) =
-            reg.native_block("code").expect("code claims native code");
+        let (_, native_decl) = reg.native_block("code").expect("code claims native code");
         assert_eq!(native_decl.name, "code");
     }
 

@@ -4,11 +4,11 @@
 //! `save_pipeline`, `new_doc`, `ctrl_wire`) owns a responsibility and
 //! exports a free function that `editing_view` calls.
 
-pub mod focus;
-pub mod pane_key;
-pub mod new_doc;
-pub mod save_pipeline;
 pub mod action_sink;
-pub mod undo_redo;
 #[cfg(debug_assertions)]
 pub mod ctrl_wire;
+pub mod focus;
+pub mod new_doc;
+pub mod pane_key;
+pub mod save_pipeline;
+pub mod undo_redo;

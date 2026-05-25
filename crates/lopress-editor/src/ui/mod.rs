@@ -20,14 +20,14 @@ use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::ui::editing::pane_key;
-use crate::ui::editing::new_doc;
-use crate::ui::editing::save_pipeline;
-use crate::ui::editing::{action_sink, ctrl_wire, undo_redo};
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::dnd::DndState;
+use crate::ui::editing::new_doc;
+use crate::ui::editing::pane_key;
+use crate::ui::editing::save_pipeline;
+use crate::ui::editing::{action_sink, ctrl_wire, undo_redo};
 use crate::ui::footer::footer_view;
 use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::sidebar_view;
@@ -205,10 +205,24 @@ fn editing_view(
 
     // ── Action sink + undo/redo closures ───────────────────────────────
     let on_action = action_sink::build_action_sink(
-        current_doc, focus_target, slash_menu_open, undo_stack, Rc::clone(&save.mark_dirty),
+        current_doc,
+        focus_target,
+        slash_menu_open,
+        undo_stack,
+        Rc::clone(&save.mark_dirty),
     );
-    let on_undo = undo_redo::build_undo(undo_stack, current_doc, focus_target, Rc::clone(&save.mark_dirty));
-    let on_redo = undo_redo::build_redo(undo_stack, current_doc, focus_target, Rc::clone(&save.mark_dirty));
+    let on_undo = undo_redo::build_undo(
+        undo_stack,
+        current_doc,
+        focus_target,
+        Rc::clone(&save.mark_dirty),
+    );
+    let on_redo = undo_redo::build_redo(
+        undo_stack,
+        current_doc,
+        focus_target,
+        Rc::clone(&save.mark_dirty),
+    );
 
     // Cloned for the debug ctrl wiring near the end of this function;
     // `on_action` itself is moved into the dyn_container view closure.
@@ -268,7 +282,13 @@ fn editing_view(
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
     #[cfg(debug_assertions)]
     if let Some((ctrl_handle, ctrl_action_rx)) = ctrl {
-        ctrl_wire::wire_ctrl(ctrl_handle, ctrl_action_rx, current_doc, current_path, on_action_for_ctrl);
+        ctrl_wire::wire_ctrl(
+            ctrl_handle,
+            ctrl_action_rx,
+            current_doc,
+            current_path,
+            on_action_for_ctrl,
+        );
     }
 
     // `min_height(0)` lets these flex items shrink below their content height
@@ -300,5 +320,3 @@ enum StateTag {
     Welcome,
     Editing,
 }
-
-

@@ -41,7 +41,9 @@ pub fn kind_tag(k: &BlockKind) -> KindTag {
 /// Returns a closure that, when called, produces the current block id
 /// sequence + per-block kind tag + plugin presence. This closure is passed
 /// as the key function to `dyn_container`.
-pub fn build_pane_key(current_doc: RwSignal<Option<EditorDoc>>) -> impl Fn() -> Option<Vec<(BlockId, KindTag, bool)>> + Copy {
+pub fn build_pane_key(
+    current_doc: RwSignal<Option<EditorDoc>>,
+) -> impl Fn() -> Option<Vec<(BlockId, KindTag, bool)>> + Copy {
     move || {
         current_doc.with(|d| {
             d.as_ref().map(|d| {

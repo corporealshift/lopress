@@ -4,7 +4,6 @@
 /// closure. The closures share the same focus-computation pattern: pop
 /// from the stack, resolve the focus target from the pre-apply doc, apply
 /// the inverse action, and mark dirty.
-
 use crate::actions::apply;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::ui::editing::focus::focus_after_apply;
@@ -33,8 +32,7 @@ pub fn build_undo(
             // Compute focus from the pre-apply doc — MergeWithPrev
             // deletes its target, so focus must resolve to the
             // surviving predecessor before the apply runs.
-            let focus_id =
-                current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
+            let focus_id = current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
             let action_for_apply = action.clone();
             current_doc.update(|maybe| {
                 if let Some(d) = maybe {
@@ -71,8 +69,7 @@ pub fn build_redo(
             popped = s.pop_redo();
         });
         if let Some(action) = popped {
-            let focus_id =
-                current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
+            let focus_id = current_doc.with_untracked(|m| focus_after_apply(m.as_ref(), &action));
             let action_for_apply = action.clone();
             current_doc.update(|maybe| {
                 if let Some(d) = maybe {
