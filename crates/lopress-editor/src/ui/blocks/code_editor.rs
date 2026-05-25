@@ -136,26 +136,26 @@ fn make_code_structural_key(
             // Enter (no mods) — insert newline, no block split.
             KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) if !shift => {
                 editor_sig.get_untracked().receive_char("\n");
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // Shift+Enter — same as Enter (soft line break).
             KeyInput::Keyboard(Key::Named(NamedKey::Enter), _) if shift => {
                 editor_sig.get_untracked().receive_char("\n");
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // Shift+Tab — consume, no-op (defer outdent to a follow-up).
             // Must come BEFORE the unguarded Tab arm so the shift guard
             // is evaluated first.
             KeyInput::Keyboard(Key::Named(NamedKey::Tab), _) if shift => {
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // Tab — insert two spaces.
             KeyInput::Keyboard(Key::Named(NamedKey::Tab), _) => {
                 editor_sig.get_untracked().receive_char("  ");
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // Backspace.
@@ -174,7 +174,7 @@ fn make_code_structural_key(
                     return Some(CommandExecuted::Yes);
                 }
                 // Non-empty body at offset 0 — keyboard isolation.
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // ArrowUp at first vline — jump to previous block.
@@ -195,7 +195,7 @@ fn make_code_structural_key(
                 if let Some(id) = prev_id {
                     defer_focus(focus_target, id);
                 }
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // ArrowDown at last vline — jump to next block.
@@ -217,7 +217,7 @@ fn make_code_structural_key(
                 if let Some(id) = next_id {
                     defer_focus(focus_target, id);
                 }
-                return Some(CommandExecuted::Yes);
+                Some(CommandExecuted::Yes)
             }
 
             // Anything else — fall through to the shared default handler.
@@ -336,9 +336,12 @@ pub fn editable_code_view(
 
     // Body: wrap the mounted editor in a stack that hides the gutter and
     // applies monospace font + padding. Height tracks the visual line count.
-    let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
+    let line_height = f64::from(editor_sig.with_untracked(|ed| ed.line_height(0)));
     let body_view = stack((editor_view,)).style(move |s| {
-        let lines = text_sig.get().split('\n').count().max(1) as f32;
+        // Line count is bounded by viewport height / line_height — never exceeds
+        // ~10 k lines on screen, well within f64's 53-bit mantissa.
+        #[allow(clippy::cast_precision_loss)]
+        let lines = text_sig.get().split('\n').count().max(1) as f64;
         s.class(GutterClass, |s| s.hide())
             .font_family(MONO_FAMILY.to_string())
             .font_size(13.)

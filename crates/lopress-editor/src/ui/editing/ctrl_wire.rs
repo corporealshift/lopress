@@ -21,7 +21,7 @@ use std::path::PathBuf;
 ///    snapshot on every signal change.
 /// 2. Listens on `ctrl_action_rx` for ctrl actions, translates them
 ///    to `BlockAction`, and dispatches via `on_action`.
-pub fn wire_ctrl(
+pub(crate) fn wire_ctrl(
     ctrl_handle: CtrlHandle,
     ctrl_action_rx: crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
     current_doc: RwSignal<Option<EditorDoc>>,
