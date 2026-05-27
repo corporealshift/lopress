@@ -123,3 +123,20 @@ regressions.
 `unsafe_code` is forbidden at the workspace level. If a task genuinely needs
 `unsafe`, raise it before writing the code — the answer is usually to reach
 for a crate that has already vetted the unsafe block.
+
+## Cargo verification runs automatically on Stop
+
+`.claude/settings.json` registers a Stop hook that runs `cargo fmt --all`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and
+`cargo test --workspace` in the background whenever the agent stops with any
+`.rs` file dirty in `git status`. No-`.rs`-change turns skip silently.
+
+The hook is `asyncRewake: true`, so if any of the three fail, the agent is
+re-woken with the output prefixed by *"Stop-hook cargo verification failed."*
+That isn't a separate task or a user message — it's the verification gate.
+Fix the reported issues and stop again; on a clean pass the hook is invisible.
+
+`cargo fmt --all` runs in apply mode, so formatting changes appear in your
+working tree without explicit edits. Stage them with the rest of the change.
+Don't try to disable or skip the hook to "ship faster" — if clippy or tests
+are failing, that's the signal the work isn't done.

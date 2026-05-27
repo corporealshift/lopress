@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "asyncRewake": true,
+            "timeout": 600,
+            "statusMessage": "Running cargo fmt / clippy / test...",
+            "rewakeSummary": "cargo checks failed",
+            "rewakeMessage": "Stop-hook cargo verification failed. Fix the issues below before ending the turn.",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || exit 0; git status --porcelain 2>/dev/null | grep -qE '\\.rs$' || exit 0; failed=0; echo '=== cargo fmt ==='; cargo fmt --all || failed=1; echo '=== cargo clippy ==='; cargo clippy --workspace --all-targets -- -D warnings || failed=1; echo '=== cargo test ==='; cargo test --workspace || failed=1; exit $((failed * 2))"
+          }
+        ]
+      }
+    ]
+  }
+}
