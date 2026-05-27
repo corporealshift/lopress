@@ -24,10 +24,12 @@ use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::dnd::DndState;
+#[cfg(debug_assertions)]
+use crate::ui::editing::ctrl_wire;
 use crate::ui::editing::new_doc;
 use crate::ui::editing::pane_key;
 use crate::ui::editing::save_pipeline;
-use crate::ui::editing::{action_sink, ctrl_wire, undo_redo};
+use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
 use crate::ui::inspector::inspector_view;
 use crate::ui::sidebar::sidebar_view;
