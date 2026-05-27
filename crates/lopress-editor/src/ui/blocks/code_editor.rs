@@ -148,9 +148,7 @@ fn make_code_structural_key(
             // Shift+Tab — consume, no-op (defer outdent to a follow-up).
             // Must come BEFORE the unguarded Tab arm so the shift guard
             // is evaluated first.
-            KeyInput::Keyboard(Key::Named(NamedKey::Tab), _) if shift => {
-                Some(CommandExecuted::Yes)
-            }
+            KeyInput::Keyboard(Key::Named(NamedKey::Tab), _) if shift => Some(CommandExecuted::Yes),
 
             // Tab — insert two spaces.
             KeyInput::Keyboard(Key::Named(NamedKey::Tab), _) => {
