@@ -1422,7 +1422,7 @@ dependencies = [
  "im-rc",
  "image",
  "indexmap",
- "lapce-xi-rope 0.3.2",
+ "lapce-xi-rope",
  "parking_lot",
  "peniko",
  "raw-window-handle 0.6.2",
@@ -1447,7 +1447,7 @@ checksum = "6e3e40a1b06cb878f44a172f51d506d56bae76e7b2b977ba7a40a9217b6c33e3"
 dependencies = [
  "bitflags 2.11.1",
  "itertools 0.12.1",
- "lapce-xi-rope 0.3.2",
+ "lapce-xi-rope",
  "memchr",
  "strum",
  "strum_macros",
@@ -2566,18 +2566,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lapce-xi-rope"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc91b8df26aaa2700656a7c1a5b0aeb587aca512a44618974f79673dbe793ba"
-dependencies = [
- "bytecount",
- "memchr",
- "regex",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "lazy-bytes-cast"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2777,7 +2765,7 @@ dependencies = [
  "directories",
  "floem",
  "image",
- "lapce-xi-rope 0.4.0",
+ "lapce-xi-rope",
  "lopress-build",
  "lopress-core",
  "lopress-gui-host",
