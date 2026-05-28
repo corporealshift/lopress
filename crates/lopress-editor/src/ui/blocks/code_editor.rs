@@ -339,7 +339,7 @@ pub fn editable_code_view(
         // Line count is bounded by viewport height / line_height — never exceeds
         // ~10 k lines on screen, well within f64's 53-bit mantissa.
         #[allow(clippy::cast_precision_loss)]
-        let lines = text_sig.get().split('\n').count().max(1) as f64;
+        let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f64;
         s.class(GutterClass, |s| s.hide())
             .font_family(MONO_FAMILY.to_string())
             .font_size(13.)

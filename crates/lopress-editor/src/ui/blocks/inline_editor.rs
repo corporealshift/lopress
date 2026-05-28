@@ -18,6 +18,7 @@ use floem::views::editor::Editor;
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 use floem::View;
+use lapce_xi_rope::Rope;
 
 use std::rc::Rc;
 
@@ -55,7 +56,7 @@ pub struct BlockEditorState {
     /// style toggle.
     pub style_rev: RwSignal<u64>,
     /// Full block text, kept in sync with the rope via `TextDocument::add_on_update`.
-    pub text_sig: RwSignal<String>,
+    pub text_sig: RwSignal<Rope>,
     /// When `Some`, the link-URL input row is shown; holds the editing buffer
     /// seed. `None` hides the row.
     pub link_url_sig: RwSignal<Option<String>>,
@@ -77,7 +78,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 
     let spans_sig = cx.create_rw_signal(spans);
     let style_rev = cx.create_rw_signal(0u64);
-    let text_sig = cx.create_rw_signal(initial_text.clone());
+    let text_sig = cx.create_rw_signal(rope.clone());
     let link_url_sig = cx.create_rw_signal(None::<String>);
 
     let styling = Rc::new(InlineRunStyling {
@@ -94,8 +95,8 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
     let text_sig_for_update = text_sig;
     doc.add_on_update(move |upd| {
         if let Some(ed) = upd.editor {
-            let new_text = String::from(&ed.doc().text());
-            text_sig_for_update.set(new_text);
+            let new_rope = ed.doc().text(); // cheap Arc bump, no full-text copy
+            text_sig_for_update.set(new_rope);
         }
     });
 

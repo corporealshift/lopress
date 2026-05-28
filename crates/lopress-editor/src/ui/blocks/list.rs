@@ -258,7 +258,7 @@ fn list_item_editor(
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
     stack((view,))
         .style(move |s| {
-            let lines = text_sig.get().split('\n').count().max(1) as f32;
+            let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f32;
             s.class(GutterClass, |s| s.hide())
                 .width_full()
                 .height(lines * line_height)

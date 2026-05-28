@@ -5,6 +5,7 @@ use floem::views::editor::id::EditorId;
 use floem::views::editor::layout::TextLayoutLine;
 use floem::views::editor::text::Styling;
 use floem::views::editor::EditorStyle;
+use lapce_xi_rope::Rope;
 
 use crate::model::style_span::StyleSpan;
 
@@ -22,7 +23,7 @@ const MONO_FAMILY: &str = "monospace";
 /// text-layout cache and re-run `apply_attr_styles`.
 pub struct InlineRunStyling {
     pub spans: RwSignal<Vec<StyleSpan>>,
-    pub text: RwSignal<String>,
+    pub text: RwSignal<Rope>,
     pub rev: RwSignal<u64>,
     pub font_size: usize,
 }
@@ -45,10 +46,13 @@ impl Styling for InlineRunStyling {
         attrs: &mut AttrsList,
     ) {
         let spans = self.spans.get_untracked();
-        let full_text = self.text.get_untracked();
+        let rope = self.text.get_untracked();
+        let full_text = String::from(&rope);
 
         // Compute byte offset of the start of logical line `line`.
         // Logical lines are delimited by '\n' (inserted by Shift+Enter).
+        // Identical arithmetic to the pre-change code — only the source of
+        // `full_text` changed (rope instead of an owned-String signal).
         let line_start: usize = full_text
             .split('\n')
             .take(line)
@@ -105,5 +109,40 @@ impl InlineRunStyling {
     /// Call this after mutating `spans`.
     pub fn bump_rev(&self) {
         self.rev.update(|r| *r = r.wrapping_add(1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mirrors the `line_start` / `line_end` arithmetic in `apply_attr_styles`,
+    /// sourced from a rope. Asserts it matches hand-computed `split('\n')` offsets.
+    fn line_bounds(rope: &Rope, line: usize) -> (usize, usize) {
+        let full_text = String::from(rope);
+        let line_start: usize = full_text
+            .split('\n')
+            .take(line)
+            .map(|l| l.len() + 1)
+            .sum();
+        let line_len: usize = full_text.split('\n').nth(line).map(str::len).unwrap_or(0);
+        (line_start, line_start + line_len)
+    }
+
+    #[test]
+    fn rope_line_bounds_match_split_newline() {
+        // "hello\nworld\nfoo" — three logical lines.
+        let rope = Rope::from("hello\nworld\nfoo");
+        assert_eq!(line_bounds(&rope, 0), (0, 5)); // "hello"
+        assert_eq!(line_bounds(&rope, 1), (6, 11)); // "world"
+        assert_eq!(line_bounds(&rope, 2), (12, 15)); // "foo"
+    }
+
+    #[test]
+    fn rope_roundtrips_to_same_string() {
+        // The per-keystroke win relies on the rope faithfully holding the text;
+        // confirm String::from(&rope) round-trips.
+        let s = "abc\ndef";
+        assert_eq!(String::from(&Rope::from(s)), s);
     }
 }
