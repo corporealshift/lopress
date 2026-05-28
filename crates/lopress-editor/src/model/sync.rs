@@ -102,44 +102,87 @@ pub fn canonicalize_body(body: &BlockBody) -> BlockBody {
 /// This function is designed for per-block usage. Calling it on a large rope
 /// (document-level) allocates O(N) in document size.
 pub fn rope_and_spans_to_runs(rope: &Rope, spans: &[StyleSpan]) -> Vec<InlineRun> {
-    let full = String::from(rope);
-    let rope_len = full.len();
+    let rope_len = rope.len();
     let mut runs: Vec<InlineRun> = Vec::with_capacity(spans.len() + 1);
 
     let mut cursor = 0usize;
     for span in spans {
-        // Emit a plain run for any gap between the previous span's end and
-        // this span's start (typed text that the spans don't cover yet).
+        // Gap run before this span.
         if span.start > cursor {
-            if let Some(text) = full.get(cursor..span.start) {
-                if !text.is_empty() {
-                    runs.push(InlineRun::plain(text.to_owned()));
-                }
+            let gap_end = span.start.min(rope_len);
+            let text = rope.slice_to_cow(cursor..gap_end);
+            if !text.is_empty() {
+                runs.push(InlineRun::plain(text.into_owned()));
             }
         }
-        // Clip the span to the rope's actual extent.
+        // The span itself.
         let span_end = span.end.min(rope_len);
         let span_start = span.start.min(span_end);
-        if let Some(text) = full.get(span_start..span_end) {
-            if !text.is_empty() {
-                runs.push(InlineRun {
-                    text: text.to_owned(),
-                    bold: span.bold,
-                    italic: span.italic,
-                    code: span.code,
-                    link: span.link.clone(),
-                });
-            }
+        let text = rope.slice_to_cow(span_start..span_end);
+        if !text.is_empty() {
+            runs.push(InlineRun {
+                text: text.into_owned(),
+                bold: span.bold,
+                italic: span.italic,
+                code: span.code,
+                link: span.link.clone(),
+            });
         }
         cursor = span_end.max(cursor);
     }
-    // Trailing uncovered tail (typed text appended past the last span).
+    // Trailing uncovered tail.
     if cursor < rope_len {
-        if let Some(text) = full.get(cursor..rope_len) {
-            if !text.is_empty() {
-                runs.push(InlineRun::plain(text.to_owned()));
-            }
+        let text = rope.slice_to_cow(cursor..rope_len);
+        if !text.is_empty() {
+            runs.push(InlineRun::plain(text.into_owned()));
         }
     }
     canonicalize_runs(&runs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rope_and_spans_to_runs_matches_string_roundtrip() {
+        // Build a rope with known content: "Hello **bold** world"
+        // Positions: H=0 e=1 l=2 l=3 o=4 ' '=5 *=6 *=7 b=8 o=9 l=10 d=11 *=12 *=13 ' '=14 ...
+        let rope = Rope::from("Hello **bold** world");
+        let spans = vec![StyleSpan {
+            start: 6,
+            end: 14,
+            bold: true,
+            italic: false,
+            code: false,
+            link: None,
+        }];
+        let runs = rope_and_spans_to_runs(&rope, &spans);
+
+        // The output should have three runs: "Hello " (plain), "**bold**" (styled), " world" (plain).
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].text, "Hello ");
+        assert!(!runs[0].bold);
+        assert_eq!(runs[1].text, "**bold**");
+        assert!(runs[1].bold);
+        assert_eq!(runs[2].text, " world");
+        assert!(!runs[2].bold);
+    }
+
+    #[test]
+    fn rope_and_spans_to_runs_empty_spans_returns_plain() {
+        let rope = Rope::from("plain text");
+        let runs = rope_and_spans_to_runs(&rope, &[]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "plain text");
+    }
+
+    #[test]
+    fn rope_and_spans_to_runs_multiline_preserves_newlines() {
+        let rope = Rope::from("line1\nline2\nline3");
+        let spans = vec![];
+        let runs = rope_and_spans_to_runs(&rope, &spans);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "line1\nline2\nline3");
+    }
 }

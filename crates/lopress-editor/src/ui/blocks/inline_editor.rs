@@ -18,7 +18,7 @@ use floem::views::editor::Editor;
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 use floem::View;
-use lapce_xi_rope::Rope;
+
 use std::rc::Rc;
 
 /// Caret color for inline block editors — dark enough to contrast on white.
@@ -658,11 +658,8 @@ fn commit_from_editor(
     block_id: BlockId,
     on_action: &ActionSink,
 ) {
-    // ed.doc().text() returns xi-rope 0.3.2 Rope; convert via String to the
-    // workspace's 0.4.0 Rope that rope_and_spans_to_runs expects.
-    let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+    let rope = editor_sig.with_untracked(|ed| ed.doc().text());
     let spans = spans_sig.get_untracked();
-    let rope = Rope::from(text.as_str());
     let new_runs = rope_and_spans_to_runs(&rope, &spans);
     on_action(BlockAction::EditBlockBody {
         block_id,
