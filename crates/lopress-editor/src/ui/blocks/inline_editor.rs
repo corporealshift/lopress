@@ -310,7 +310,9 @@ pub fn mount_block_editor(
             let Ok(keypress) = KeyPress::try_from(key_event) else {
                 return;
             };
-            combined_key(&keypress, key_event.modifiers);
+            if combined_key(&keypress, key_event.modifiers) == CommandExecuted::Yes {
+                return;
+            }
 
             // Character insertion: Floem's editor_view does not insert text
             // itself — editor_content used to. Replicate that, with SHIFT/ALTGR
