@@ -129,10 +129,7 @@ fn undo_stack_push_and_pop() {
 
     let undo_action = stack.pop_undo().unwrap();
     match undo_action {
-        BlockAction::EditBlockBody {
-            ref new_body,
-            ..
-        } => {
+        BlockAction::EditBlockBody { ref new_body, .. } => {
             if let BlockBody::Inline(runs) = new_body.as_ref() {
                 assert_eq!(*runs, vec![InlineRun::plain("text")]);
             } else {
@@ -162,10 +159,7 @@ fn undo_stack_redo_available_after_undo() {
     stack.pop_undo().unwrap();
     let redo_action = stack.pop_redo().unwrap();
     match redo_action {
-        BlockAction::EditBlockBody {
-            ref new_body,
-            ..
-        } => {
+        BlockAction::EditBlockBody { ref new_body, .. } => {
             if let BlockBody::Inline(runs) = new_body.as_ref() {
                 assert_eq!(*runs, vec![InlineRun::plain("edited")]);
             } else {
@@ -209,10 +203,7 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     // First undo: restores the intermediate "ab" state.
     let undo1 = stack.pop_undo().unwrap();
     match &undo1 {
-        BlockAction::EditBlockBody {
-            ref new_body,
-            ..
-        } => {
+        BlockAction::EditBlockBody { ref new_body, .. } => {
             if let BlockBody::Inline(runs) = new_body.as_ref() {
                 assert_eq!(runs, &vec![InlineRun::plain("ab")]);
             } else {
@@ -226,10 +217,7 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     // Second undo: restores the original "a".
     let undo2 = stack.pop_undo().unwrap();
     match undo2 {
-        BlockAction::EditBlockBody {
-            ref new_body,
-            ..
-        } => {
+        BlockAction::EditBlockBody { ref new_body, .. } => {
             if let BlockBody::Inline(runs) = new_body.as_ref() {
                 assert_eq!(*runs, vec![InlineRun::plain("a")]);
             } else {

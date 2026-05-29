@@ -610,7 +610,9 @@ mod inverse_symmetry {
     fn edit_block_body_inline_round_trip() {
         let (id, block) = paragraph_with_id("hello world");
         let mut doc = doc_with(vec![block]);
-        let new_body = Box::new(BlockBody::Inline(vec![InlineRun::plain("entirely different content")]));
+        let new_body = Box::new(BlockBody::Inline(vec![InlineRun::plain(
+            "entirely different content",
+        )]));
         assert_round_trip(
             &mut doc,
             BlockAction::EditBlockBody {
@@ -624,9 +626,7 @@ mod inverse_symmetry {
     fn edit_block_body_code_round_trip() {
         let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
         block.body = BlockBody::Code("fn main() {}".to_string());
-        block.kind = BlockKind::Code {
-            lang: Rc::from(""),
-        };
+        block.kind = BlockKind::Code { lang: Rc::from("") };
         let id = block.id;
         let mut doc = doc_with(vec![block]);
         let new_body = Box::new(BlockBody::Code("fn other() { /* ... */ }".to_string()));
@@ -680,9 +680,7 @@ mod inverse_symmetry {
     fn split_code_is_now_recordable() {
         let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
         block.body = BlockBody::Code("foobar".to_string());
-        block.kind = BlockKind::Code {
-            lang: Rc::from(""),
-        };
+        block.kind = BlockKind::Code { lang: Rc::from("") };
         let id = block.id;
         let mut doc = doc_with(vec![block]);
         assert_round_trip(

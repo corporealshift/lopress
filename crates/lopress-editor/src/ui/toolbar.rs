@@ -18,7 +18,6 @@ use floem::event::{Event, EventListener};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use std::rc::Rc;
 use floem::text::Weight;
 use floem::views::editor::Editor;
 use floem::views::{
@@ -26,6 +25,7 @@ use floem::views::{
     Decorators,
 };
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Pre-snapshotted view of the toolbar's inputs at one moment in time.
 /// Currently only used by tests / external callers — the live toolbar reads
@@ -58,12 +58,7 @@ pub fn block_toolbar_for(
         ("H1", BlockKind::Heading(1)),
         ("H2", BlockKind::Heading(2)),
         ("H3", BlockKind::Heading(3)),
-        (
-            "Code",
-            BlockKind::Code {
-                lang: Rc::from(""),
-            },
-        ),
+        ("Code", BlockKind::Code { lang: Rc::from("") }),
         ("UL", BlockKind::List { ordered: false }),
         ("OL", BlockKind::List { ordered: true }),
         ("H4", BlockKind::Heading(4)),

@@ -96,7 +96,9 @@ impl CtrlAction {
                 new_kind: match new_kind {
                     CtrlBlockKind::Paragraph => BlockKind::Paragraph,
                     CtrlBlockKind::Heading { level } => BlockKind::Heading(level.clamp(1, 6)),
-                    CtrlBlockKind::Code { lang } => BlockKind::Code { lang: Rc::from(lang) },
+                    CtrlBlockKind::Code { lang } => BlockKind::Code {
+                        lang: Rc::from(lang),
+                    },
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
                 },
             },
@@ -552,15 +554,13 @@ mod tests {
             BlockAction::EditBlockBody {
                 block_id,
                 ref new_body,
-            } => {
-                match new_body.as_ref() {
-                    BlockBody::Inline(runs) => {
-                        assert_eq!(block_id.raw(), raw);
-                        assert_eq!(*runs, vec![InlineRun::plain("new")]);
-                    }
-                    other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+            } => match new_body.as_ref() {
+                BlockBody::Inline(runs) => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(*runs, vec![InlineRun::plain("new")]);
                 }
-            }
+                other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+            },
             other => panic!("unexpected action: {other:?}"),
         }
     }
@@ -576,15 +576,13 @@ mod tests {
             BlockAction::EditBlockBody {
                 block_id,
                 ref new_body,
-            } => {
-                match new_body.as_ref() {
-                    BlockBody::Code(text) => {
-                        assert_eq!(block_id.raw(), raw);
-                        assert_eq!(text, "fn main() {}");
-                    }
-                    other => panic!("expected EditBlockBody/Code, got {other:?}"),
+            } => match new_body.as_ref() {
+                BlockBody::Code(text) => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(text, "fn main() {}");
                 }
-            }
+                other => panic!("expected EditBlockBody/Code, got {other:?}"),
+            },
             other => panic!("unexpected action: {other:?}"),
         }
     }

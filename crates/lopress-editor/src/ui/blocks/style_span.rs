@@ -120,11 +120,7 @@ mod tests {
     /// sourced from a rope. Asserts it matches hand-computed `split('\n')` offsets.
     fn line_bounds(rope: &Rope, line: usize) -> (usize, usize) {
         let full_text = String::from(rope);
-        let line_start: usize = full_text
-            .split('\n')
-            .take(line)
-            .map(|l| l.len() + 1)
-            .sum();
+        let line_start: usize = full_text.split('\n').take(line).map(|l| l.len() + 1).sum();
         let line_len: usize = full_text.split('\n').nth(line).map(str::len).unwrap_or(0);
         (line_start, line_start + line_len)
     }

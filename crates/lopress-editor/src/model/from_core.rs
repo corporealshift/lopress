@@ -92,7 +92,12 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
                 .and_then(|c| c.attrs.get("lang").and_then(serde_json::Value::as_str))
                 .unwrap_or("");
             let text = inner.and_then(|c| c.text.clone()).unwrap_or_default();
-            (BlockKind::Code { lang: Rc::from(lang) }, BlockBody::Code(text))
+            (
+                BlockKind::Code {
+                    lang: Rc::from(lang),
+                },
+                BlockBody::Code(text),
+            )
         }
         "list" => {
             let ordered = inner
