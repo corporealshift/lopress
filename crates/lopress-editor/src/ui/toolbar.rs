@@ -89,7 +89,7 @@ pub fn block_toolbar_for(
                     let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                     on_action_for_btn(BlockAction::EditBlockBody {
                         block_id,
-                        new_body: crate::model::types::BlockBody::Inline(new_runs),
+                        new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                     });
                 }
                 on_action_for_btn(BlockAction::ChangeType {
@@ -173,7 +173,7 @@ pub fn block_toolbar_for(
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_commit(BlockAction::EditBlockBody {
                             block_id,
-                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                         });
                         url_sig.set(None);
                     }
@@ -197,7 +197,7 @@ pub fn block_toolbar_for(
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_remove(BlockAction::EditBlockBody {
                             block_id,
-                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                         });
                     }
                 };

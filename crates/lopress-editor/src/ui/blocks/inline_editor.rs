@@ -664,7 +664,7 @@ fn commit_from_editor(
     let new_runs = rope_and_spans_to_runs(&rope, &spans);
     on_action(BlockAction::EditBlockBody {
         block_id,
-        new_body: crate::model::types::BlockBody::Inline(new_runs),
+        new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
     });
 }
 

@@ -85,7 +85,7 @@ fn commit_live_if_changed(
     if differs {
         on_action(BlockAction::EditBlockBody {
             block_id: list_block_id,
-            new_body: BlockBody::List(live.to_vec()),
+            new_body: Box::new(BlockBody::List(live.to_vec())),
         });
     }
 }
@@ -360,7 +360,7 @@ fn make_list_structural_key(
                 split_item_at_with_id(&mut split, item_index, byte_offset, Some(new_item_id));
                 on_action(BlockAction::EditBlockBody {
                     block_id: list_block_id,
-                    new_body: BlockBody::List(split),
+                    new_body: Box::new(BlockBody::List(split)),
                 });
                 defer_focus(focus_target, new_item_id);
                 Some(CommandExecuted::Yes)
@@ -386,7 +386,7 @@ fn make_list_structural_key(
                     let prev_id = item_ids.get(item_index - 1).copied();
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
-                        new_body: BlockBody::List(merged),
+                        new_body: Box::new(BlockBody::List(merged)),
                     });
                     if let Some(id) = prev_id {
                         defer_focus(focus_target, id);
@@ -418,7 +418,7 @@ fn make_list_structural_key(
                     let new_first_id = without_first.first().map(|it| it.id);
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
-                        new_body: BlockBody::List(without_first),
+                        new_body: Box::new(BlockBody::List(without_first)),
                     });
                     if let Some(id) = new_first_id {
                         defer_focus(focus_target, id);

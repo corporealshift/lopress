@@ -53,7 +53,7 @@ fn make_code_commit(
         if differs {
             commit_on_action(BlockAction::EditBlockBody {
                 block_id,
-                new_body: BlockBody::Code(live_text),
+                new_body: Box::new(BlockBody::Code(live_text)),
             });
         }
     })
@@ -307,7 +307,7 @@ pub fn editable_code_view(
                     );
                     on_action(BlockAction::EditAttrs {
                         block_id,
-                        new_attrs,
+                        new_attrs: Box::new(new_attrs),
                     });
                     lang_committed.set(new_lang);
                 }

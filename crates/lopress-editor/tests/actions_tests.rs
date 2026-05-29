@@ -130,7 +130,7 @@ fn insert_after_places_correctly() {
         &mut doc,
         BlockAction::InsertAfter {
             anchor: id,
-            new_block: EditorBlock::heading(1, vec![InlineRun::plain("Title")]),
+            new_block: Box::new(EditorBlock::heading(1, vec![InlineRun::plain("Title")])),
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -145,7 +145,7 @@ fn insert_after_unknown_anchor_appends() {
         &mut doc,
         BlockAction::InsertAfter {
             anchor: BlockId::new(),
-            new_block: EditorBlock::paragraph(vec![InlineRun::plain("y")]),
+            new_block: Box::new(EditorBlock::paragraph(vec![InlineRun::plain("y")])),
         },
     );
     assert_eq!(doc.blocks.len(), 2);
@@ -295,7 +295,7 @@ fn edit_block_body_inline_replaces_runs() {
         &mut doc,
         BlockAction::EditBlockBody {
             block_id: id,
-            new_body: BlockBody::Inline(vec![InlineRun::plain("new")]),
+            new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("new")])),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -310,7 +310,7 @@ fn edit_block_body_code_replaces_text() {
         &mut doc,
         BlockAction::EditBlockBody {
             block_id: id,
-            new_body: BlockBody::Code("new".into()),
+            new_body: Box::new(BlockBody::Code("new".into())),
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -551,7 +551,7 @@ mod inverse_symmetry {
     fn insert_after_round_trip() {
         let (id_a, a) = paragraph_with_id("anchor");
         let mut doc = doc_with(vec![a]);
-        let new_block = EditorBlock::paragraph(vec![InlineRun::plain("inserted")]);
+        let new_block = Box::new(EditorBlock::paragraph(vec![InlineRun::plain("inserted")]));
         assert_round_trip(
             &mut doc,
             BlockAction::InsertAfter {
@@ -610,7 +610,7 @@ mod inverse_symmetry {
     fn edit_block_body_inline_round_trip() {
         let (id, block) = paragraph_with_id("hello world");
         let mut doc = doc_with(vec![block]);
-        let new_body = BlockBody::Inline(vec![InlineRun::plain("entirely different content")]);
+        let new_body = Box::new(BlockBody::Inline(vec![InlineRun::plain("entirely different content")]));
         assert_round_trip(
             &mut doc,
             BlockAction::EditBlockBody {
@@ -629,7 +629,7 @@ mod inverse_symmetry {
         };
         let id = block.id;
         let mut doc = doc_with(vec![block]);
-        let new_body = BlockBody::Code("fn other() { /* ... */ }".to_string());
+        let new_body = Box::new(BlockBody::Code("fn other() { /* ... */ }".to_string()));
         assert_round_trip(
             &mut doc,
             BlockAction::EditBlockBody {
@@ -653,7 +653,7 @@ mod inverse_symmetry {
         let list = EditorBlock::list(false, vec![it0, it1]);
         let id = list.id;
         let mut doc = doc_with(vec![list]);
-        let new_body = BlockBody::List(vec![
+        let new_body = Box::new(BlockBody::List(vec![
             ListItem {
                 id: BlockId::new(),
                 runs: vec![InlineRun::plain("entirely")],
@@ -666,7 +666,7 @@ mod inverse_symmetry {
                 id: BlockId::new(),
                 runs: vec![InlineRun::plain("items")],
             },
-        ]);
+        ]));
         assert_round_trip(
             &mut doc,
             BlockAction::EditBlockBody {
@@ -1016,7 +1016,7 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
         &mut doc,
         BlockAction::EditAttrs {
             block_id: id,
-            new_attrs: new_attrs.clone(),
+            new_attrs: Box::new(new_attrs.clone()),
         },
     );
 

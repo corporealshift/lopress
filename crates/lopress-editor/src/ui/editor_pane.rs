@@ -118,7 +118,7 @@ fn add_block_button(on_action: ActionSink) -> AnyView {
         .action(move || {
             on_action(BlockAction::InsertAfter {
                 anchor: BlockId::new(),
-                new_block: EditorBlock::paragraph(vec![InlineRun::plain("")]),
+                new_block: Box::new(EditorBlock::paragraph(vec![InlineRun::plain("")])),
             });
         })
         .style(|s| s.margin_top(8.))

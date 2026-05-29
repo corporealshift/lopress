@@ -28,12 +28,6 @@ pub enum BlockAction {
     MergeWithPrev {
         block_id: BlockId,
     },
-    /// Insert `new_block` immediately after `anchor`. If `anchor` is missing,
-    /// appends to the end.
-    InsertAfter {
-        anchor: BlockId,
-        new_block: EditorBlock,
-    },
     Delete {
         block_id: BlockId,
     },
@@ -61,7 +55,7 @@ pub enum BlockAction {
     /// block isn't plugin-flagged. Used by the plugin block's attr form.
     EditAttrs {
         block_id: BlockId,
-        new_attrs: serde_json::Map<String, serde_json::Value>,
+        new_attrs: Box<serde_json::Map<String, serde_json::Value>>,
     },
     /// Replace `block_id`'s entire `body` with `new_body`. Generic content
     /// edit — works for any body shape (Inline, Code, List, Opaque). The
@@ -69,7 +63,13 @@ pub enum BlockAction {
     /// target body locally rather than declaring a per-shape intent.
     EditBlockBody {
         block_id: BlockId,
-        new_body: BlockBody,
+        new_body: Box<BlockBody>,
+    },
+    /// Insert `new_block` immediately after `anchor`. If `anchor` is missing,
+    /// appends to the end.
+    InsertAfter {
+        anchor: BlockId,
+        new_block: Box<EditorBlock>,
     },
 }
 
@@ -102,7 +102,7 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         } => apply_split(doc, block_id, byte_offset, new_block_id),
         BlockAction::MergeWithPrev { block_id } => apply_merge(doc, block_id),
         BlockAction::InsertAfter { anchor, new_block } => {
-            apply_insert_after(doc, anchor, new_block)
+            apply_insert_after(doc, anchor, *new_block)
         }
         BlockAction::Delete { block_id } => apply_delete(doc, block_id),
         BlockAction::Move { block_id, to_index } => apply_move(doc, block_id, to_index),
@@ -114,9 +114,9 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         BlockAction::EditAttrs {
             block_id,
             new_attrs,
-        } => apply_edit_attrs(doc, block_id, new_attrs),
+        } => apply_edit_attrs(doc, block_id, *new_attrs),
         BlockAction::EditBlockBody { block_id, new_body } => {
-            apply_edit_block_body(doc, block_id, new_body)
+            apply_edit_block_body(doc, block_id, *new_body)
         }
     }
 }
@@ -157,11 +157,11 @@ fn apply_edit_attrs(
     Some((
         BlockAction::EditAttrs {
             block_id: id,
-            new_attrs,
+            new_attrs: Box::new(new_attrs),
         },
         BlockAction::EditAttrs {
             block_id: id,
-            new_attrs: old_attrs,
+            new_attrs: Box::new(old_attrs),
         },
     ))
 }
@@ -363,7 +363,10 @@ fn apply_insert_after(
         doc.blocks.insert(pos, new_block.clone());
     }
     Some((
-        BlockAction::InsertAfter { anchor, new_block },
+        BlockAction::InsertAfter {
+            anchor,
+            new_block: Box::new(new_block),
+        },
         BlockAction::Delete {
             block_id: inserted_id,
         },
@@ -387,7 +390,7 @@ fn apply_delete(doc: &mut EditorDoc, id: BlockId) -> Option<(BlockAction, BlockA
         BlockAction::Delete { block_id: id },
         BlockAction::InsertAfter {
             anchor,
-            new_block: removed,
+            new_block: Box::new(removed),
         },
     ))
 }
@@ -607,11 +610,30 @@ fn apply_edit_block_body(
     Some((
         BlockAction::EditBlockBody {
             block_id: id,
-            new_body,
+            new_body: Box::new(new_body),
         },
         BlockAction::EditBlockBody {
             block_id: id,
-            new_body: old_body,
+            new_body: Box::new(old_body),
         },
     ))
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn block_action_size_is_compact() {
+        // After boxing heavy variants, BlockAction should fit in
+        // a discriminant + pointer (roughly 9 bytes on x64, padded
+        // to 16 bytes due to alignment). The guard threshold is 40
+        // bytes to leave room for future small variants.
+        let size = std::mem::size_of::<BlockAction>();
+        assert!(
+            size <= 40,
+            "BlockAction is {} bytes (expected <= 40); box heavier variants",
+            size
+        );
+    }
 }

@@ -102,18 +102,18 @@ impl CtrlAction {
             },
             CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_body: crate::model::types::BlockBody::Inline(new_runs),
+                new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
             },
             CtrlAction::EditCode { block_id, new_text } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_body: crate::model::types::BlockBody::Code(new_text),
+                new_body: Box::new(crate::model::types::BlockBody::Code(new_text)),
             },
             CtrlAction::EditAttrs {
                 block_id,
                 new_attrs,
             } => BlockAction::EditAttrs {
                 block_id: find(doc, block_id)?,
-                new_attrs,
+                new_attrs: Box::new(new_attrs),
             },
         })
     }
@@ -551,12 +551,17 @@ mod tests {
         match ctrl.into_block_action(&doc).expect("known id translates") {
             BlockAction::EditBlockBody {
                 block_id,
-                new_body: BlockBody::Inline(runs),
+                ref new_body,
             } => {
-                assert_eq!(block_id.raw(), raw);
-                assert_eq!(runs, vec![InlineRun::plain("new")]);
+                match new_body.as_ref() {
+                    BlockBody::Inline(runs) => {
+                        assert_eq!(block_id.raw(), raw);
+                        assert_eq!(*runs, vec![InlineRun::plain("new")]);
+                    }
+                    other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+                }
             }
-            other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+            other => panic!("unexpected action: {other:?}"),
         }
     }
 
@@ -570,12 +575,17 @@ mod tests {
         match ctrl.into_block_action(&doc).expect("known id translates") {
             BlockAction::EditBlockBody {
                 block_id,
-                new_body: BlockBody::Code(text),
+                ref new_body,
             } => {
-                assert_eq!(block_id.raw(), raw);
-                assert_eq!(text, "fn main() {}");
+                match new_body.as_ref() {
+                    BlockBody::Code(text) => {
+                        assert_eq!(block_id.raw(), raw);
+                        assert_eq!(text, "fn main() {}");
+                    }
+                    other => panic!("expected EditBlockBody/Code, got {other:?}"),
+                }
             }
-            other => panic!("expected EditBlockBody/Code, got {other:?}"),
+            other => panic!("unexpected action: {other:?}"),
         }
     }
 
@@ -656,7 +666,7 @@ mod tests {
                 new_attrs,
             } => {
                 assert_eq!(block_id.raw(), raw);
-                assert_eq!(new_attrs, map);
+                assert_eq!(*new_attrs, map);
             }
             other => panic!("expected EditAttrs, got {other:?}"),
         }
