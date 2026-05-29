@@ -75,8 +75,8 @@ mod tests {
         ];
         let deduped = dedup_canonical(&paths);
         assert_eq!(deduped.len(), 2);
-        assert_eq!(deduped[0], PathBuf::from("/nonexistent/a"));
-        assert_eq!(deduped[1], PathBuf::from("/nonexistent/b"));
+        assert_eq!(deduped.first(), Some(&PathBuf::from("/nonexistent/a")));
+        assert_eq!(deduped.get(1), Some(&PathBuf::from("/nonexistent/b")));
     }
 
     #[test]
@@ -87,10 +87,13 @@ mod tests {
             PathBuf::from("/nonexistent/b"),
         ];
         let deduped = dedup_canonical(&paths);
-        assert_eq!(deduped, vec![
-            PathBuf::from("/nonexistent/b"),
-            PathBuf::from("/nonexistent/a"),
-        ]);
+        assert_eq!(
+            deduped,
+            vec![
+                PathBuf::from("/nonexistent/b"),
+                PathBuf::from("/nonexistent/a"),
+            ]
+        );
     }
 
     #[test]
