@@ -58,12 +58,12 @@ pub fn block_toolbar_for(
         ("H1", BlockKind::Heading(1)),
         ("H2", BlockKind::Heading(2)),
         ("H3", BlockKind::Heading(3)),
-        ("Code", BlockKind::Code { lang: Rc::from("") }),
-        ("UL", BlockKind::List { ordered: false }),
-        ("OL", BlockKind::List { ordered: true }),
         ("H4", BlockKind::Heading(4)),
         ("H5", BlockKind::Heading(5)),
         ("H6", BlockKind::Heading(6)),
+        ("Code", BlockKind::Code { lang: Rc::from("") }),
+        ("UL", BlockKind::List { ordered: false }),
+        ("OL", BlockKind::List { ordered: true }),
     ];
 
     let mut buttons: Vec<AnyView> = Vec::with_capacity(kinds.len() + 5);
