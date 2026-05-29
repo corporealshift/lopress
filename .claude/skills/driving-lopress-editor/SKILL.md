@@ -37,6 +37,8 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}]}` |
 | `/screenshot` | GET | PNG of the window | `image/png` bytes; `503` if window not found |
 | `/action` | POST | Apply a `CtrlAction` to the doc | `200 {"status":"dispatched"}` / `409 no_document` / `422 block_not_found` / `400 parse error` |
+| `/open` | POST | Open a doc by path. Body `{ "path": "..." }`. Absolute or workspace-relative. | `200 {"status":"opened"}` / `404 {"status":"not_found"}` / `409 {"status":"no_workspace"}` |
+| `/close` | POST | Close the current doc and return to the welcome view. | `200 {"status":"closed"}` / `409 {"status":"no_workspace"}` |
 | `/input` | POST | Inject text or a key chord | `ok` / `400` |
 | `/click` | POST | Click at client-area coords | `ok` / `400` |
 
@@ -63,6 +65,40 @@ PowerShell example:
 ```powershell
 $body = '{"type":"ChangeType","block_id":2,"new_kind":{"type":"Heading","level":2}}'
 Invoke-RestMethod -Uri http://127.0.0.1:7878/action -Method Post -Body $body
+```
+
+## POST /open — open a document
+
+Body is `{ "path": "..." }`. The path can be absolute or relative to the open workspace.
+
+```powershell
+# Open by absolute path:
+$body = '{"path":"C:\\Users\\corpo\\Documents\\lopress-listtest\\src\\posts\\listtest.md"}'
+Invoke-RestMethod -Uri http://127.0.0.1:7878/open -Method Post -Body $body
+# Expected: {"status":"opened"}; /state shows doc_open:true.
+
+# Relative path before workspace open:
+$body = '{"path":"posts/foo.md"}'
+Invoke-RestMethod -Uri http://127.0.0.1:7878/open -Method Post -Body $body
+# Expected: {"status":"no_workspace"} (409).
+
+# Nonexistent path:
+$body = '{"path":"C:\\nonexistent.md"}'
+Invoke-RestMethod -Uri http://127.0.0.1:7878/open -Method Post -Body $body
+# Expected: {"status":"not_found"} (404).
+```
+
+## POST /close — close the current document
+
+Closes the open document and returns the editor to the welcome view.
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:7878/close -Method Post
+# Expected: {"status":"closed"}; /state shows doc_open:false.
+
+# Close with no document open:
+Invoke-RestMethod -Uri http://127.0.0.1:7878/close -Method Post
+# Expected: {"status":"no_workspace"} (409).
 ```
 
 ## POST /input and /click — OS input injection

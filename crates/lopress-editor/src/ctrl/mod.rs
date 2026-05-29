@@ -19,6 +19,10 @@ use crate::model::types::{BlockBody, BlockId, BlockKind, EditorDoc, InlineRun};
 
 pub(crate) struct CtrlHandle {
     pub snapshot: Arc<Mutex<String>>,
+    #[allow(dead_code)]
+    pub open_tx: crossbeam_channel::Sender<CtrlOpenEnvelope>,
+    #[allow(dead_code)]
+    pub close_tx: crossbeam_channel::Sender<CtrlCloseEnvelope>,
 }
 
 // ── Action types (HTTP API) ───────────────────────────────────────────────────
@@ -185,6 +189,53 @@ impl CtrlActionResult {
 /// blocked HTTP handler.
 pub(crate) type CtrlActionEnvelope = (CtrlAction, Sender<CtrlActionResult>);
 
+/// Body of `POST /open`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct CtrlOpenRequest {
+    pub path: String,
+}
+
+/// Reply outcome for `/open`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CtrlOpenResult {
+    Opened,
+    NotFound,
+    NoWorkspace,
+}
+
+impl CtrlOpenResult {
+    pub(crate) fn http_parts(&self) -> (u16, String) {
+        match self {
+            CtrlOpenResult::Opened => (200, r#"{"status":"opened"}"#.to_string()),
+            CtrlOpenResult::NotFound => (404, r#"{"status":"not_found"}"#.to_string()),
+            CtrlOpenResult::NoWorkspace => (409, r#"{"status":"no_workspace"}"#.to_string()),
+        }
+    }
+}
+
+/// Reply outcome for `/close`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CtrlCloseResult {
+    Closed,
+    NoWorkspace,
+}
+
+impl CtrlCloseResult {
+    pub(crate) fn http_parts(&self) -> (u16, String) {
+        match self {
+            CtrlCloseResult::Closed => (200, r#"{"status":"closed"}"#.to_string()),
+            CtrlCloseResult::NoWorkspace => (409, r#"{"status":"no_workspace"}"#.to_string()),
+        }
+    }
+}
+
+/// Envelopes for the open/close channels — the parsed payload + a one-shot
+/// reply sender. The trailing comma on `CtrlCloseEnvelope` is load-bearing:
+/// without it `(Sender<...>)` is a parenthesized type, not a tuple, and the
+/// `if let Some((tx,)) = ...` pattern below won't destructure.
+pub(crate) type CtrlOpenEnvelope = (String, crossbeam_channel::Sender<CtrlOpenResult>);
+pub(crate) type CtrlCloseEnvelope = (crossbeam_channel::Sender<CtrlCloseResult>,);
+
 // ── Doc state serialization ───────────────────────────────────────────────────
 
 pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::Path>) -> String {
@@ -254,27 +305,41 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-pub(crate) fn start() -> (CtrlHandle, crossbeam_channel::Receiver<CtrlActionEnvelope>) {
+pub(crate) fn start() -> (
+    CtrlHandle,
+    crossbeam_channel::Receiver<CtrlActionEnvelope>,
+    crossbeam_channel::Receiver<CtrlOpenEnvelope>,
+    crossbeam_channel::Receiver<CtrlCloseEnvelope>,
+) {
     let snapshot: Arc<Mutex<String>> = Arc::new(Mutex::new(
         r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string(),
     ));
     let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlActionEnvelope>();
+    let (open_tx, open_rx) = crossbeam_channel::unbounded::<CtrlOpenEnvelope>();
+    let (close_tx, close_rx) = crossbeam_channel::unbounded::<CtrlCloseEnvelope>();
 
     let handle = CtrlHandle {
         snapshot: Arc::clone(&snapshot),
+        open_tx: open_tx.clone(),
+        close_tx: close_tx.clone(),
     };
 
     let server_snapshot = Arc::clone(&snapshot);
     std::thread::spawn(move || {
-        serve(server_snapshot, action_tx);
+        serve(server_snapshot, action_tx, open_tx, close_tx);
     });
 
-    (handle, action_rx)
+    (handle, action_rx, open_rx, close_rx)
 }
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
-fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlActionEnvelope>) {
+fn serve(
+    snapshot: Arc<Mutex<String>>,
+    action_tx: Sender<CtrlActionEnvelope>,
+    open_tx: Sender<CtrlOpenEnvelope>,
+    close_tx: Sender<CtrlCloseEnvelope>,
+) {
     let server = match tiny_http::Server::http("127.0.0.1:7878") {
         Ok(s) => s,
         Err(e) => {
@@ -288,7 +353,15 @@ fn serve(snapshot: Arc<Mutex<String>>, action_tx: Sender<CtrlActionEnvelope>) {
         let method = request.method().as_str().to_string();
         let url = request.url().to_string();
 
-        let response = handle_request(&mut request, &method, &url, &snapshot, &action_tx);
+        let response = handle_request(
+            &mut request,
+            &method,
+            &url,
+            &snapshot,
+            &action_tx,
+            &open_tx,
+            &close_tx,
+        );
         let _ = request.respond(response);
     }
 }
@@ -299,6 +372,8 @@ fn handle_request(
     url: &str,
     snapshot: &Arc<Mutex<String>>,
     action_tx: &Sender<CtrlActionEnvelope>,
+    open_tx: &Sender<CtrlOpenEnvelope>,
+    close_tx: &Sender<CtrlCloseEnvelope>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     match (method, url) {
         ("GET", "/ping") => text_response("ok", 200),
@@ -367,6 +442,47 @@ fn handle_request(
             match input::handle_click(&body) {
                 Ok(()) => text_response("ok", 200),
                 Err(e) => text_response(&e, 400),
+            }
+        }
+
+        ("POST", "/open") => {
+            let mut body = String::new();
+            if request.as_reader().read_to_string(&mut body).is_err() {
+                return text_response("read error", 400);
+            }
+            match serde_json::from_str::<CtrlOpenRequest>(&body) {
+                Ok(req) => {
+                    let (reply_tx, reply_rx) = crossbeam_channel::bounded::<CtrlOpenResult>(1);
+                    if open_tx.send((req.path, reply_tx)).is_err() {
+                        return text_response("editor channel closed", 503);
+                    }
+                    match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                        Ok(result) => {
+                            let (code, json) = result.http_parts();
+                            tiny_http::Response::from_string(json)
+                                .with_header(json_header())
+                                .with_status_code(code)
+                        }
+                        Err(_) => text_response("editor did not respond", 504),
+                    }
+                }
+                Err(e) => text_response(&format!("parse error: {e}"), 400),
+            }
+        }
+
+        ("POST", "/close") => {
+            let (reply_tx, reply_rx) = crossbeam_channel::bounded::<CtrlCloseResult>(1);
+            if close_tx.send((reply_tx,)).is_err() {
+                return text_response("editor channel closed", 503);
+            }
+            match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                Ok(result) => {
+                    let (code, json) = result.http_parts();
+                    tiny_http::Response::from_string(json)
+                        .with_header(json_header())
+                        .with_status_code(code)
+                }
+                Err(_) => text_response("editor did not respond", 504),
             }
         }
 
@@ -821,5 +937,33 @@ mod tests {
             block_id: unknown_id,
         };
         assert!(ctrl.into_block_action(&doc).is_none());
+    }
+
+    #[test]
+    fn open_result_http_parts() {
+        assert_eq!(
+            CtrlOpenResult::Opened.http_parts(),
+            (200, r#"{"status":"opened"}"#.to_string()),
+        );
+        assert_eq!(
+            CtrlOpenResult::NotFound.http_parts(),
+            (404, r#"{"status":"not_found"}"#.to_string()),
+        );
+        assert_eq!(
+            CtrlOpenResult::NoWorkspace.http_parts(),
+            (409, r#"{"status":"no_workspace"}"#.to_string()),
+        );
+    }
+
+    #[test]
+    fn close_result_http_parts() {
+        assert_eq!(
+            CtrlCloseResult::Closed.http_parts(),
+            (200, r#"{"status":"closed"}"#.to_string()),
+        );
+        assert_eq!(
+            CtrlCloseResult::NoWorkspace.http_parts(),
+            (409, r#"{"status":"no_workspace"}"#.to_string()),
+        );
     }
 }

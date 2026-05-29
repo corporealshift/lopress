@@ -51,6 +51,12 @@ pub(crate) fn root_view(
     #[cfg(debug_assertions)] ctrl_action_rx: crossbeam_channel::Receiver<
         crate::ctrl::CtrlActionEnvelope,
     >,
+    #[cfg(debug_assertions)] ctrl_open_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlOpenEnvelope,
+    >,
+    #[cfg(debug_assertions)] ctrl_close_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlCloseEnvelope,
+    >,
 ) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
@@ -100,6 +106,10 @@ pub(crate) fn root_view(
 
     let editing_for_view = Rc::clone(&editing);
 
+    // Capture `on_open` as an Rc<dyn Fn> so it can be threaded through
+    // `ctrl_once` for the ctrl `/open` endpoint.
+    let on_open_for_ctrl: Rc<dyn Fn(std::path::PathBuf)> = Rc::new(on_open.clone());
+
     #[cfg(debug_assertions)]
     #[allow(clippy::type_complexity)]
     let ctrl_once: Rc<
@@ -107,9 +117,18 @@ pub(crate) fn root_view(
             Option<(
                 crate::ctrl::CtrlHandle,
                 crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
+                crossbeam_channel::Receiver<crate::ctrl::CtrlOpenEnvelope>,
+                crossbeam_channel::Receiver<crate::ctrl::CtrlCloseEnvelope>,
+                Rc<dyn Fn(std::path::PathBuf)>,
             )>,
         >,
-    > = Rc::new(std::cell::RefCell::new(Some((ctrl_handle, ctrl_action_rx))));
+    > = Rc::new(std::cell::RefCell::new(Some((
+        ctrl_handle,
+        ctrl_action_rx,
+        ctrl_open_rx,
+        ctrl_close_rx,
+        on_open_for_ctrl,
+    ))));
     #[cfg(debug_assertions)]
     let ctrl_once_for_view = Rc::clone(&ctrl_once);
 
@@ -125,6 +144,7 @@ pub(crate) fn root_view(
                 editing_view(
                     Rc::clone(&editing_for_view),
                     current_doc,
+                    state_tag,
                     #[cfg(debug_assertions)]
                     ctrl,
                 )
@@ -137,12 +157,17 @@ pub(crate) fn root_view(
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
 /// with a footer pinned at the bottom.
+#[allow(clippy::type_complexity)]
 fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    state_tag: RwSignal<StateTag>,
     #[cfg(debug_assertions)] ctrl: Option<(
         crate::ctrl::CtrlHandle,
         crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
+        crossbeam_channel::Receiver<crate::ctrl::CtrlOpenEnvelope>,
+        crossbeam_channel::Receiver<crate::ctrl::CtrlCloseEnvelope>,
+        Rc<dyn Fn(std::path::PathBuf)>,
     )>,
 ) -> impl IntoView {
     // Snapshot the workspace once at view-build time. Sidebar actions
@@ -283,13 +308,18 @@ fn editing_view(
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
     #[cfg(debug_assertions)]
-    if let Some((ctrl_handle, ctrl_action_rx)) = ctrl {
+    if let Some((ctrl_handle, ctrl_action_rx, ctrl_open_rx, ctrl_close_rx, on_open_ctrl)) = ctrl {
         ctrl_wire::wire_ctrl(
             ctrl_handle,
             ctrl_action_rx,
+            ctrl_open_rx,
+            ctrl_close_rx,
             current_doc,
             current_path,
             on_action_for_ctrl,
+            on_open_ctrl,
+            Rc::clone(&editing),
+            state_tag,
         );
     }
 
@@ -318,7 +348,7 @@ fn editing_view(
 
 /// Lightweight discriminant so `dyn_container` can derive equality cheaply.
 #[derive(Clone, PartialEq)]
-enum StateTag {
+pub(crate) enum StateTag {
     Welcome,
     Editing,
 }
