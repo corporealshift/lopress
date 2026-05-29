@@ -25,6 +25,7 @@ use floem::views::{
     Decorators,
 };
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Pre-snapshotted view of the toolbar's inputs at one moment in time.
 /// Currently only used by tests / external callers — the live toolbar reads
@@ -57,12 +58,7 @@ pub fn block_toolbar_for(
         ("H1", BlockKind::Heading(1)),
         ("H2", BlockKind::Heading(2)),
         ("H3", BlockKind::Heading(3)),
-        (
-            "Code",
-            BlockKind::Code {
-                lang: String::new(),
-            },
-        ),
+        ("Code", BlockKind::Code { lang: Rc::from("") }),
         ("UL", BlockKind::List { ordered: false }),
         ("OL", BlockKind::List { ordered: true }),
         ("H4", BlockKind::Heading(4)),
@@ -88,7 +84,7 @@ pub fn block_toolbar_for(
                     let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                     on_action_for_btn(BlockAction::EditBlockBody {
                         block_id,
-                        new_body: crate::model::types::BlockBody::Inline(new_runs),
+                        new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                     });
                 }
                 on_action_for_btn(BlockAction::ChangeType {
@@ -172,7 +168,7 @@ pub fn block_toolbar_for(
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_commit(BlockAction::EditBlockBody {
                             block_id,
-                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                         });
                         url_sig.set(None);
                     }
@@ -196,7 +192,7 @@ pub fn block_toolbar_for(
                         let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_remove(BlockAction::EditBlockBody {
                             block_id,
-                            new_body: crate::model::types::BlockBody::Inline(new_runs),
+                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
                         });
                     }
                 };

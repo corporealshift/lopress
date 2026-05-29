@@ -82,16 +82,15 @@ pub fn start_save_pipeline(
         let ds = dirty_sig;
         let ses = save_error_sig;
         debounce_action(dc, Duration::from_millis(500), move || {
-            let doc = match current_doc.with_untracked(|d| d.clone()) {
-                Some(d) => d,
-                None => return,
-            };
-            let result = {
+            let result = current_doc.with_untracked(|d| {
+                let doc = d.as_ref()?;
                 let guard = editing_for_save.borrow();
-                match guard.as_ref() {
-                    Some(state) => state.save_doc(&doc),
-                    None => return,
-                }
+                let state = guard.as_ref()?;
+                Some(state.save_doc(doc))
+            });
+            let result = match result {
+                Some(r) => r,
+                None => return,
             };
             match result {
                 Ok(()) => {

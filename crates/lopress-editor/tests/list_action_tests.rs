@@ -39,10 +39,10 @@ fn edit_block_body_on_list_replaces_items() {
         &mut doc,
         BlockAction::EditBlockBody {
             block_id,
-            new_body: BlockBody::List(vec![ListItem {
+            new_body: Box::new(BlockBody::List(vec![ListItem {
                 id: original_id,
                 runs: vec![InlineRun::plain("new")],
-            }]),
+            }])),
         },
     );
     assert_eq!(items_of(&doc), vec!["new"]);
@@ -164,7 +164,7 @@ fn editing_multiple_items_then_splitting_one_preserves_all_edits() {
     // Enter in item 1 to split it. The UI captures everyone's live buffer
     // plus the split into a single EditBlockBody.
     let new_item_after_split = BlockId::new();
-    let new_body = BlockBody::List(vec![
+    let new_body = Box::new(BlockBody::List(vec![
         ListItem {
             id: ids[0],
             runs: vec![InlineRun::plain("item zero edited")],
@@ -181,7 +181,7 @@ fn editing_multiple_items_then_splitting_one_preserves_all_edits() {
             id: ids[2],
             runs: vec![InlineRun::plain("item two edited")],
         },
-    ]);
+    ]));
     let (_canonical, inverse) =
         apply(&mut doc, BlockAction::EditBlockBody { block_id, new_body }).unwrap();
 

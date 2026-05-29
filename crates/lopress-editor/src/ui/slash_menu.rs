@@ -14,6 +14,7 @@ use floem::peniko::Color;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate};
 use floem::views::{label, v_stack_from_iter, Decorators};
 use floem::{AnyView, IntoView, View};
+use std::rc::Rc;
 
 const HIGHLIGHT_BG: Color = Color::rgb8(210, 220, 240);
 const POPUP_BG: Color = Color::rgb8(252, 252, 254);
@@ -26,12 +27,7 @@ pub fn slash_menu_items() -> Vec<(&'static str, BlockKind)> {
         ("Heading 1", BlockKind::Heading(1)),
         ("Heading 2", BlockKind::Heading(2)),
         ("Heading 3", BlockKind::Heading(3)),
-        (
-            "Code block",
-            BlockKind::Code {
-                lang: String::new(),
-            },
-        ),
+        ("Code block", BlockKind::Code { lang: Rc::from("") }),
         ("Unordered list", BlockKind::List { ordered: false }),
         ("Ordered list", BlockKind::List { ordered: true }),
     ]

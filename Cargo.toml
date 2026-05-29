@@ -51,7 +51,7 @@ missing_errors_doc = "allow"
 
 [workspace.dependencies]
 anyhow = "1"
-lapce-xi-rope = "0.4"
+lapce-xi-rope = "=0.3.2"
 blake3 = "1.5"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }

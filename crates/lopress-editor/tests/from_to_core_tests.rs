@@ -24,6 +24,7 @@ use lopress_editor::model::types::{
 };
 use lopress_plugin::PluginRegistry;
 use serde_json::{json, Value};
+use std::rc::Rc;
 
 #[test]
 fn paragraph_round_trips_via_document_equality() {
@@ -45,7 +46,7 @@ fn code_round_trips_with_language() {
     // Sanity: the editor classifies it correctly.
     assert!(matches!(
         &editor.blocks[0].kind,
-        BlockKind::Code { lang } if lang == "rust"
+        BlockKind::Code { lang } if &**lang == "rust"
     ));
 
     let core_back = doc_to_core(&editor);
@@ -66,7 +67,7 @@ fn opaque_block_preserved_byte_identical() {
 
     let video = &editor.blocks[1];
     assert!(
-        matches!(&video.kind, BlockKind::Opaque { type_name } if type_name == "lopress:video"),
+        matches!(&video.kind, BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"),
         "expected Opaque(lopress:video), got {:?}",
         video.kind
     );
@@ -89,7 +90,7 @@ fn nested_block_inside_custom_falls_through_opaque() {
     assert_eq!(editor.blocks.len(), 1);
     assert!(matches!(
         &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name == "lopress:callout"
+        BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:callout"
     ));
 
     let core_back = doc_to_core(&editor);
@@ -122,12 +123,12 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     let mut list_attrs = serde_json::Map::new();
     list_attrs.insert("ordered".to_string(), serde_json::Value::Bool(false));
     list_block.plugin = Some(PluginMeta {
-        block_type_name: "list".to_string(),
+        block_type_name: Rc::from("list"),
         attrs: list_attrs,
-        attr_decls: vec![],
+        attr_decls: Rc::from([]),
         builtin: true,
-        editor: Some("list".to_string()),
-        native: Some("list".to_string()),
+        editor: Some(Rc::from("list")),
+        native: Some(Rc::from("list")),
     });
     let editor_doc = EditorDoc {
         front_matter: FrontMatter::default(),
@@ -203,7 +204,7 @@ fn nested_list_becomes_opaque() {
     let editor = doc_from_core(&core, &PluginRegistry::default());
     assert!(matches!(
         &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name == "list"
+        BlockKind::Opaque { type_name } if type_name.as_ref() == "list"
     ));
 
     let core_back = doc_to_core(&editor);
@@ -273,12 +274,12 @@ fn code_block_carries_plugin_meta_after_from_core() {
         "loaded code block must carry PluginMeta"
     );
     let meta = block.plugin.as_ref().unwrap();
-    assert_eq!(meta.block_type_name, "code");
+    assert_eq!(meta.block_type_name.as_ref(), "code");
     assert_eq!(meta.attrs.get("lang").and_then(Value::as_str), Some("rust"));
     assert!(meta.builtin);
     assert_eq!(meta.editor.as_deref(), Some("code"));
     assert_eq!(meta.native.as_deref(), Some("code"));
-    assert!(matches!(&block.kind, BlockKind::Code { lang } if lang == "rust"));
+    assert!(matches!(&block.kind, BlockKind::Code { lang } if &**lang == "rust"));
     assert!(matches!(&block.body, BlockBody::Code(t) if t == "fn main() {}\n"));
 }
 
@@ -352,6 +353,6 @@ fn pluginless_code_block_round_trips() {
     );
     assert!(matches!(
         &editor_back.blocks[0].kind,
-        BlockKind::Code { lang } if lang == "go"
+        BlockKind::Code { lang } if &**lang == "go"
     ));
 }

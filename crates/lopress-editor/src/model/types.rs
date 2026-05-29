@@ -1,5 +1,6 @@
 use lopress_plugin::AttrDecl;
 use serde_json::Value;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Stable identity for a block within an open document. Not persisted to disk.
@@ -43,9 +44,9 @@ pub struct EditorBlock {
 pub enum BlockKind {
     Paragraph,
     Heading(u8), // 1..=6
-    Code { lang: String },
+    Code { lang: Rc<str> },
     List { ordered: bool },
-    Opaque { type_name: String },
+    Opaque { type_name: Rc<str> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,19 +83,19 @@ impl InlineRun {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginMeta {
-    pub block_type_name: String,
+    pub block_type_name: Rc<str>,
     pub attrs: serde_json::Map<String, Value>,
-    pub attr_decls: Vec<AttrDecl>,
+    pub attr_decls: Rc<[AttrDecl]>,
     /// True when this block is owned by a built-in base plugin. The plugin
     /// block view suppresses chrome (header strip, attr form) when set.
     pub builtin: bool,
     /// The block's editor key (manifest `editor` field). Drives `render_body`
     /// dispatch via the editor registry. `None` → generic attr-form editor.
-    pub editor: Option<String>,
+    pub editor: Option<Rc<str>>,
     /// The native core type this block claims (manifest `native` field).
     /// `Some` → `to_core` serializes it as bare native markdown of this type.
     /// `None` → `to_core` uses the comment container.
-    pub native: Option<String>,
+    pub native: Option<Rc<str>>,
 }
 
 impl PluginMeta {
@@ -109,12 +110,12 @@ impl PluginMeta {
         let mut attrs = serde_json::Map::new();
         attrs.insert("ordered".to_string(), Value::Bool(ordered));
         Self {
-            block_type_name: "list".to_string(),
+            block_type_name: Rc::from("list"),
             attrs,
-            attr_decls: Vec::new(),
+            attr_decls: Rc::from([]),
             builtin: true,
-            editor: Some("list".to_string()),
-            native: Some("list".to_string()),
+            editor: Some(Rc::from("list")),
+            native: Some(Rc::from("list")),
         }
     }
 
@@ -129,12 +130,12 @@ impl PluginMeta {
         let mut attrs = serde_json::Map::new();
         attrs.insert("lang".to_string(), Value::String(lang.to_string()));
         Self {
-            block_type_name: "code".to_string(),
+            block_type_name: Rc::from("code"),
             attrs,
-            attr_decls: Vec::new(),
+            attr_decls: Rc::from([]),
             builtin: true,
-            editor: Some("code".to_string()),
-            native: Some("code".to_string()),
+            editor: Some(Rc::from("code")),
+            native: Some(Rc::from("code")),
         }
     }
 }
@@ -161,7 +162,9 @@ impl EditorBlock {
     pub fn code(lang: String, text: String) -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Code { lang },
+            kind: BlockKind::Code {
+                lang: Rc::from(lang),
+            },
             body: BlockBody::Code(text),
             plugin: None,
         }
@@ -180,7 +183,7 @@ impl EditorBlock {
         Self {
             id: BlockId::new(),
             kind: BlockKind::Opaque {
-                type_name: type_name.clone(),
+                type_name: Rc::from(type_name),
             },
             body: BlockBody::Opaque(value),
             plugin: None,

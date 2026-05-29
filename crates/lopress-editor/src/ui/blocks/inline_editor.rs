@@ -19,6 +19,7 @@ use floem::views::{stack, Decorators};
 use floem::IntoView;
 use floem::View;
 use lapce_xi_rope::Rope;
+
 use std::rc::Rc;
 
 /// Caret color for inline block editors — dark enough to contrast on white.
@@ -55,7 +56,7 @@ pub struct BlockEditorState {
     /// style toggle.
     pub style_rev: RwSignal<u64>,
     /// Full block text, kept in sync with the rope via `TextDocument::add_on_update`.
-    pub text_sig: RwSignal<String>,
+    pub text_sig: RwSignal<Rope>,
     /// When `Some`, the link-URL input row is shown; holds the editing buffer
     /// seed. `None` hides the row.
     pub link_url_sig: RwSignal<Option<String>>,
@@ -77,7 +78,7 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 
     let spans_sig = cx.create_rw_signal(spans);
     let style_rev = cx.create_rw_signal(0u64);
-    let text_sig = cx.create_rw_signal(initial_text.clone());
+    let text_sig = cx.create_rw_signal(rope.clone());
     let link_url_sig = cx.create_rw_signal(None::<String>);
 
     let styling = Rc::new(InlineRunStyling {
@@ -94,8 +95,8 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
     let text_sig_for_update = text_sig;
     doc.add_on_update(move |upd| {
         if let Some(ed) = upd.editor {
-            let new_text = String::from(&ed.doc().text());
-            text_sig_for_update.set(new_text);
+            let new_rope = ed.doc().text(); // cheap Arc bump, no full-text copy
+            text_sig_for_update.set(new_rope);
         }
     });
 
@@ -658,15 +659,12 @@ fn commit_from_editor(
     block_id: BlockId,
     on_action: &ActionSink,
 ) {
-    // ed.doc().text() returns xi-rope 0.3.2 Rope; convert via String to the
-    // workspace's 0.4.0 Rope that rope_and_spans_to_runs expects.
-    let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+    let rope = editor_sig.with_untracked(|ed| ed.doc().text());
     let spans = spans_sig.get_untracked();
-    let rope = Rope::from(text.as_str());
     let new_runs = rope_and_spans_to_runs(&rope, &spans);
     on_action(BlockAction::EditBlockBody {
         block_id,
-        new_body: crate::model::types::BlockBody::Inline(new_runs),
+        new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
     });
 }
 

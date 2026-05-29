@@ -6,6 +6,7 @@
 
 pub(crate) mod input;
 
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
@@ -95,24 +96,26 @@ impl CtrlAction {
                 new_kind: match new_kind {
                     CtrlBlockKind::Paragraph => BlockKind::Paragraph,
                     CtrlBlockKind::Heading { level } => BlockKind::Heading(level.clamp(1, 6)),
-                    CtrlBlockKind::Code { lang } => BlockKind::Code { lang },
+                    CtrlBlockKind::Code { lang } => BlockKind::Code {
+                        lang: Rc::from(lang),
+                    },
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
                 },
             },
             CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_body: crate::model::types::BlockBody::Inline(new_runs),
+                new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
             },
             CtrlAction::EditCode { block_id, new_text } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
-                new_body: crate::model::types::BlockBody::Code(new_text),
+                new_body: Box::new(crate::model::types::BlockBody::Code(new_text)),
             },
             CtrlAction::EditAttrs {
                 block_id,
                 new_attrs,
             } => BlockAction::EditAttrs {
                 block_id: find(doc, block_id)?,
-                new_attrs,
+                new_attrs: Box::new(new_attrs),
             },
         })
     }
@@ -209,9 +212,9 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                 BlockBody::Code(text) => {
                     let lang = match &b.kind {
                         BlockKind::Code { lang } => lang.clone(),
-                        _ => String::new(),
+                        _ => Rc::from(""),
                     };
-                    serde_json::json!({ "id": id, "kind": "Code", "lang": lang, "text": text })
+                    serde_json::json!({ "id": id, "kind": "Code", "lang": &*lang, "text": text })
                 }
                 BlockBody::List(items) => {
                     let text = items
@@ -229,7 +232,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                 BlockBody::Opaque(_) => {
                     let type_name = match &b.kind {
                         BlockKind::Opaque { type_name } => type_name.clone(),
-                        _ => String::new(),
+                        _ => Rc::from(""),
                     };
                     serde_json::json!({
                         "id": id,
@@ -550,12 +553,15 @@ mod tests {
         match ctrl.into_block_action(&doc).expect("known id translates") {
             BlockAction::EditBlockBody {
                 block_id,
-                new_body: BlockBody::Inline(runs),
-            } => {
-                assert_eq!(block_id.raw(), raw);
-                assert_eq!(runs, vec![InlineRun::plain("new")]);
-            }
-            other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+                ref new_body,
+            } => match new_body.as_ref() {
+                BlockBody::Inline(runs) => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(*runs, vec![InlineRun::plain("new")]);
+                }
+                other => panic!("expected EditBlockBody/Inline, got {other:?}"),
+            },
+            other => panic!("unexpected action: {other:?}"),
         }
     }
 
@@ -569,12 +575,15 @@ mod tests {
         match ctrl.into_block_action(&doc).expect("known id translates") {
             BlockAction::EditBlockBody {
                 block_id,
-                new_body: BlockBody::Code(text),
-            } => {
-                assert_eq!(block_id.raw(), raw);
-                assert_eq!(text, "fn main() {}");
-            }
-            other => panic!("expected EditBlockBody/Code, got {other:?}"),
+                ref new_body,
+            } => match new_body.as_ref() {
+                BlockBody::Code(text) => {
+                    assert_eq!(block_id.raw(), raw);
+                    assert_eq!(text, "fn main() {}");
+                }
+                other => panic!("expected EditBlockBody/Code, got {other:?}"),
+            },
+            other => panic!("unexpected action: {other:?}"),
         }
     }
 
@@ -655,7 +664,7 @@ mod tests {
                 new_attrs,
             } => {
                 assert_eq!(block_id.raw(), raw);
-                assert_eq!(new_attrs, map);
+                assert_eq!(*new_attrs, map);
             }
             other => panic!("expected EditAttrs, got {other:?}"),
         }
@@ -672,7 +681,7 @@ mod tests {
                     lang: "rust".to_string(),
                 },
                 BlockKind::Code {
-                    lang: "rust".to_string(),
+                    lang: Rc::from("rust"),
                 },
             ),
             (

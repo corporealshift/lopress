@@ -3,8 +3,9 @@ use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, ListItem, PluginMeta,
 };
 use lopress_core::{Block, Document};
-use lopress_plugin::{AttrDecl, BlockDecl, PluginRegistry};
+use lopress_plugin::{BlockDecl, PluginRegistry};
 use serde_json::{Map, Value};
+use std::rc::Rc;
 
 /// Convert a `lopress_core::Document` into the editor's working model,
 /// consulting `registry` for plugin-declared block types.
@@ -64,12 +65,12 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
 /// — anything between the comment markers parses into `b.children`).
 fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let plugin = PluginMeta {
-        block_type_name: b.r#type.clone(),
+        block_type_name: Rc::from(b.r#type.as_str()),
         attrs: block_attrs_as_object(&b.attrs),
-        attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+        attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
         builtin: decl.builtin,
-        editor: decl.editor.clone(),
-        native: decl.native.clone(),
+        editor: decl.editor.as_deref().map(Rc::from),
+        native: decl.native.as_deref().map(Rc::from),
     };
 
     let editor = decl.editor.as_deref().unwrap_or("paragraph");
@@ -89,10 +90,14 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         "code" => {
             let lang = inner
                 .and_then(|c| c.attrs.get("lang").and_then(serde_json::Value::as_str))
-                .unwrap_or("")
-                .to_string();
+                .unwrap_or("");
             let text = inner.and_then(|c| c.text.clone()).unwrap_or_default();
-            (BlockKind::Code { lang }, BlockBody::Code(text))
+            (
+                BlockKind::Code {
+                    lang: Rc::from(lang),
+                },
+                BlockBody::Code(text),
+            )
         }
         "list" => {
             let ordered = inner
@@ -197,12 +202,12 @@ fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
             let mut attrs = Map::new();
             attrs.insert("ordered".to_string(), Value::Bool(ordered));
             block.plugin = Some(PluginMeta {
-                block_type_name: decl.name.clone(),
+                block_type_name: Rc::from(decl.name.as_str()),
                 attrs,
-                attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+                attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
                 builtin: decl.builtin,
-                editor: decl.editor.clone(),
-                native: decl.native.clone(),
+                editor: decl.editor.as_deref().map(Rc::from),
+                native: decl.native.as_deref().map(Rc::from),
             });
             block
         }
@@ -230,12 +235,12 @@ fn native_code_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let mut attrs = Map::new();
     attrs.insert("lang".to_string(), Value::String(lang));
     block.plugin = Some(PluginMeta {
-        block_type_name: decl.name.clone(),
+        block_type_name: Rc::from(decl.name.as_str()),
         attrs,
-        attr_decls: decl.attrs.values().cloned().collect::<Vec<AttrDecl>>(),
+        attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
         builtin: decl.builtin,
-        editor: decl.editor.clone(),
-        native: decl.native.clone(),
+        editor: decl.editor.as_deref().map(Rc::from),
+        native: decl.native.as_deref().map(Rc::from),
     });
     block
 }

@@ -29,7 +29,7 @@ fn plugin_block_round_trips_byte_identical() {
     let first = &editor.blocks[0];
     assert!(first.plugin.is_some(), "plugin block should be detected");
     let meta = first.plugin.as_ref().unwrap();
-    assert_eq!(meta.block_type_name, "lopress:codehighlight");
+    assert_eq!(meta.block_type_name.as_ref(), "lopress:codehighlight");
     assert_eq!(
         meta.attrs.get("lang").and_then(|v| v.as_str()),
         Some("rust")

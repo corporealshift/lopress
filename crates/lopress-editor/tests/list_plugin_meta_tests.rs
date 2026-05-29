@@ -46,7 +46,7 @@ fn list_block_gets_plugin_meta_when_base_plugin_registered() {
     assert!(matches!(block.kind, BlockKind::List { ordered: true }));
     assert!(matches!(block.body, BlockBody::List(_)));
     let meta = block.plugin.as_ref().expect("list block has plugin meta");
-    assert_eq!(meta.block_type_name, "list");
+    assert_eq!(meta.block_type_name.as_ref(), "list");
     assert!(meta.builtin);
     assert_eq!(
         meta.attrs.get("ordered"),

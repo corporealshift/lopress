@@ -102,7 +102,7 @@ fn inverse_of_insert_after_is_delete_new_block() {
         &doc,
         BlockAction::InsertAfter {
             anchor: anchor_id,
-            new_block: new_b,
+            new_block: Box::new(new_b),
         },
     );
     match inv {
@@ -122,18 +122,19 @@ fn undo_stack_push_and_pop() {
 
     let action = BlockAction::EditBlockBody {
         block_id: id,
-        new_body: BlockBody::Inline(vec![InlineRun::plain("edited")]),
+        new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("edited")])),
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
 
     let undo_action = stack.pop_undo().unwrap();
     match undo_action {
-        BlockAction::EditBlockBody {
-            new_body: BlockBody::Inline(runs),
-            ..
-        } => {
-            assert_eq!(runs, vec![InlineRun::plain("text")]);
+        BlockAction::EditBlockBody { ref new_body, .. } => {
+            if let BlockBody::Inline(runs) = new_body.as_ref() {
+                assert_eq!(*runs, vec![InlineRun::plain("text")]);
+            } else {
+                panic!("wrong variant");
+            }
         }
         _ => panic!("wrong variant"),
     }
@@ -150,7 +151,7 @@ fn undo_stack_redo_available_after_undo() {
 
     let action = BlockAction::EditBlockBody {
         block_id: id,
-        new_body: BlockBody::Inline(vec![InlineRun::plain("edited")]),
+        new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("edited")])),
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
@@ -158,11 +159,12 @@ fn undo_stack_redo_available_after_undo() {
     stack.pop_undo().unwrap();
     let redo_action = stack.pop_redo().unwrap();
     match redo_action {
-        BlockAction::EditBlockBody {
-            new_body: BlockBody::Inline(runs),
-            ..
-        } => {
-            assert_eq!(runs, vec![InlineRun::plain("edited")]);
+        BlockAction::EditBlockBody { ref new_body, .. } => {
+            if let BlockBody::Inline(runs) = new_body.as_ref() {
+                assert_eq!(*runs, vec![InlineRun::plain("edited")]);
+            } else {
+                panic!("wrong variant");
+            }
         }
         _ => panic!("wrong variant"),
     }
@@ -183,14 +185,14 @@ fn each_edit_block_body_is_its_own_undo_entry() {
 
     let a1 = BlockAction::EditBlockBody {
         block_id: id,
-        new_body: BlockBody::Inline(vec![InlineRun::plain("ab")]),
+        new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("ab")])),
     };
     let (c1, i1) = apply(&mut doc, a1).unwrap();
     stack.push_after_apply(c1, i1);
 
     let a2 = BlockAction::EditBlockBody {
         block_id: id,
-        new_body: BlockBody::Inline(vec![InlineRun::plain("abc")]),
+        new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("abc")])),
     };
     let (c2, i2) = apply(&mut doc, a2).unwrap();
     stack.push_after_apply(c2, i2);
@@ -201,10 +203,13 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     // First undo: restores the intermediate "ab" state.
     let undo1 = stack.pop_undo().unwrap();
     match &undo1 {
-        BlockAction::EditBlockBody {
-            new_body: BlockBody::Inline(runs),
-            ..
-        } => assert_eq!(runs, &vec![InlineRun::plain("ab")]),
+        BlockAction::EditBlockBody { ref new_body, .. } => {
+            if let BlockBody::Inline(runs) = new_body.as_ref() {
+                assert_eq!(runs, &vec![InlineRun::plain("ab")]);
+            } else {
+                panic!("wrong variant");
+            }
+        }
         _ => panic!("wrong variant"),
     }
     let _ = apply(&mut doc, undo1).unwrap();
@@ -212,10 +217,13 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     // Second undo: restores the original "a".
     let undo2 = stack.pop_undo().unwrap();
     match undo2 {
-        BlockAction::EditBlockBody {
-            new_body: BlockBody::Inline(runs),
-            ..
-        } => assert_eq!(runs, vec![InlineRun::plain("a")]),
+        BlockAction::EditBlockBody { ref new_body, .. } => {
+            if let BlockBody::Inline(runs) = new_body.as_ref() {
+                assert_eq!(*runs, vec![InlineRun::plain("a")]);
+            } else {
+                panic!("wrong variant");
+            }
+        }
         _ => panic!("wrong variant"),
     }
 }

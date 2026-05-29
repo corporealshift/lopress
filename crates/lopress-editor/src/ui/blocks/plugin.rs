@@ -215,7 +215,7 @@ fn attr_text(
             let new_attrs = attrs_for_commit.get_untracked();
             on_action_for_commit(BlockAction::EditAttrs {
                 block_id,
-                new_attrs,
+                new_attrs: Box::new(new_attrs),
             });
             floem::event::EventPropagation::Continue
         })
@@ -240,7 +240,7 @@ fn attr_checkbox(
         let new_attrs = attrs_sig.get_untracked();
         on_action(BlockAction::EditAttrs {
             block_id,
-            new_attrs,
+            new_attrs: Box::new(new_attrs),
         });
     })
 }
@@ -277,7 +277,7 @@ fn attr_select(
                 let new_attrs = attrs_sig.get_untracked();
                 on_action_for_btn(BlockAction::EditAttrs {
                     block_id,
-                    new_attrs,
+                    new_attrs: Box::new(new_attrs),
                 });
             })
             .style(move |s| {
