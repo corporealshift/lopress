@@ -71,6 +71,15 @@ pub enum BlockAction {
         anchor: BlockId,
         new_block: Box<EditorBlock>,
     },
+    /// Replace the document's front matter with `new_front_matter`. Used by
+    /// the inspector to make front-matter edits undoable. One action per
+    /// commit (Title blur, Slug blur, Date validation success, etc.).
+    /// Boxed to keep `BlockAction` within the 40-byte size guard — front
+    /// matter is small (KB at most) but not small enough to fit inline.
+    #[allow(clippy::large_enum_variant)]
+    EditFrontMatter {
+        new_front_matter: Box<lopress_core::FrontMatter>,
+    },
 }
 
 /// Apply one `BlockAction` to the document.
@@ -117,6 +126,9 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         } => apply_edit_attrs(doc, block_id, *new_attrs),
         BlockAction::EditBlockBody { block_id, new_body } => {
             apply_edit_block_body(doc, block_id, *new_body)
+        }
+        BlockAction::EditFrontMatter { new_front_matter } => {
+            apply_edit_front_matter(doc, *new_front_matter)
         }
     }
 }
@@ -595,6 +607,24 @@ pub(crate) fn split_item_at_with_id(
 /// run splitting (a styled span vs. a styled span plus a typed plain tail)
 /// or empty runs. Comparing canonically recognises those as no-ops, and the
 /// stored/recorded body is the canonical one so the model stays canonical.
+fn apply_edit_front_matter(
+    doc: &mut EditorDoc,
+    new_fm: lopress_core::FrontMatter,
+) -> Option<(BlockAction, BlockAction)> {
+    if doc.front_matter == new_fm {
+        return None;
+    }
+    let old_fm = std::mem::replace(&mut doc.front_matter, new_fm.clone());
+    Some((
+        BlockAction::EditFrontMatter {
+            new_front_matter: Box::new(new_fm),
+        },
+        BlockAction::EditFrontMatter {
+            new_front_matter: Box::new(old_fm),
+        },
+    ))
+}
+
 fn apply_edit_block_body(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -635,5 +665,54 @@ mod size_tests {
             "BlockAction is {} bytes (expected <= 40); box heavier variants",
             size
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(unreachable_code)]
+#[allow(clippy::unreachable)]
+mod front_matter_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn apply_edit_front_matter_records_inverse() {
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain("body")])],
+            front_matter: lopress_core::FrontMatter {
+                title: Some("old".to_string()),
+                ..Default::default()
+            },
+        };
+        let new_fm = lopress_core::FrontMatter {
+            title: Some("new".to_string()),
+            ..Default::default()
+        };
+        let (canonical, inverse) =
+            apply_edit_front_matter(&mut doc, new_fm.clone()).expect("recorded");
+        assert!(matches!(canonical, BlockAction::EditFrontMatter { .. }));
+
+        // Apply the inverse: the doc's title should return to "old".
+        let BlockAction::EditFrontMatter { new_front_matter } = inverse else {
+            unreachable!();
+        };
+        apply_edit_front_matter(&mut doc, *new_front_matter);
+        assert_eq!(doc.front_matter.title.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn apply_edit_front_matter_no_op_returns_none() {
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain("body")])],
+            front_matter: lopress_core::FrontMatter {
+                title: Some("same".to_string()),
+                ..Default::default()
+            },
+        };
+        let same = lopress_core::FrontMatter {
+            title: Some("same".to_string()),
+            ..Default::default()
+        };
+        assert!(apply_edit_front_matter(&mut doc, same).is_none());
     }
 }

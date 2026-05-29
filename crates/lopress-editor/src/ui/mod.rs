@@ -269,11 +269,12 @@ fn editing_view(
     // P/H1/H2/Code/UL/OL buttons) do too — discriminant comparison covers
     // Heading(1) vs Heading(2), List{ordered:false} vs ordered:true, etc.
     let pane_key = pane_key::build_pane_key(current_doc);
+    let on_action_for_editor = on_action.clone();
     let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
         Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
             Some(doc) => editor_pane::editor_pane(
                 &doc,
-                on_action.clone(),
+                on_action_for_editor.clone(),
                 focus_target,
                 slash_menu_open,
                 dnd,
@@ -296,7 +297,7 @@ fn editing_view(
     })
     .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
-    let inspector = inspector_view(current_doc, current_path, Rc::clone(&save.mark_dirty));
+    let inspector = inspector_view(current_doc, current_path, on_action.clone());
 
     let footer = footer_view(
         save.build_status_sig,

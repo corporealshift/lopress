@@ -32,18 +32,17 @@ const INPUT_BORDER: Color = Color::rgb8(210, 210, 215);
 
 /// Build the inspector view. Empty placeholder when no doc is open.
 ///
-/// `mark_dirty` is called whenever a field edit actually changes
-/// `current_doc.front_matter`; the save-debounce machinery in `mod.rs`
-/// listens for this to schedule a write.
+/// `on_action` dispatches front-matter edits through the `BlockAction`
+/// chokepoint so they are undoable.
 pub fn inspector_view(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
-    mark_dirty: Rc<dyn Fn()>,
+    on_action: crate::ui::blocks::inline_editor::ActionSink,
 ) -> impl IntoView {
     let body = dyn_container(
         move || current_path.get(),
         move |path| match current_doc.with_untracked(|d| d.clone()) {
-            Some(doc) => form(doc, path, current_doc, mark_dirty.clone()).into_any(),
+            Some(doc) => form(doc, path, current_doc, on_action.clone()).into_any(),
             None => empty().into_any(),
         },
     )
@@ -62,8 +61,26 @@ fn form(
     doc: EditorDoc,
     path: Option<PathBuf>,
     current_doc: RwSignal<Option<EditorDoc>>,
-    mark_dirty: Rc<dyn Fn()>,
+    on_action: crate::ui::blocks::inline_editor::ActionSink,
 ) -> AnyView {
+    #[allow(clippy::type_complexity)]
+    let dispatch_fm_edit: Rc<dyn Fn(&dyn Fn(&mut lopress_core::FrontMatter))> = Rc::new({
+        let on_action = on_action.clone();
+        move |mutate: &dyn Fn(&mut lopress_core::FrontMatter)| {
+            let current =
+                current_doc.with_untracked(|d| d.as_ref().map(|doc| doc.front_matter.clone()));
+            let Some(mut new_fm) = current else {
+                return;
+            };
+            let before = new_fm.clone();
+            mutate(&mut new_fm);
+            if new_fm != before {
+                on_action(crate::actions::BlockAction::EditFrontMatter {
+                    new_front_matter: Box::new(new_fm),
+                });
+            }
+        }
+    });
     let fm = &doc.front_matter;
     let title_buf: RwSignal<String> = RwSignal::new(fm.title.clone().unwrap_or_default());
     let slug_buf: RwSignal<String> = RwSignal::new(fm.slug.clone().unwrap_or_default());
@@ -86,95 +103,55 @@ fn form(
         .unwrap_or("")
         .to_string();
 
-    // ── Effects: push buffer changes into current_doc.front_matter ────────
-    // Each effect mutates `current_doc` only when the value actually
-    // changed, then calls `mark_dirty` so the save-debounce in `mod.rs` is
-    // triggered. Without the diff-guard the effects would fire on initial
-    // mount and falsely mark a fresh doc dirty.
-    let md = mark_dirty.clone();
+    // ── Effects: push buffer changes through BlockAction for undoability ──
+    // Each effect calls `dispatch_fm_edit` which builds a new front matter
+    // via a mutator closure and dispatches `EditFrontMatter` only when the
+    // result differs from the current model state.
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let new_title = title_buf.get();
-        let mut changed = false;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                let next = if new_title.is_empty() {
-                    None
-                } else {
-                    Some(new_title.clone())
-                };
-                if d.front_matter.title != next {
-                    d.front_matter.title = next;
-                    changed = true;
-                }
-            }
+        dfe(&|fm| {
+            fm.title = if new_title.is_empty() {
+                None
+            } else {
+                Some(new_title.clone())
+            };
         });
-        if changed {
-            md();
-        }
     });
-    let md = mark_dirty.clone();
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let new_slug = slug_buf.get();
-        let mut changed = false;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                let next = if new_slug.is_empty() {
-                    None
-                } else {
-                    Some(new_slug.clone())
-                };
-                if d.front_matter.slug != next {
-                    d.front_matter.slug = next;
-                    changed = true;
-                }
-            }
+        dfe(&|fm| {
+            fm.slug = if new_slug.is_empty() {
+                None
+            } else {
+                Some(new_slug.clone())
+            };
         });
-        if changed {
-            md();
-        }
     });
-    let md = mark_dirty.clone();
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let raw = date_buf.get();
         if raw.trim().is_empty() {
             date_invalid.set(false);
-            let mut changed = false;
-            current_doc.update(|maybe| {
-                if let Some(d) = maybe {
-                    if d.front_matter.date.is_some() {
-                        d.front_matter.date = None;
-                        changed = true;
-                    }
-                }
+            dfe(&|fm| {
+                fm.date = None;
             });
-            if changed {
-                md();
-            }
             return;
         }
         match NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d") {
             Ok(d) => {
                 date_invalid.set(false);
-                let mut changed = false;
-                current_doc.update(|maybe| {
-                    if let Some(doc) = maybe {
-                        if doc.front_matter.date != Some(d) {
-                            doc.front_matter.date = Some(d);
-                            changed = true;
-                        }
-                    }
+                dfe(&|fm| {
+                    fm.date = Some(d);
                 });
-                if changed {
-                    md();
-                }
             }
             Err(_) => {
-                // Don't write through bad input; surface a hint instead.
                 date_invalid.set(true);
             }
         }
     });
-    let md = mark_dirty.clone();
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let raw = tags_buf.get();
         let tags: Vec<String> = raw
@@ -182,55 +159,27 @@ fn form(
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
             .collect();
-        let mut changed = false;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                if d.front_matter.tags != tags {
-                    d.front_matter.tags = tags.clone();
-                    changed = true;
-                }
-            }
+        dfe(&|fm| {
+            fm.tags = tags.clone();
         });
-        if changed {
-            md();
-        }
     });
-    let md = mark_dirty.clone();
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let v = draft_sig.get();
-        let mut changed = false;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                if d.front_matter.draft != v {
-                    d.front_matter.draft = v;
-                    changed = true;
-                }
-            }
+        dfe(&|fm| {
+            fm.draft = v;
         });
-        if changed {
-            md();
-        }
     });
-    let md = mark_dirty.clone();
+    let dfe = Rc::clone(&dispatch_fm_edit);
     create_effect(move |_| {
         let new_desc = desc_buf.get();
-        let mut changed = false;
-        current_doc.update(|maybe| {
-            if let Some(d) = maybe {
-                let next = if new_desc.is_empty() {
-                    None
-                } else {
-                    Some(new_desc.clone())
-                };
-                if d.front_matter.description != next {
-                    d.front_matter.description = next;
-                    changed = true;
-                }
-            }
+        dfe(&|fm| {
+            fm.description = if new_desc.is_empty() {
+                None
+            } else {
+                Some(new_desc.clone())
+            };
         });
-        if changed {
-            md();
-        }
     });
 
     // ── Field widgets ────────────────────────────────────────────────────
@@ -286,23 +235,19 @@ fn form(
     });
 
     let warning_row = {
-        let mark_dirty_for_sync = mark_dirty.clone();
         dyn_container(
             move || title_h1_mismatch.get(),
             move |mismatch| {
                 if !mismatch {
                     return empty().into_any();
                 }
-                let mark_dirty = mark_dirty_for_sync.clone();
+                let dfe_sync = Rc::clone(&dispatch_fm_edit);
                 let on_sync = move || {
                     if let Some(text) = h1_text.get_untracked() {
                         title_buf.set(text.clone());
-                        current_doc.update(|maybe| {
-                            if let Some(d) = maybe {
-                                d.front_matter.title = Some(text.clone());
-                            }
+                        dfe_sync(&|fm| {
+                            fm.title = Some(text.clone());
                         });
-                        mark_dirty();
                     }
                 };
                 h_stack((
