@@ -289,14 +289,18 @@ pub fn editable_code_view(
 
     // Lang input in the top-right corner. An always-on `text_input` bound
     // to `lang_sig`; styled to look like a plain corner label until focused,
-    // when it grows a subtle border. On FocusLost we commit the new lang
-    // via `EditAttrs` (deferred so the click that moves focus has fully
-    // settled before any signal mutation lands).
+    // when it grows a subtle border. On FocusLost or Enter we commit the new
+    // lang via `EditAttrs` (deferred so the click that moves focus has fully
+    // settled before any signal mutation lands). Escape reverts.
     let lang_sig: RwSignal<String> = RwSignal::new(lang.to_string());
     let lang_committed: RwSignal<String> = RwSignal::new(lang.to_string());
+
+    let lang_on_action_for_blur = lang_on_action.clone();
+    let lang_on_action_for_key = lang_on_action.clone();
+
     let lang_input = text_input(lang_sig)
         .on_event_stop(EventListener::FocusLost, move |_| {
-            let on_action = lang_on_action.clone();
+            let on_action = lang_on_action_for_blur.clone();
             floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
                 let new_lang = lang_sig.get_untracked();
                 if new_lang != lang_committed.get_untracked() {
@@ -312,6 +316,37 @@ pub fn editable_code_view(
                     lang_committed.set(new_lang);
                 }
             });
+        })
+        .on_event_stop(EventListener::KeyDown, move |e: &floem::event::Event| {
+            if let floem::event::Event::KeyDown(k) = e {
+                if matches!(
+                    k.key.logical_key,
+                    floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter)
+                ) {
+                    let on_action = lang_on_action_for_key.clone();
+                    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
+                        let new_lang = lang_sig.get_untracked();
+                        if new_lang != lang_committed.get_untracked() {
+                            let mut new_attrs = serde_json::Map::new();
+                            new_attrs.insert(
+                                "lang".to_string(),
+                                serde_json::Value::String(new_lang.clone()),
+                            );
+                            on_action(BlockAction::EditAttrs {
+                                block_id,
+                                new_attrs: Box::new(new_attrs),
+                            });
+                            lang_committed.set(new_lang);
+                        }
+                    });
+                } else if matches!(
+                    k.key.logical_key,
+                    floem::keyboard::Key::Named(floem::keyboard::NamedKey::Escape)
+                ) {
+                    let original = lang_committed.get_untracked();
+                    lang_sig.set(original);
+                }
+            }
         })
         .style(|s| {
             s.color(Color::rgb8(120, 120, 120))
