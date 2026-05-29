@@ -27,11 +27,16 @@ use floem::views::editor::gutter::GutterClass;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
-use floem::views::{h_stack, stack, text, v_stack_from_iter, Decorators};
+use floem::views::{
+    dyn_container, empty, h_stack, label, stack, text, v_stack_from_iter, Decorators,
+};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// Greyed hint text shown in empty list items so users see they're editable.
+const EMPTY_ITEM_PLACEHOLDER: &str = "Empty item — type to fill";
 
 /// Per-list shared collection of every item's editor signals. Each
 /// `list_item_editor` call pushes its handle here at construction; the
@@ -130,7 +135,7 @@ pub fn editable_list_view(
             } else {
                 "•".to_string()
             };
-            let editor = list_item_editor(
+            let (editor, editor_sig) = list_item_editor(
                 &item.runs,
                 block_id,
                 item.id,
@@ -145,9 +150,34 @@ pub fn editable_list_view(
                 Rc::clone(&on_undo),
                 Rc::clone(&on_redo),
             );
+            let editor_sig_for_overlay = editor_sig;
+            let placeholder_overlay = dyn_container(
+                move || editor_sig_for_overlay.with(|ed| ed.doc().text().is_empty()),
+                move |is_empty| {
+                    if is_empty {
+                        label(|| EMPTY_ITEM_PLACEHOLDER.to_string())
+                            .style(|s| {
+                                s.color(floem::peniko::Color::rgb8(160, 160, 160))
+                                    .font_size(15.)
+                                    .padding_horiz(2.)
+                                    .position(floem::style::Position::Absolute)
+                                    .inset_left(0.)
+                                    .inset_top(0.)
+                            })
+                            .into_any()
+                    } else {
+                        empty().into_any()
+                    }
+                },
+            );
+
             h_stack((
                 text(prefix).style(|s| s.width(24.).font_size(15.)),
-                editor.style(|s| s.flex_grow(1.0)),
+                floem::views::stack((
+                    editor.style(|s| s.flex_grow(1.0).width_full()),
+                    placeholder_overlay,
+                ))
+                .style(|s| s.flex_grow(1.0)),
             ))
             .style(|s| s.padding_vert(2.).width_full())
             .into_any()
@@ -182,7 +212,7 @@ fn list_item_editor(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
-) -> AnyView {
+) -> (AnyView, RwSignal<Editor>) {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
     let editor_sig = state.editor_sig;
@@ -256,14 +286,13 @@ fn list_item_editor(
     // Per-item height styling: hide the editor gutter (the bullet prefix
     // serves that role) and size to the visual line count.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
-    stack((view,))
-        .style(move |s| {
-            let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f32;
-            s.class(GutterClass, |s| s.hide())
-                .width_full()
-                .height(lines * line_height)
-        })
-        .into_any()
+    let view = stack((view,)).style(move |s| {
+        let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f32;
+        s.class(GutterClass, |s| s.hide())
+            .width_full()
+            .height(lines * line_height)
+    });
+    (view.into_any(), editor_sig)
 }
 
 /// Build the list-item structural-key callback. Implements the keyboard-
