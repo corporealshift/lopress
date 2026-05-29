@@ -39,13 +39,13 @@ fn block_to_core(b: &EditorBlock) -> Block {
         },
         (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
             r#type: "code".into(),
-            attrs: json!({ "lang": lang }),
+            attrs: json!({ "lang": &**lang }),
             children: vec![],
             text: Some(text.clone()),
         },
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
             serde_json::from_value::<Block>(value.clone()).unwrap_or_else(|_| Block {
-                r#type: type_name.clone(),
+                r#type: type_name.to_string(),
                 attrs: empty_attrs(),
                 children: vec![],
                 text: None,
@@ -138,7 +138,7 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
         },
         (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
             r#type: "code".into(),
-            attrs: json!({ "lang": lang }),
+            attrs: json!({ "lang": &**lang }),
             children: vec![],
             text: Some(text.clone()),
         },
@@ -170,7 +170,7 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
         },
     };
     Block {
-        r#type: meta.block_type_name.clone(),
+        r#type: meta.block_type_name.to_string(),
         attrs,
         children: vec![inner],
         text: None,

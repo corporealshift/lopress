@@ -11,6 +11,7 @@ use lopress_editor::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use serde_json::{json, Value};
+use std::rc::Rc;
 
 fn doc_with(blocks: Vec<EditorBlock>) -> EditorDoc {
     EditorDoc {
@@ -278,7 +279,7 @@ fn change_paragraph_to_code_flattens_runs() {
         BlockAction::ChangeType {
             block_id: id,
             new_kind: BlockKind::Code {
-                lang: "rust".into(),
+                lang: Rc::from("rust"),
             },
         },
     );
@@ -358,7 +359,7 @@ fn change_type_to_list_stamps_plugin_meta() {
     assert_eq!(meta.editor.as_deref(), Some("list"));
     assert_eq!(meta.native.as_deref(), Some("list"));
     assert!(meta.builtin);
-    assert_eq!(meta.block_type_name, "list");
+    assert_eq!(meta.block_type_name.as_ref(), "list");
 }
 
 #[test]
@@ -624,7 +625,7 @@ mod inverse_symmetry {
         let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
         block.body = BlockBody::Code("fn main() {}".to_string());
         block.kind = BlockKind::Code {
-            lang: String::new(),
+            lang: Rc::from(""),
         };
         let id = block.id;
         let mut doc = doc_with(vec![block]);
@@ -680,7 +681,7 @@ mod inverse_symmetry {
         let mut block = EditorBlock::paragraph(vec![InlineRun::plain("")]);
         block.body = BlockBody::Code("foobar".to_string());
         block.kind = BlockKind::Code {
-            lang: String::new(),
+            lang: Rc::from(""),
         };
         let id = block.id;
         let mut doc = doc_with(vec![block]);
@@ -822,7 +823,7 @@ fn change_type_code_to_list_converts_body_to_list() {
         .plugin
         .as_ref()
         .expect("a list block must carry PluginMeta");
-    assert_eq!(meta.block_type_name, "list");
+    assert_eq!(meta.block_type_name.as_ref(), "list");
 }
 
 #[test]
@@ -844,7 +845,7 @@ fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
         },
     );
     let b = &doc.blocks[0];
-    assert!(matches!(&b.kind, BlockKind::Code { lang } if lang == "python"));
+    assert!(matches!(&b.kind, BlockKind::Code { lang } if &**lang == "python"));
     assert!(
         matches!(&b.body, BlockBody::Code(t) if t == "fn main() {}"),
         "code text must be preserved"
@@ -938,13 +939,13 @@ fn change_type_list_to_code_converts_body_to_code() {
         },
     );
     let b = &doc.blocks[0];
-    assert!(matches!(&b.kind, BlockKind::Code { lang } if lang == "bash"));
+    assert!(matches!(&b.kind, BlockKind::Code { lang } if &**lang == "bash"));
     assert!(
         matches!(&b.body, BlockBody::Code(t) if t == "line1\nline2"),
         "code body must be joined list item texts"
     );
     let meta = b.plugin.as_ref().expect("code block must carry PluginMeta");
-    assert_eq!(meta.block_type_name, "code");
+    assert_eq!(meta.block_type_name.as_ref(), "code");
 }
 
 #[test]
@@ -995,12 +996,12 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
         serde_json::Value::String("rust".to_string()),
     );
     block.plugin = Some(PluginMeta {
-        block_type_name: "code".to_string(),
+        block_type_name: Rc::from("code"),
         attrs: attrs.clone(),
-        attr_decls: vec![],
+        attr_decls: Rc::from([]),
         builtin: true,
-        editor: Some("code".to_string()),
-        native: Some("code".to_string()),
+        editor: Some(Rc::from("code")),
+        native: Some(Rc::from("code")),
     });
     let id = block.id;
     let mut doc = doc_with(vec![block]);
@@ -1032,7 +1033,7 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
     // Verify kind.lang mirrored.
     assert!(matches!(
         &doc.blocks[0].kind,
-        BlockKind::Code { lang } if lang == "python"
+        BlockKind::Code { lang } if &**lang == "python"
     ));
 
     // Verify to_core emits the new lang.

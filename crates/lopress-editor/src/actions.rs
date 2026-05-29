@@ -10,6 +10,7 @@ use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use serde_json::Value;
+use std::rc::Rc;
 
 /// One discrete edit. Each variant maps to one function below.
 #[derive(Debug, Clone)]
@@ -149,7 +150,7 @@ fn apply_edit_attrs(
             .and_then(Value::as_str)
         {
             block.kind = BlockKind::Code {
-                lang: new_lang.to_string(),
+                lang: Rc::from(new_lang),
             };
         }
     }
@@ -467,7 +468,7 @@ fn apply_change_type(
             block.kind = BlockKind::Code { lang: lang.clone() };
             if let Some(meta) = block.plugin.as_mut() {
                 meta.attrs
-                    .insert("lang".into(), Value::String(lang.clone()));
+                    .insert("lang".into(), Value::String(lang.to_string()));
             }
         }
         (BlockKind::Code { lang }, BlockBody::List(items)) => {

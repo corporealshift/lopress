@@ -6,6 +6,7 @@
 
 pub(crate) mod input;
 
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
@@ -95,7 +96,7 @@ impl CtrlAction {
                 new_kind: match new_kind {
                     CtrlBlockKind::Paragraph => BlockKind::Paragraph,
                     CtrlBlockKind::Heading { level } => BlockKind::Heading(level.clamp(1, 6)),
-                    CtrlBlockKind::Code { lang } => BlockKind::Code { lang },
+                    CtrlBlockKind::Code { lang } => BlockKind::Code { lang: Rc::from(lang) },
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
                 },
             },
@@ -209,9 +210,9 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                 BlockBody::Code(text) => {
                     let lang = match &b.kind {
                         BlockKind::Code { lang } => lang.clone(),
-                        _ => String::new(),
+                        _ => Rc::from(""),
                     };
-                    serde_json::json!({ "id": id, "kind": "Code", "lang": lang, "text": text })
+                    serde_json::json!({ "id": id, "kind": "Code", "lang": &*lang, "text": text })
                 }
                 BlockBody::List(items) => {
                     let text = items
@@ -229,7 +230,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                 BlockBody::Opaque(_) => {
                     let type_name = match &b.kind {
                         BlockKind::Opaque { type_name } => type_name.clone(),
-                        _ => String::new(),
+                        _ => Rc::from(""),
                     };
                     serde_json::json!({
                         "id": id,
@@ -672,7 +673,7 @@ mod tests {
                     lang: "rust".to_string(),
                 },
                 BlockKind::Code {
-                    lang: "rust".to_string(),
+                    lang: Rc::from("rust"),
                 },
             ),
             (

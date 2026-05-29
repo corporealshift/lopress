@@ -18,6 +18,7 @@ use floem::event::{Event, EventListener};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
+use std::rc::Rc;
 use floem::text::Weight;
 use floem::views::editor::Editor;
 use floem::views::{
@@ -60,7 +61,7 @@ pub fn block_toolbar_for(
         (
             "Code",
             BlockKind::Code {
-                lang: String::new(),
+                lang: Rc::from(""),
             },
         ),
         ("UL", BlockKind::List { ordered: false }),

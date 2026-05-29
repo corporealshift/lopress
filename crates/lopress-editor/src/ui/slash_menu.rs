@@ -8,6 +8,7 @@
 //! `on_close()` so the editor pane can clear its `slash_menu_open` flag.
 
 use crate::model::types::BlockKind;
+use std::rc::Rc;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
@@ -29,7 +30,7 @@ pub fn slash_menu_items() -> Vec<(&'static str, BlockKind)> {
         (
             "Code block",
             BlockKind::Code {
-                lang: String::new(),
+                lang: Rc::from(""),
             },
         ),
         ("Unordered list", BlockKind::List { ordered: false }),
