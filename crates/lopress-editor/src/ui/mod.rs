@@ -78,6 +78,10 @@ pub(crate) fn root_view(
     // Reactive view of the currently open document.
     let current_doc: RwSignal<Option<EditorDoc>> = RwSignal::new(None);
 
+    // Reactive view of the open document's path. Lifted to root_view (from
+    // editing_view) so the ctrl snapshot/open/close effects can read & set it.
+    let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
+
     // Callback invoked by the welcome view when the user picks a path.
     let editing_for_open = Rc::clone(&editing);
     let on_open = move |path: std::path::PathBuf| match Session::open(&path) {
@@ -106,31 +110,20 @@ pub(crate) fn root_view(
 
     let editing_for_view = Rc::clone(&editing);
 
-    // Capture `on_open` as an Rc<dyn Fn> so it can be threaded through
-    // `ctrl_once` for the ctrl `/open` endpoint.
-    let on_open_for_ctrl: Rc<dyn Fn(std::path::PathBuf)> = Rc::new(on_open.clone());
-
+    // Wire the always-on ctrl effects (snapshot/open/close) at root scope so
+    // `/open` and `/close` work from the welcome screen. Returns the action
+    // signal, which `editing_view` wires to the `on_action` sink on mount.
     #[cfg(debug_assertions)]
-    #[allow(clippy::type_complexity)]
-    let ctrl_once: Rc<
-        std::cell::RefCell<
-            Option<(
-                crate::ctrl::CtrlHandle,
-                crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
-                crossbeam_channel::Receiver<crate::ctrl::CtrlOpenEnvelope>,
-                crossbeam_channel::Receiver<crate::ctrl::CtrlCloseEnvelope>,
-                Rc<dyn Fn(std::path::PathBuf)>,
-            )>,
-        >,
-    > = Rc::new(std::cell::RefCell::new(Some((
+    let ctrl_action_read = ctrl_wire::wire_ctrl_root(
         ctrl_handle,
         ctrl_action_rx,
         ctrl_open_rx,
         ctrl_close_rx,
-        on_open_for_ctrl,
-    ))));
-    #[cfg(debug_assertions)]
-    let ctrl_once_for_view = Rc::clone(&ctrl_once);
+        current_doc,
+        current_path,
+        Rc::clone(&editing),
+        state_tag,
+    );
 
     dyn_container(
         move || state_tag.get(),
@@ -138,18 +131,14 @@ pub(crate) fn root_view(
             StateTag::Welcome => {
                 welcome::welcome_view(welcome_signal, settings_signal, on_open.clone()).into_any()
             }
-            StateTag::Editing => {
+            StateTag::Editing => editing_view(
+                Rc::clone(&editing_for_view),
+                current_doc,
+                current_path,
                 #[cfg(debug_assertions)]
-                let ctrl = ctrl_once_for_view.borrow_mut().take();
-                editing_view(
-                    Rc::clone(&editing_for_view),
-                    current_doc,
-                    state_tag,
-                    #[cfg(debug_assertions)]
-                    ctrl,
-                )
-                .into_any()
-            }
+                ctrl_action_read,
+            )
+            .into_any(),
         },
     )
     .style(|s| s.width_full().height_full())
@@ -157,18 +146,13 @@ pub(crate) fn root_view(
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
 /// with a footer pinned at the bottom.
-#[allow(clippy::type_complexity)]
 fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
-    state_tag: RwSignal<StateTag>,
-    #[cfg(debug_assertions)] ctrl: Option<(
-        crate::ctrl::CtrlHandle,
-        crossbeam_channel::Receiver<crate::ctrl::CtrlActionEnvelope>,
-        crossbeam_channel::Receiver<crate::ctrl::CtrlOpenEnvelope>,
-        crossbeam_channel::Receiver<crate::ctrl::CtrlCloseEnvelope>,
-        Rc<dyn Fn(std::path::PathBuf)>,
-    )>,
+    current_path: RwSignal<Option<PathBuf>>,
+    #[cfg(debug_assertions)] ctrl_action_read: floem::reactive::ReadSignal<
+        Option<crate::ctrl::CtrlActionEnvelope>,
+    >,
 ) -> impl IntoView {
     // Snapshot the workspace once at view-build time. Sidebar actions
     // (new post / new page) call `session.rescan()` and then update this
@@ -184,7 +168,6 @@ fn editing_view(
             pages: Vec::new(),
         });
     let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
-    let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
 
     let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
 
@@ -308,21 +291,10 @@ fn editing_view(
     );
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
+    // Snapshot/open/close effects are wired once at root scope; here we only
+    // attach the action effect (it needs the `on_action` sink).
     #[cfg(debug_assertions)]
-    if let Some((ctrl_handle, ctrl_action_rx, ctrl_open_rx, ctrl_close_rx, on_open_ctrl)) = ctrl {
-        ctrl_wire::wire_ctrl(
-            ctrl_handle,
-            ctrl_action_rx,
-            ctrl_open_rx,
-            ctrl_close_rx,
-            current_doc,
-            current_path,
-            on_action_for_ctrl,
-            on_open_ctrl,
-            Rc::clone(&editing),
-            state_tag,
-        );
-    }
+    ctrl_wire::wire_ctrl_action(ctrl_action_read, current_doc, on_action_for_ctrl);
 
     // `min_height(0)` lets these flex items shrink below their content height
     // so the editor pane's `scroll` gets a bounded viewport (see editor_pane).
