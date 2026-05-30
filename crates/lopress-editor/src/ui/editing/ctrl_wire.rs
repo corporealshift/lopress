@@ -136,7 +136,11 @@ fn open_document_by_path(
     let target = if raw.is_absolute() {
         raw
     } else {
-        let Some(root) = editing.borrow().as_ref().map(|s| s.session.workspace().root) else {
+        let Some(root) = editing
+            .borrow()
+            .as_ref()
+            .map(|s| s.session.workspace().root)
+        else {
             return CtrlOpenResult::NoWorkspace;
         };
         root.join(&raw)
@@ -172,7 +176,10 @@ fn open_document_by_path(
         };
         state.open_document(&doc_ref);
     }
-    let doc = editing.borrow().as_ref().and_then(|s| s.current_doc.clone());
+    let doc = editing
+        .borrow()
+        .as_ref()
+        .and_then(|s| s.current_doc.clone());
     // Set current_doc + current_path BEFORE flipping state_tag so editing_view
     // sees a populated doc when it mounts.
     current_doc.set(doc);

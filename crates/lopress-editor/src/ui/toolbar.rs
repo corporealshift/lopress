@@ -73,7 +73,7 @@ pub fn block_toolbar_for(
         let kind_for_action = kind.clone();
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
-            .action(move || {
+            .on_event_stop(EventListener::PointerDown, move |_| {
                 // Commit current editor text before changing kind.
                 if let Some((editor_sig, spans_sig, _, _)) =
                     focus_pub.editor_and_spans.get_untracked()
@@ -122,7 +122,7 @@ pub fn block_toolbar_for(
     // Delete.
     let on_action_for_del = on_action.clone();
     let del_btn = button(label(|| "x".to_string()))
-        .action(move || {
+        .on_event_stop(EventListener::PointerDown, move |_| {
             on_action_for_del(BlockAction::Delete { block_id });
         })
         .style(|s| {
@@ -207,7 +207,12 @@ pub fn block_toolbar_for(
                             }
                         })
                         .style(|s| s.flex_grow(1.0).font_size(13.)),
-                    button(label(|| "Remove".to_string())).action(remove),
+                    button(label(|| "Remove".to_string())).on_event_stop(
+                        EventListener::PointerDown,
+                        move |_| {
+                            remove();
+                        },
+                    ),
                 ))
                 .style(|s| s.gap(4.).width_full().padding_horiz(6.).padding_vert(4.))
                 .into_any()
@@ -235,7 +240,7 @@ fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher)
     });
 
     button(lbl_view)
-        .action(move || {
+        .on_event_stop(EventListener::PointerDown, move |_| {
             if let Some((editor_sig, spans_sig, style_rev, _)) =
                 focus_pub.editor_and_spans.get_untracked()
             {
