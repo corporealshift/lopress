@@ -86,16 +86,17 @@ pub fn block_view(
             )
             .style(|s| s.width_full())
         };
-        return v_stack((toolbar_slot, plugin_view))
-            .style(move |s| {
-                let focused = focus_pub.block.get() == Some(block_id);
-                let s = s.width_full().border(1.0).border_radius(4.0);
-                if focused {
-                    s.border_color(FOCUS_BORDER)
-                } else {
-                    s.border_color(floem::peniko::Color::TRANSPARENT)
-                }
-            })
+        let plugin_with_border = plugin_view.style(move |s| {
+            let focused = focus_pub.block.get() == Some(block_id);
+            let s = s.width_full().border(1.0).border_radius(4.0);
+            if focused {
+                s.border_color(FOCUS_BORDER)
+            } else {
+                s.border_color(floem::peniko::Color::TRANSPARENT)
+            }
+        });
+        return v_stack((toolbar_slot, plugin_with_border))
+            .style(|s| s.width_full())
             .into_any();
     }
 
@@ -191,15 +192,16 @@ pub fn block_view(
             EventPropagation::Continue
         });
 
-    v_stack((toolbar_slot, row))
-        .style(move |s| {
-            let focused = focus_pub.block.get() == Some(block_id);
-            let s = s.width_full().border(1.0).border_radius(4.0);
-            if focused {
-                s.border_color(FOCUS_BORDER)
-            } else {
-                s.border_color(floem::peniko::Color::TRANSPARENT)
-            }
-        })
+    let row_with_border = row.style(move |s| {
+        let focused = focus_pub.block.get() == Some(block_id);
+        let s = s.width_full().border(1.0).border_radius(4.0);
+        if focused {
+            s.border_color(FOCUS_BORDER)
+        } else {
+            s.border_color(floem::peniko::Color::TRANSPARENT)
+        }
+    });
+    v_stack((toolbar_slot, row_with_border))
+        .style(|s| s.width_full())
         .into_any()
 }
