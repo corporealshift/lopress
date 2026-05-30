@@ -133,14 +133,14 @@ pub fn block_toolbar_for(
     buttons.push(del_btn.into_any());
 
     let button_row = h_stack_from_iter(buttons).style(|s| {
-        s.padding_horiz(6.)
+        s.padding_horiz(8.)
             .padding_vert(4.)
             .gap(4.)
-            .background(Color::rgb8(245, 245, 248))
+            .background(Color::rgb8(252, 252, 254))
             .border(1.)
             .border_color(Color::rgb8(220, 220, 226))
-            .border_radius(4.)
-            .margin_bottom(4.)
+            .border_radius(6.)
+            .margin_bottom(6.)
     });
 
     let on_action_for_url = on_action.clone();
