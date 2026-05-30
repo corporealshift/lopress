@@ -124,12 +124,26 @@ regressions.
 `unsafe`, raise it before writing the code — the answer is usually to reach
 for a crate that has already vetted the unsafe block.
 
+## Run the gate yourself: `bash scripts/check.sh`
+
+`scripts/check.sh` is the canonical verification gate — it runs `cargo fmt
+--all`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo
+test --workspace`, exiting non-zero if any fail. Run it before you stop.
+
+Use **that script** (or its exact `--workspace` commands), not a per-crate
+`cargo clippy -p <crate>`. A per-crate check can pass locally while the
+workspace gate fails in another crate, which just gets you re-woken. The
+script, this doc, and the Stop hook all share the one source of truth so they
+can't drift.
+
 ## Cargo verification runs automatically on Stop
 
-`.claude/settings.json` registers a Stop hook that runs `cargo fmt --all`,
-`cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace` in the background whenever the agent stops with any
-`.rs` file dirty in `git status`. No-`.rs`-change turns skip silently.
+`.claude/settings.json` registers a Stop hook that runs the same three commands
+as `scripts/check.sh` (`cargo fmt --all`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo test --workspace`) in the background
+whenever the agent stops with any `.rs` file dirty in `git status`.
+No-`.rs`-change turns skip silently. Running `scripts/check.sh` yourself first
+gets you the same result before the hook fires.
 
 The hook is `asyncRewake: true`, so if any of the three fail, the agent is
 re-woken with the output prefixed by *"Stop-hook cargo verification failed."*
