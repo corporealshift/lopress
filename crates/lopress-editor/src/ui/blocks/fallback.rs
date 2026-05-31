@@ -11,12 +11,28 @@ use crate::ui::blocks::paragraph::MONO_FAMILY;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::SignalUpdate;
-use floem::views::{label, stack, text, Decorators};
+use floem::views::{label, text, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 
-/// Warning text shown inline on every fallback block. Self-clears because the
+/// The recovery hint shown inline on a fallback block. Self-clears because the
 /// fallback view is no longer constructed once the block renders normally.
-const WARNING_TEXT: &str = "This block couldn't be displayed with its editor — showing its raw content. Change its type or delete it to recover.";
+///
+/// An `Opaque` body is an unknown or unregistered block type loaded from disk:
+/// there is no sensible target kind to convert it into (`apply_change_type`
+/// can't reshape arbitrary JSON, and the flattened text is empty), so Change
+/// Type does not recover it — the copy points only to Delete. Any other body
+/// shape is a genuine kind/body mismatch that Change Type *can* recover by
+/// re-mounting a working editor.
+fn warning_text_for(body: &BlockBody) -> &'static str {
+    match body {
+        BlockBody::Opaque(_) => {
+            "This block's type isn't available here, so it can't be edited — showing its raw content. Delete it to remove this block."
+        }
+        _ => {
+            "This block couldn't be displayed with its editor — showing its raw content. Change its type or delete it to recover."
+        }
+    }
+}
 
 /// Build a recoverable fallback view for a block that can't be rendered normally.
 ///
@@ -56,8 +72,10 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
         }
     };
 
-    // Warning banner: persistent, inline, non-blocking.
-    let warning = label(|| WARNING_TEXT.to_string()).style(|s| {
+    // Warning banner: persistent, inline, non-blocking. Copy depends on whether
+    // the block is recoverable via Change Type (mismatch) or only Delete (Opaque).
+    let warning_text = warning_text_for(&block.body);
+    let warning = label(move || warning_text.to_string()).style(|s| {
         s.font_size(11.)
             .color(Color::rgb8(180, 120, 40))
             .padding_horiz(8.)
@@ -65,10 +83,13 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
             .background(Color::rgb8(255, 248, 230))
             .border_radius(4.)
             .margin(6.)
+            .width_full()
     });
 
-    // The body: content + warning stacked, with a PointerDown that sets focus.
-    let body = stack((content, warning))
+    // The body: a full-width warning banner above the raw content, with a
+    // PointerDown that sets focus. Vertical so the banner is never clipped
+    // beside the content (a horizontal stack hid the message off the edge).
+    let body = v_stack((warning, content))
         .style(|s| {
             s.width_full()
                 .border(1.)
@@ -86,4 +107,33 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
         });
 
     body.into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::warning_text_for;
+    use crate::model::types::{BlockBody, InlineRun};
+
+    #[test]
+    fn opaque_warning_points_to_delete_only() {
+        // An Opaque block can't be recovered via Change Type, so its copy must
+        // not promise it — only Delete.
+        let w = warning_text_for(&BlockBody::Opaque(serde_json::json!({ "src": "x.mp4" })));
+        assert!(w.contains("Delete"), "expected a Delete hint, got: {w}");
+        assert!(
+            !w.contains("Change its type"),
+            "Opaque copy must not promise Change Type recovery, got: {w}"
+        );
+    }
+
+    #[test]
+    fn mismatch_warning_offers_change_type() {
+        // A genuine kind/body mismatch (non-Opaque body) is recoverable via
+        // Change Type, so the copy should offer it.
+        let w = warning_text_for(&BlockBody::Inline(vec![InlineRun::plain("hi")]));
+        assert!(
+            w.contains("Change its type"),
+            "expected a Change Type hint, got: {w}"
+        );
+    }
 }
