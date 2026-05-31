@@ -356,3 +356,87 @@ fn pluginless_code_block_round_trips() {
         BlockKind::Code { lang } if &**lang == "go"
     ));
 }
+
+// ============================================================================
+// Unclassifiable block loading — no panics on disk data.
+// ============================================================================
+
+#[test]
+fn unknown_block_type_loads_as_opaque_no_panic() {
+    // A block type that is neither built-in nor in the registry must load
+    // as Opaque without panicking. The body contains verbatim JSON so the
+    // fallback view can render it.
+    let unknown_block = Block {
+        r#type: "unknown:foobar".into(),
+        attrs: json!({ "foo": "bar" }),
+        children: vec![],
+        text: Some("raw text content".to_string()),
+    };
+    let core = Document {
+        front_matter: FrontMatter::default(),
+        blocks: vec![unknown_block],
+    };
+
+    let editor = doc_from_core(&core, &PluginRegistry::default());
+    assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
+    assert!(matches!(
+        &editor.blocks[0].kind,
+        BlockKind::Opaque { type_name } if type_name.as_ref() == "unknown:foobar"
+    ));
+    assert!(matches!(
+        &editor.blocks[0].body,
+        BlockBody::Opaque(v) if v.get("text").and_then(Value::as_str) == Some("raw text content")
+    ));
+}
+
+#[test]
+fn malformed_attrs_loads_as_opaque_no_panic() {
+    // A block with attrs that can't be parsed as an object should still
+    // load without panicking — serde_json::to_value handles any Block.
+    let malformed_block = Block {
+        r#type: "weird:block".into(),
+        attrs: json!("not-an-object"), // malformed: attrs should be an object
+        children: vec![],
+        text: None,
+    };
+    let core = Document {
+        front_matter: FrontMatter::default(),
+        blocks: vec![malformed_block],
+    };
+
+    let editor = doc_from_core(&core, &PluginRegistry::default());
+    assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
+    assert!(matches!(
+        &editor.blocks[0].kind,
+        BlockKind::Opaque { type_name } if type_name.as_ref() == "weird:block"
+    ));
+}
+
+#[test]
+fn unregistered_plugin_type_loads_as_opaque() {
+    // A block type matching a plugin namespace but not registered in the
+    // current registry must load as Opaque, not panic.
+    let custom_block = Block {
+        r#type: "lopress:video".into(),
+        attrs: json!({ "src": "video.mp4" }),
+        children: vec![],
+        text: None,
+    };
+    let core = Document {
+        front_matter: FrontMatter::default(),
+        blocks: vec![custom_block],
+    };
+
+    // Use an empty registry — no plugins registered.
+    let registry = PluginRegistry::default();
+    let editor = doc_from_core(&core, &registry);
+    assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
+    assert!(matches!(
+        &editor.blocks[0].kind,
+        BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"
+    ));
+
+    // Round-trip: the Opaque body preserves the original JSON.
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back, core);
+}

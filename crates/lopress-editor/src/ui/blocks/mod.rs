@@ -142,8 +142,11 @@ pub fn block_view(
             Rc::clone(&on_undo),
             Rc::clone(&on_redo),
         ),
-        (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
-            opaque::render_opaque(type_name, value).into_any()
+        (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => {
+            // Opaque blocks load from disk with unknown/removed plugin types.
+            // Route through the fallback so they're visible and recoverable,
+            // not a silent drop or a read-only card with no toolbar.
+            fallback::fallback_block_view(block, focus_pub).into_any()
         }
         // Body/kind mismatch — render fallback so content is visible and recoverable.
         _ => {
