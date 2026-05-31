@@ -69,23 +69,32 @@ pub fn block_toolbar_for(
     let mut buttons: Vec<AnyView> = Vec::with_capacity(kinds.len() + 5);
     for (lbl, kind) in kinds {
         let is_current = same_kind(&current_kind, &kind);
+        let is_inline = is_inline_kind(&current_kind);
         let lbl_str: String = lbl.to_string();
         let kind_for_action = kind.clone();
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
             .on_event_stop(EventListener::PointerDown, move |_| {
-                // Commit current editor text before changing kind.
-                if let Some((editor_sig, spans_sig, _, _)) =
-                    focus_pub.editor_and_spans.get_untracked()
-                {
-                    let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
-                    let spans = spans_sig.get_untracked();
-                    let rope = lapce_xi_rope::Rope::from(text.as_str());
-                    let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                    on_action_for_btn(BlockAction::EditBlockBody {
-                        block_id,
-                        new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
-                    });
+                // Pre-commit the current block's body shape before changing kind.
+                // Only inline-bodied blocks (Paragraph/Heading) have an active
+                // editor_and_spans to read; for non-inline kinds (Code/List) the
+                // editor_and_spans is None (or belongs to a different block), so
+                // we skip the pre-commit — the body shape already matches what
+                // ChangeType expects.
+                if is_inline {
+                    if let Some((editor_sig, spans_sig, _, _)) =
+                        focus_pub.editor_and_spans.get_untracked()
+                    {
+                        let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
+                        let spans = spans_sig.get_untracked();
+                        let rope = lapce_xi_rope::Rope::from(text.as_str());
+                        let new_runs =
+                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        on_action_for_btn(BlockAction::EditBlockBody {
+                            block_id,
+                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+                        });
+                    }
                 }
                 on_action_for_btn(BlockAction::ChangeType {
                     block_id,
@@ -292,6 +301,15 @@ fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
     saw_any
 }
 
+/// True when `kind` is inline-bodied (Paragraph or Heading). These are the
+/// only kinds whose editor publishes `editor_and_spans`; the toolbar's
+/// pre-commit reads from that signal. For non-inline kinds (Code, List) the
+/// signal is None (or stale from a different block), so pre-committing an
+/// Inline body would be wrong — it's the exact regression this fixes.
+fn is_inline_kind(kind: &BlockKind) -> bool {
+    matches!(kind, BlockKind::Paragraph | BlockKind::Heading(_))
+}
+
 fn same_kind(a: &BlockKind, b: &BlockKind) -> bool {
     match (a, b) {
         (BlockKind::Paragraph, BlockKind::Paragraph) => true,
@@ -338,4 +356,36 @@ fn write_url_to_selection(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_inline_kind_paragraph() {
+        assert!(is_inline_kind(&BlockKind::Paragraph));
+    }
+
+    #[test]
+    fn is_inline_kind_heading() {
+        assert!(is_inline_kind(&BlockKind::Heading(1)));
+        assert!(is_inline_kind(&BlockKind::Heading(6)));
+    }
+
+    #[test]
+    fn is_inline_kind_not_code() {
+        assert!(!is_inline_kind(&BlockKind::Code { lang: Rc::from("") }));
+    }
+
+    #[test]
+    fn is_inline_kind_not_list() {
+        assert!(!is_inline_kind(&BlockKind::List { ordered: false }));
+        assert!(!is_inline_kind(&BlockKind::List { ordered: true }));
+    }
+
+    #[test]
+    fn is_inline_kind_not_opaque() {
+        assert!(!is_inline_kind(&BlockKind::Opaque { type_name: Rc::from("video") }));
+    }
 }
