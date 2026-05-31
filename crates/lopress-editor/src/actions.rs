@@ -628,8 +628,9 @@ fn apply_edit_front_matter(
 /// Flatten any body to its plain text. Mirrors the flattening that
 /// `apply_change_type` performs: `Inline`/`List` runs are concatenated, list
 /// items are joined with `\n`, `Code` is already flat, and `Opaque` has no
-/// text.
-fn body_to_flat_text(body: &BlockBody) -> String {
+/// text. Shared between `apply_change_type` / `coerce_body_to_kind` and the
+/// render-layer fallback view so every code path presents the same text.
+pub(crate) fn body_to_flat_text(body: &BlockBody) -> String {
     match body {
         BlockBody::Inline(runs) => runs.iter().map(|r| r.text.as_str()).collect(),
         BlockBody::Code(text) => text.clone(),
@@ -776,5 +777,50 @@ mod front_matter_tests {
             ..Default::default()
         };
         assert!(apply_edit_front_matter(&mut doc, same).is_none());
+    }
+}
+
+#[cfg(test)]
+mod body_to_flat_text_tests {
+    use super::*;
+
+    #[test]
+    fn inline_runs_concatenate() {
+        let body = BlockBody::Inline(vec![
+            InlineRun::plain("hello "),
+            InlineRun {
+                text: "world".into(),
+                bold: true,
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(body_to_flat_text(&body), "hello world");
+    }
+
+    #[test]
+    fn code_returns_text_as_is() {
+        let body = BlockBody::Code("fn main() {}".to_string());
+        assert_eq!(body_to_flat_text(&body), "fn main() {}");
+    }
+
+    #[test]
+    fn list_joins_items_with_newlines() {
+        let body = BlockBody::List(vec![
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("a")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("b")],
+            },
+        ]);
+        assert_eq!(body_to_flat_text(&body), "a\nb");
+    }
+
+    #[test]
+    fn opaque_returns_empty_string() {
+        let body = BlockBody::Opaque(serde_json::json!({ "foo": 42 }));
+        assert_eq!(body_to_flat_text(&body), "");
     }
 }
