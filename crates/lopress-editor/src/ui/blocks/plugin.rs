@@ -371,6 +371,13 @@ fn render_body(
             on_undo,
             on_redo,
         ),
-        _ => floem::views::empty().into_any(),
+        _ => {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[fallback] plugin block {:?}: kind/body mismatch ({:?} + {:?})",
+                block.id, block.kind, block.body
+            );
+            crate::ui::blocks::fallback::fallback_block_view(block, focus_pub).into_any()
+        }
     }
 }

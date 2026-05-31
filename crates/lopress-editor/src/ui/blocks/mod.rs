@@ -145,8 +145,15 @@ pub fn block_view(
         (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
             opaque::render_opaque(type_name, value).into_any()
         }
-        // Body/kind mismatch — render nothing.
-        _ => empty().into_any(),
+        // Body/kind mismatch — render fallback so content is visible and recoverable.
+        _ => {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[fallback] block {:?}: kind/body mismatch ({:?} + {:?})",
+                block_id, block.kind, block.body
+            );
+            fallback::fallback_block_view(block, focus_pub).into_any()
+        }
     };
 
     // Anchored toolbar: rendered above this block's body iff this block is
