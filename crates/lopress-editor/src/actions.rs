@@ -452,6 +452,16 @@ fn apply_change_type(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
+    // Guard: an Opaque (unknown-plugin) body has no sensible conversion to
+    // another kind. Changing only the kind would leave `{kind, Opaque}`, which
+    // `to_core` cannot serialize — the block is silently dropped on save. The
+    // fallback view routes Opaque blocks through a focusable card whose toolbar
+    // can fire ChangeType, so guard it here at the model chokepoint: treat it as
+    // a no-op. These blocks are recoverable via Delete only (the fallback's
+    // warning says as much).
+    if matches!(block.body, BlockBody::Opaque(_)) {
+        return None;
+    }
     let old_kind = block.kind.clone();
     match (&new_kind, &block.body) {
         // ── To Inline (Paragraph / Heading) ──────────────────────────────

@@ -35,6 +35,40 @@ fn run_text(block: &EditorBlock) -> String {
 }
 
 #[test]
+fn change_type_on_opaque_block_is_noop_to_prevent_data_loss() {
+    // An Opaque (unknown-plugin) block has no sensible conversion to another
+    // kind. Changing only its kind yields {kind: X, body: Opaque}, which
+    // `to_core` cannot serialize — the block is silently lost on save. So
+    // ChangeType on an Opaque block must be a no-op, leaving it intact and
+    // round-trippable; recovery for these blocks is via Delete only.
+    let block = EditorBlock::opaque(
+        "lopress:video".to_string(),
+        json!({ "type": "lopress:video", "attrs": { "src": "x.mp4" } }),
+    );
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+
+    assert_eq!(doc.blocks.len(), 1, "block must not be dropped");
+    assert!(
+        matches!(&doc.blocks[0].kind, BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"),
+        "kind must stay Opaque, got {:?}",
+        doc.blocks[0].kind
+    );
+    assert!(
+        matches!(doc.blocks[0].body, BlockBody::Opaque(_)),
+        "body must stay Opaque so it round-trips through to_core"
+    );
+}
+
+#[test]
 fn split_paragraph_at_middle() {
     let (id, block) = paragraph_with_id("hello world");
     let mut doc = doc_with(vec![block]);
