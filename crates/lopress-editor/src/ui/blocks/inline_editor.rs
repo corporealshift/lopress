@@ -682,6 +682,7 @@ fn commit_from_editor(
     on_action(BlockAction::EditBlockBody {
         block_id,
         new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+        built_in: true, // Built-in inline editor widget.
     });
 }
 

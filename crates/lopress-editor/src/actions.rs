@@ -64,6 +64,11 @@ pub enum BlockAction {
     EditBlockBody {
         block_id: BlockId,
         new_body: Box<BlockBody>,
+        /// True when this commit originates from a built-in editor widget
+        /// (paragraph, heading, code, list). Used by the debug_assert in
+        /// apply_edit_block_body to distinguish internal regressions from
+        /// plugin-originated input — plugin commits always degrade gracefully.
+        built_in: bool,
     },
     /// Insert `new_block` immediately after `anchor`. If `anchor` is missing,
     /// appends to the end.
@@ -124,9 +129,11 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
             block_id,
             new_attrs,
         } => apply_edit_attrs(doc, block_id, *new_attrs),
-        BlockAction::EditBlockBody { block_id, new_body } => {
-            apply_edit_block_body(doc, block_id, *new_body)
-        }
+        BlockAction::EditBlockBody {
+            block_id,
+            new_body,
+            built_in,
+        } => apply_edit_block_body(doc, block_id, *new_body, built_in),
         BlockAction::EditFrontMatter { new_front_matter } => {
             apply_edit_front_matter(doc, *new_front_matter)
         }
@@ -202,7 +209,7 @@ fn apply_split(
             let mut new_text = text;
             new_text.insert(byte_offset.min(new_text.len()), '\n');
             let (_inner_canonical, inverse) =
-                apply_edit_block_body(doc, id, BlockBody::Code(new_text))?;
+                apply_edit_block_body(doc, id, BlockBody::Code(new_text), false)?;
             Some((
                 BlockAction::Split {
                     block_id: id,
@@ -272,7 +279,7 @@ fn apply_split(
             split_item_at_with_id(&mut new_items, pos, local, new_block_id);
             let minted_id = new_items.get(pos + 1)?.id;
             let (_inner_canonical, inverse) =
-                apply_edit_block_body(doc, id, BlockBody::List(new_items))?;
+                apply_edit_block_body(doc, id, BlockBody::List(new_items), false)?;
             Some((
                 BlockAction::Split {
                     block_id: id,
@@ -625,6 +632,21 @@ fn apply_edit_front_matter(
     ))
 }
 
+/// True when `body` is the expected shape for `kind`. Used by the
+/// debug_assert in apply_edit_block_body to distinguish valid from
+/// mismatched commits.
+fn body_matches_kind(kind: &BlockKind, body: &BlockBody) -> bool {
+    matches!(
+        (kind, body),
+        (
+            BlockKind::Paragraph | BlockKind::Heading(_),
+            BlockBody::Inline(_)
+        ) | (BlockKind::Code { .. }, BlockBody::Code(_))
+            | (BlockKind::List { .. }, BlockBody::List(_))
+            | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
+    )
+}
+
 /// Flatten any body to its plain text. Mirrors the flattening that
 /// `apply_change_type` performs: `Inline`/`List` runs are concatenated, list
 /// items are joined with `\n`, `Code` is already flat, and `Opaque` has no
@@ -689,9 +711,24 @@ fn apply_edit_block_body(
     doc: &mut EditorDoc,
     id: BlockId,
     new_body: BlockBody,
+    built_in: bool,
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
+    // Debug assertion: catch shape-mismatched commits from built-in sources.
+    // (`get_mut` because `block.body` is mutated below; the assert and
+    // `coerce_body_to_kind` only take immutable reborrows of `block`.)
+    // Plugin-originated input (built_in: false) always degrades gracefully —
+    // it can carry any body shape from a third-party editor. Built-in widgets
+    // (built_in: true) should only emit bodies matching the block's kind; a
+    // mismatch here is an internal regression.
+    debug_assert!(
+        !built_in || body_matches_kind(&block.kind, &new_body),
+        "built-in EditBlockBody mismatch: block {:?} kind {:?}, body {:?}",
+        id,
+        block.kind,
+        new_body
+    );
     // Coerce the incoming body to the block's kind so a stale or out-of-order
     // commit can never leave the block in an unrenderable shape. See
     // `coerce_body_to_kind`.
@@ -704,10 +741,12 @@ fn apply_edit_block_body(
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(new_body),
+            built_in: false, // Record/inverse: external provenance.
         },
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(old_body),
+            built_in: false, // Record/inverse: external provenance.
         },
     ))
 }

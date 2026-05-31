@@ -91,6 +91,7 @@ fn commit_live_if_changed(
         on_action(BlockAction::EditBlockBody {
             block_id: list_block_id,
             new_body: Box::new(BlockBody::List(live.to_vec())),
+            built_in: true, // Built-in list editor widget.
         });
     }
 }
@@ -390,6 +391,7 @@ fn make_list_structural_key(
                 on_action(BlockAction::EditBlockBody {
                     block_id: list_block_id,
                     new_body: Box::new(BlockBody::List(split)),
+                    built_in: true, // Built-in list structural-key split.
                 });
                 defer_focus(focus_target, new_item_id);
                 Some(CommandExecuted::Yes)
@@ -416,6 +418,7 @@ fn make_list_structural_key(
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
                         new_body: Box::new(BlockBody::List(merged)),
+                        built_in: true, // Built-in list structural-key Backspace.
                     });
                     if let Some(id) = prev_id {
                         defer_focus(focus_target, id);
@@ -448,6 +451,7 @@ fn make_list_structural_key(
                     on_action(BlockAction::EditBlockBody {
                         block_id: list_block_id,
                         new_body: Box::new(BlockBody::List(without_first)),
+                        built_in: true, // Built-in list structural-key Backspace empty.
                     });
                     if let Some(id) = new_first_id {
                         defer_focus(focus_target, id);

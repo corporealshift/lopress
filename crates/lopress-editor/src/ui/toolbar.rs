@@ -88,11 +88,11 @@ pub fn block_toolbar_for(
                         let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
                         let spans = spans_sig.get_untracked();
                         let rope = lapce_xi_rope::Rope::from(text.as_str());
-                        let new_runs =
-                            crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
+                        let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
                         on_action_for_btn(BlockAction::EditBlockBody {
                             block_id,
                             new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+                            built_in: true, // Built-in toolbar type-selector pre-commit.
                         });
                     }
                 }
@@ -178,6 +178,7 @@ pub fn block_toolbar_for(
                         on_action_commit(BlockAction::EditBlockBody {
                             block_id,
                             new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+                            built_in: true, // Built-in toolbar URL commit.
                         });
                         url_sig.set(None);
                     }
@@ -202,6 +203,7 @@ pub fn block_toolbar_for(
                         on_action_remove(BlockAction::EditBlockBody {
                             block_id,
                             new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+                            built_in: true, // Built-in toolbar URL remove.
                         });
                     }
                 };
@@ -386,6 +388,8 @@ mod tests {
 
     #[test]
     fn is_inline_kind_not_opaque() {
-        assert!(!is_inline_kind(&BlockKind::Opaque { type_name: Rc::from("video") }));
+        assert!(!is_inline_kind(&BlockKind::Opaque {
+            type_name: Rc::from("video")
+        }));
     }
 }
