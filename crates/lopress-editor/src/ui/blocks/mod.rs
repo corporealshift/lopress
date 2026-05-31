@@ -28,6 +28,12 @@ use std::rc::Rc;
 /// Border color for the block that currently holds focus.
 const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
 
+/// Reserved height for the toolbar slot above each block. Matches the
+/// rendered toolbar's natural height including its bottom margin. Reserving
+/// the slot on every block prevents the document from shifting when focus
+/// moves between blocks.
+const TOOLBAR_HEIGHT_PX: f32 = 36.;
+
 /// Background tint for the block under the pointer. Subtle so it reads as a
 /// hover hint, not a selection — its main job is making empty blocks (which
 /// have no text to see) visible when the mouse is over them.
@@ -84,18 +90,19 @@ pub fn block_view(
                     }
                 },
             )
-            .style(|s| s.width_full())
+            .style(|s| s.width_full().height(TOOLBAR_HEIGHT_PX))
         };
-        return v_stack((toolbar_slot, plugin_view))
-            .style(move |s| {
-                let focused = focus_pub.block.get() == Some(block_id);
-                let s = s.width_full().border(1.0).border_radius(4.0);
-                if focused {
-                    s.border_color(FOCUS_BORDER)
-                } else {
-                    s.border_color(floem::peniko::Color::TRANSPARENT)
-                }
-            })
+        let plugin_with_border = plugin_view.style(move |s| {
+            let focused = focus_pub.block.get() == Some(block_id);
+            let s = s.width_full().border(1.0).border_radius(4.0);
+            if focused {
+                s.border_color(FOCUS_BORDER)
+            } else {
+                s.border_color(floem::peniko::Color::TRANSPARENT)
+            }
+        });
+        return v_stack((toolbar_slot, plugin_with_border))
+            .style(|s| s.width_full())
             .into_any();
     }
 
@@ -163,7 +170,7 @@ pub fn block_view(
                 }
             },
         )
-        .style(|s| s.width_full())
+        .style(|s| s.width_full().height(TOOLBAR_HEIGHT_PX))
     };
 
     // Hover gutter: shows the drag handle when the user is over this block
@@ -191,15 +198,16 @@ pub fn block_view(
             EventPropagation::Continue
         });
 
-    v_stack((toolbar_slot, row))
-        .style(move |s| {
-            let focused = focus_pub.block.get() == Some(block_id);
-            let s = s.width_full().border(1.0).border_radius(4.0);
-            if focused {
-                s.border_color(FOCUS_BORDER)
-            } else {
-                s.border_color(floem::peniko::Color::TRANSPARENT)
-            }
-        })
+    let row_with_border = row.style(move |s| {
+        let focused = focus_pub.block.get() == Some(block_id);
+        let s = s.width_full().border(1.0).border_radius(4.0);
+        if focused {
+            s.border_color(FOCUS_BORDER)
+        } else {
+            s.border_color(floem::peniko::Color::TRANSPARENT)
+        }
+    });
+    v_stack((toolbar_slot, row_with_border))
+        .style(|s| s.width_full())
         .into_any()
 }

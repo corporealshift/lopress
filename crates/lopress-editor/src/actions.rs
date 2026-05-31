@@ -71,6 +71,15 @@ pub enum BlockAction {
         anchor: BlockId,
         new_block: Box<EditorBlock>,
     },
+    /// Replace the document's front matter with `new_front_matter`. Used by
+    /// the inspector to make front-matter edits undoable. One action per
+    /// commit (Title blur, Slug blur, Date validation success, etc.).
+    /// Boxed to keep `BlockAction` within the 40-byte size guard — front
+    /// matter is small (KB at most) but not small enough to fit inline.
+    #[allow(clippy::large_enum_variant)]
+    EditFrontMatter {
+        new_front_matter: Box<lopress_core::FrontMatter>,
+    },
 }
 
 /// Apply one `BlockAction` to the document.
@@ -117,6 +126,9 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         } => apply_edit_attrs(doc, block_id, *new_attrs),
         BlockAction::EditBlockBody { block_id, new_body } => {
             apply_edit_block_body(doc, block_id, *new_body)
+        }
+        BlockAction::EditFrontMatter { new_front_matter } => {
+            apply_edit_front_matter(doc, *new_front_matter)
         }
     }
 }
@@ -595,6 +607,83 @@ pub(crate) fn split_item_at_with_id(
 /// run splitting (a styled span vs. a styled span plus a typed plain tail)
 /// or empty runs. Comparing canonically recognises those as no-ops, and the
 /// stored/recorded body is the canonical one so the model stays canonical.
+fn apply_edit_front_matter(
+    doc: &mut EditorDoc,
+    new_fm: lopress_core::FrontMatter,
+) -> Option<(BlockAction, BlockAction)> {
+    if doc.front_matter == new_fm {
+        return None;
+    }
+    let old_fm = std::mem::replace(&mut doc.front_matter, new_fm.clone());
+    Some((
+        BlockAction::EditFrontMatter {
+            new_front_matter: Box::new(new_fm),
+        },
+        BlockAction::EditFrontMatter {
+            new_front_matter: Box::new(old_fm),
+        },
+    ))
+}
+
+/// Flatten any body to its plain text. Mirrors the flattening that
+/// `apply_change_type` performs: `Inline`/`List` runs are concatenated, list
+/// items are joined with `\n`, `Code` is already flat, and `Opaque` has no
+/// text.
+fn body_to_flat_text(body: &BlockBody) -> String {
+    match body {
+        BlockBody::Inline(runs) => runs.iter().map(|r| r.text.as_str()).collect(),
+        BlockBody::Code(text) => text.clone(),
+        BlockBody::List(items) => items
+            .iter()
+            .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        BlockBody::Opaque(_) => String::new(),
+    }
+}
+
+/// Coerce `body` into the shape required by `kind`.
+///
+/// `EditBlockBody` carries a body produced by the block's currently-mounted
+/// editor widget, whose shape is fixed by `kind`. A mismatched shape means the
+/// commit is *stale* — it was emitted by a widget that a `ChangeType` has since
+/// swapped out (e.g. the paragraph editor's `FocusLost` commit firing during
+/// the editor-pane rebuild that `ChangeType` triggers, landing *after* the
+/// block already became Code). Letting that stale commit through would drop the
+/// block into an unrenderable `(kind, body)` pair, which `block_view` draws as
+/// an empty, uneditable gap. Instead, convert the body to the kind's shape
+/// (preserving the text). Conversions mirror `apply_change_type`'s body arms.
+fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
+    match (kind, &body) {
+        // Shape already matches the kind — keep as-is (the common case; every
+        // non-stale commit lands here, so this is a no-op in normal editing).
+        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_))
+        | (BlockKind::Code { .. }, BlockBody::Code(_))
+        | (BlockKind::List { .. }, BlockBody::List(_))
+        | (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => body,
+
+        // → Inline (Paragraph / Heading).
+        (BlockKind::Paragraph | BlockKind::Heading(_), _) => {
+            BlockBody::Inline(vec![InlineRun::plain(body_to_flat_text(&body))])
+        }
+        // → Code.
+        (BlockKind::Code { .. }, _) => BlockBody::Code(body_to_flat_text(&body)),
+        // → List: one item per line of the flattened text.
+        (BlockKind::List { .. }, _) => BlockBody::List(
+            body_to_flat_text(&body)
+                .split('\n')
+                .map(|line| ListItem {
+                    id: BlockId::new(),
+                    runs: vec![InlineRun::plain(line.to_string())],
+                })
+                .collect(),
+        ),
+        // → Opaque from a non-Opaque body: no editor widget commits into an
+        // opaque block, so this is unreachable in practice — leave it untouched.
+        (BlockKind::Opaque { .. }, _) => body,
+    }
+}
+
 fn apply_edit_block_body(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -602,7 +691,10 @@ fn apply_edit_block_body(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
-    let new_body = canonicalize_body(&new_body);
+    // Coerce the incoming body to the block's kind so a stale or out-of-order
+    // commit can never leave the block in an unrenderable shape. See
+    // `coerce_body_to_kind`.
+    let new_body = canonicalize_body(&coerce_body_to_kind(&block.kind, new_body));
     if canonicalize_body(&block.body) == new_body {
         return None;
     }
@@ -635,5 +727,54 @@ mod size_tests {
             "BlockAction is {} bytes (expected <= 40); box heavier variants",
             size
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(unreachable_code)]
+#[allow(clippy::unreachable)]
+mod front_matter_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn apply_edit_front_matter_records_inverse() {
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain("body")])],
+            front_matter: lopress_core::FrontMatter {
+                title: Some("old".to_string()),
+                ..Default::default()
+            },
+        };
+        let new_fm = lopress_core::FrontMatter {
+            title: Some("new".to_string()),
+            ..Default::default()
+        };
+        let (canonical, inverse) =
+            apply_edit_front_matter(&mut doc, new_fm.clone()).expect("recorded");
+        assert!(matches!(canonical, BlockAction::EditFrontMatter { .. }));
+
+        // Apply the inverse: the doc's title should return to "old".
+        let BlockAction::EditFrontMatter { new_front_matter } = inverse else {
+            unreachable!();
+        };
+        apply_edit_front_matter(&mut doc, *new_front_matter);
+        assert_eq!(doc.front_matter.title.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn apply_edit_front_matter_no_op_returns_none() {
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain("body")])],
+            front_matter: lopress_core::FrontMatter {
+                title: Some("same".to_string()),
+                ..Default::default()
+            },
+        };
+        let same = lopress_core::FrontMatter {
+            title: Some("same".to_string()),
+            ..Default::default()
+        };
+        assert!(apply_edit_front_matter(&mut doc, same).is_none());
     }
 }

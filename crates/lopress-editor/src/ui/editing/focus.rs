@@ -24,7 +24,9 @@ pub fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         | BlockAction::EditAttrs { block_id, .. }
         | BlockAction::Move { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
-        BlockAction::Delete { .. } | BlockAction::OpenSlashMenu { .. } => None,
+        BlockAction::Delete { .. }
+        | BlockAction::OpenSlashMenu { .. }
+        | BlockAction::EditFrontMatter { .. } => None,
         BlockAction::EditBlockBody { block_id, .. } => Some(*block_id),
     }
 }

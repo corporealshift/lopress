@@ -69,6 +69,59 @@ fn split_at_end_creates_empty_trailing_block() {
 }
 
 #[test]
+fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
+    // Regression repro of the toolbar "Code" button bug. The button's
+    // PointerDown handler emits a pre-commit EditBlockBody{Inline} then
+    // ChangeType{Code}. ChangeType triggers a current_doc.update() that
+    // rebuilds the editor pane, unmounting the old paragraph inline editor,
+    // which fires FocusLost and emits a *stray* EditBlockBody{Inline} for the
+    // now-Code block. Before the fix, that stray commit replaced the Code body
+    // with an Inline one, leaving {kind: Code, body: Inline} — a pair no render
+    // arm matches, so the block drew as an empty, uneditable, unselectable gap.
+    // The model must coerce the body to the block's kind so it stays renderable.
+    let (id, block) = paragraph_with_id("let x = 1;");
+    let mut doc = doc_with(vec![block]);
+
+    // 1. Toolbar pre-commit (block still Paragraph — Inline shape matches).
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("let x = 1;")])),
+        },
+    );
+    // 2. Change type to Code.
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code { lang: Rc::from("") },
+        },
+    );
+    // 3. Stray FocusLost commit from the unmounted paragraph editor.
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("let x = 1;")])),
+        },
+    );
+
+    let block = &doc.blocks[0];
+    assert!(
+        matches!(block.kind, BlockKind::Code { .. }),
+        "kind should remain Code, got {:?}",
+        block.kind
+    );
+    assert!(
+        matches!(block.body, BlockBody::Code(_)),
+        "body must stay Code-shaped so the block renders; got {:?}",
+        block.body
+    );
+    assert_eq!(run_text(block), "let x = 1;");
+}
+
+#[test]
 fn split_heading_keeps_level() {
     let block = EditorBlock::heading(2, vec![InlineRun::plain("Title goes here")]);
     let id = block.id;

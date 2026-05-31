@@ -58,12 +58,12 @@ pub fn block_toolbar_for(
         ("H1", BlockKind::Heading(1)),
         ("H2", BlockKind::Heading(2)),
         ("H3", BlockKind::Heading(3)),
-        ("Code", BlockKind::Code { lang: Rc::from("") }),
-        ("UL", BlockKind::List { ordered: false }),
-        ("OL", BlockKind::List { ordered: true }),
         ("H4", BlockKind::Heading(4)),
         ("H5", BlockKind::Heading(5)),
         ("H6", BlockKind::Heading(6)),
+        ("Code", BlockKind::Code { lang: Rc::from("") }),
+        ("UL", BlockKind::List { ordered: false }),
+        ("OL", BlockKind::List { ordered: true }),
     ];
 
     let mut buttons: Vec<AnyView> = Vec::with_capacity(kinds.len() + 5);
@@ -73,7 +73,7 @@ pub fn block_toolbar_for(
         let kind_for_action = kind.clone();
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
-            .action(move || {
+            .on_event_stop(EventListener::PointerDown, move |_| {
                 // Commit current editor text before changing kind.
                 if let Some((editor_sig, spans_sig, _, _)) =
                     focus_pub.editor_and_spans.get_untracked()
@@ -122,7 +122,7 @@ pub fn block_toolbar_for(
     // Delete.
     let on_action_for_del = on_action.clone();
     let del_btn = button(label(|| "x".to_string()))
-        .action(move || {
+        .on_event_stop(EventListener::PointerDown, move |_| {
             on_action_for_del(BlockAction::Delete { block_id });
         })
         .style(|s| {
@@ -133,14 +133,14 @@ pub fn block_toolbar_for(
     buttons.push(del_btn.into_any());
 
     let button_row = h_stack_from_iter(buttons).style(|s| {
-        s.padding_horiz(6.)
+        s.padding_horiz(8.)
             .padding_vert(4.)
             .gap(4.)
-            .background(Color::rgb8(245, 245, 248))
+            .background(Color::rgb8(252, 252, 254))
             .border(1.)
             .border_color(Color::rgb8(220, 220, 226))
-            .border_radius(4.)
-            .margin_bottom(4.)
+            .border_radius(6.)
+            .margin_bottom(6.)
     });
 
     let on_action_for_url = on_action.clone();
@@ -207,7 +207,12 @@ pub fn block_toolbar_for(
                             }
                         })
                         .style(|s| s.flex_grow(1.0).font_size(13.)),
-                    button(label(|| "Remove".to_string())).action(remove),
+                    button(label(|| "Remove".to_string())).on_event_stop(
+                        EventListener::PointerDown,
+                        move |_| {
+                            remove();
+                        },
+                    ),
                 ))
                 .style(|s| s.gap(4.).width_full().padding_horiz(6.).padding_vert(4.))
                 .into_any()
@@ -235,7 +240,7 @@ fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher)
     });
 
     button(lbl_view)
-        .action(move || {
+        .on_event_stop(EventListener::PointerDown, move |_| {
             if let Some((editor_sig, spans_sig, style_rev, _)) =
                 focus_pub.editor_and_spans.get_untracked()
             {

@@ -47,6 +47,7 @@ pub fn welcome_view(
     let recents_view = dyn_container(
         move || settings.get().recents,
         move |recents| {
+            let recents = crate::recents::dedup_canonical(&recents);
             let on_open_recent = on_open.clone();
             let buttons = recents.into_iter().map(|path| {
                 let label_text = path

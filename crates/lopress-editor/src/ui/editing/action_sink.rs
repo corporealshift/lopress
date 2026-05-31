@@ -63,6 +63,9 @@ pub fn build_action_sink(
                 recorded = apply(d, action_for_apply);
             }
         });
+        if recorded.is_some() {
+            on_action_mark_dirty();
+        }
         if let Some((canonical, inverse)) = recorded {
             undo_stack.update(|s| s.push_after_apply(canonical, inverse));
         }
@@ -95,6 +98,5 @@ pub fn build_action_sink(
                 focus_target.set(Some(id));
             });
         }
-        on_action_mark_dirty();
     })
 }

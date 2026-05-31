@@ -52,7 +52,7 @@ pub fn run() -> Result<(), AppError> {
     let settings_for_close = settings_signal;
 
     #[cfg(debug_assertions)]
-    let (ctrl_handle, ctrl_action_rx) = ctrl::start();
+    let (ctrl_handle, ctrl_action_rx, ctrl_open_rx, ctrl_close_rx) = ctrl::start();
 
     Application::new()
         .on_event(move |event| {
@@ -74,6 +74,10 @@ pub fn run() -> Result<(), AppError> {
                     ctrl_handle,
                     #[cfg(debug_assertions)]
                     ctrl_action_rx,
+                    #[cfg(debug_assertions)]
+                    ctrl_open_rx,
+                    #[cfg(debug_assertions)]
+                    ctrl_close_rx,
                 );
 
                 // On window close: capture current geometry and persist.
