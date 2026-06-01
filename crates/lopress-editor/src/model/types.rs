@@ -138,6 +138,21 @@ impl PluginMeta {
             native: Some(Rc::from("code")),
         }
     }
+
+    /// The canonical `PluginMeta` for the read-more marker.
+    ///
+    /// A comment-container block (no `native` claim), built-in (chrome
+    /// suppressed), edited via the `"more"` divider widget. No attrs.
+    pub fn read_more() -> Self {
+        Self {
+            block_type_name: Rc::from("lopress:more"),
+            attrs: serde_json::Map::new(),
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("more")),
+            native: None,
+        }
+    }
 }
 
 impl EditorBlock {
@@ -189,4 +204,33 @@ impl EditorBlock {
             plugin: None,
         }
     }
+
+    /// The read-more marker block: an empty-bodied plugin block carrying
+    /// `PluginMeta::read_more`. The body is an empty inline run vec — the marker
+    /// renders via its editor widget and serializes to an empty container.
+    pub fn read_more() -> Self {
+        Self {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph,
+            body: BlockBody::Inline(vec![]),
+            plugin: Some(PluginMeta::read_more()),
+        }
+    }
 }
+
+#[cfg(test)]
+mod read_more_ctor_tests {
+    use super::*;
+
+    #[test]
+    fn read_more_block_has_marker_meta() {
+        let b = EditorBlock::read_more();
+        let meta = b.plugin.as_ref().expect("plugin meta");
+        assert_eq!(&*meta.block_type_name, "lopress:more");
+        assert_eq!(meta.editor.as_deref(), Some("more"));
+        assert!(meta.builtin);
+        assert!(meta.native.is_none());
+        assert!(matches!(b.body, BlockBody::Inline(ref runs) if runs.is_empty()));
+    }
+}
+
