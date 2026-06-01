@@ -190,6 +190,14 @@ fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
     doc.blocks.iter().position(|b| b.id == id)
 }
 
+/// True when `block` is the read-more marker (`lopress:more`).
+fn is_read_more(block: &EditorBlock) -> bool {
+    block
+        .plugin
+        .as_ref()
+        .is_some_and(|m| &*m.block_type_name == "lopress:more")
+}
+
 fn apply_split(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -371,6 +379,10 @@ fn apply_insert_after(
     anchor: BlockId,
     new_block: EditorBlock,
 ) -> Option<(BlockAction, BlockAction)> {
+    // One read-more marker per post: refuse a second.
+    if is_read_more(&new_block) && doc.blocks.iter().any(is_read_more) {
+        return None;
+    }
     let pos = find_idx(doc, anchor)
         .map(|i| i + 1)
         .unwrap_or(doc.blocks.len());
@@ -879,5 +891,44 @@ mod body_to_flat_text_tests {
     fn opaque_returns_empty_string() {
         let body = BlockBody::Opaque(serde_json::json!({ "foo": 42 }));
         assert_eq!(body_to_flat_text(&body), "");
+    }
+}
+
+#[cfg(test)]
+mod read_more_guard_tests {
+    use super::*;
+
+    fn doc_with_para() -> EditorDoc {
+        EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain("p")])],
+            front_matter: lopress_core::FrontMatter::default(),
+        }
+    }
+
+    #[test]
+    fn first_marker_inserts_second_is_rejected() {
+        let mut doc = doc_with_para();
+        let anchor = doc.blocks[0].id;
+
+        let first = apply(
+            &mut doc,
+            BlockAction::InsertAfter {
+                anchor,
+                new_block: Box::new(EditorBlock::read_more()),
+            },
+        );
+        assert!(first.is_some(), "first marker should insert");
+        assert_eq!(doc.blocks.len(), 2);
+
+        let anchor2 = doc.blocks[0].id;
+        let second = apply(
+            &mut doc,
+            BlockAction::InsertAfter {
+                anchor: anchor2,
+                new_block: Box::new(EditorBlock::read_more()),
+            },
+        );
+        assert!(second.is_none(), "second marker must be rejected");
+        assert_eq!(doc.blocks.len(), 2, "no second marker inserted");
     }
 }
