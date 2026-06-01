@@ -66,6 +66,14 @@ proptest! {
     }
 }
 
+#[test]
+fn read_more_marker_round_trips() {
+    let src = "before\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nafter\n";
+    let doc = parse(src).unwrap();
+    let out = serialize(&doc);
+    assert_eq!(out, src);
+}
+
 /// Sanity check: a fenced code block round-trips through parse → serialize
 /// with the type name preserved end-to-end. Today this asserts `"code"` and
 /// will FAIL until the parser is renamed in Task 2 — that failure is the
