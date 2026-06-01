@@ -195,6 +195,12 @@ pub fn render_all(
                     if aggregate_metadata_changed(old.as_ref(), &new_entry) {
                         post_set_changed = true;
                     }
+                    // A re-rendered post with a read-more marker may have a
+                    // changed excerpt (body-derived), which the index displays
+                    // — regenerate it.
+                    if p.doc.blocks.iter().any(|b| b.r#type == "lopress:more") {
+                        post_set_changed = true;
+                    }
                     cache.pages.insert(key, new_entry);
                     pages_rendered += 1;
                 }

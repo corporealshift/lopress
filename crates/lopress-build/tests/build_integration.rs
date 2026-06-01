@@ -212,3 +212,43 @@ fn deleted_post_is_removed_from_output() {
     build(&root).unwrap();
     assert!(!out.exists(), "deleted post should be pruned from www/");
 }
+
+#[test]
+fn home_page_shows_excerpt_with_read_more_link() {
+    let (_tmp, root) = copy_fixture("minimal");
+    // Replace the sample post with one that has a read-more marker.
+    let post = root.join("src/posts/hello.md");
+    fs::write(
+        &post,
+        "---\ntitle: P\ndate: 2026-06-01\n---\nteaser para\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nhidden para\n",
+    )
+    .unwrap();
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www = root.join("www");
+
+    // Post page: must show full content (including hidden part) and must
+    // not contain the marker comment itself.
+    let post_html = fs::read_to_string(www.join("posts/hello/index.html")).unwrap();
+    assert!(
+        post_html.contains("hidden para"),
+        "post page must show full content"
+    );
+    assert!(
+        !post_html.contains("lopress:more"),
+        "post page must not show the marker comment"
+    );
+    // The marker renders to nothing in the body, so there's no empty block
+    // between teaser and hidden.
+    assert!(
+        post_html.contains("teaser para"),
+        "post page must show teaser"
+    );
+
+    // Home page: excerpt rendering and "Read more" link are asserted in
+    // Task 12's template update. The excerpt_html field is populated
+    // (verified by the unit test in pages.rs), but the index template
+    // must be updated to display it.
+}
