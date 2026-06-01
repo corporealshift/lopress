@@ -10,7 +10,7 @@
 
 use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use crate::ui::blocks::{code_editor, list};
+use crate::ui::blocks::{code_editor, list, read_more};
 use floem::reactive::RwSignal;
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
@@ -36,6 +36,7 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
     match key {
         "list" => Some(list_editor_widget),
         "code" => Some(code_editor_widget),
+        "more" => Some(read_more::read_more_widget),
         _ => None,
     }
 }
@@ -114,6 +115,7 @@ mod tests {
     fn editor_for_resolves_list_and_rejects_unknown() {
         assert!(editor_for("list").is_some());
         assert!(editor_for("code").is_some());
+        assert!(editor_for("more").is_some());
         assert!(editor_for("paragraph").is_none());
         assert!(editor_for("bogus").is_none());
     }
