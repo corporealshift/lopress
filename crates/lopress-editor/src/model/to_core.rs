@@ -19,6 +19,17 @@ fn block_to_core(b: &EditorBlock) -> Block {
     // Plugin-flagged blocks: a `native` claim serializes as bare native
     // markdown of that core type; otherwise the comment container is used.
     if let Some(meta) = &b.plugin {
+        // The read-more marker is an empty container: emit no children so it
+        // round-trips as a clean `<!-- lopress:more -->`/`<!-- /lopress:more -->`
+        // pair (plugin_block_to_core would otherwise emit one inner child).
+        if &*meta.block_type_name == "lopress:more" {
+            return Block {
+                r#type: "lopress:more".into(),
+                attrs: empty_attrs(),
+                children: vec![],
+                text: None,
+            };
+        }
         return match &meta.native {
             Some(core_type) => native_block_to_core(b, meta, core_type),
             None => plugin_block_to_core(b, meta),
@@ -109,6 +120,37 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
             children: vec![],
             text: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod more_marker_tests {
+    use super::*;
+    use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, PluginMeta};
+    use std::rc::Rc;
+
+    fn marker_block() -> EditorBlock {
+        EditorBlock {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph,
+            body: BlockBody::Inline(vec![]),
+            plugin: Some(PluginMeta {
+                block_type_name: Rc::from("lopress:more"),
+                attrs: serde_json::Map::new(),
+                attr_decls: Rc::from([]),
+                builtin: true,
+                editor: Some(Rc::from("more")),
+                native: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn marker_serializes_to_empty_container() {
+        let core = block_to_core(&marker_block());
+        assert_eq!(core.r#type, "lopress:more");
+        assert!(core.children.is_empty(), "marker must have no children");
+        assert!(core.text.is_none());
     }
 }
 
