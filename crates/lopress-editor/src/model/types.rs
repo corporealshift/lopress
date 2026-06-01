@@ -219,13 +219,15 @@ impl EditorBlock {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
 mod read_more_ctor_tests {
     use super::*;
 
     #[test]
     fn read_more_block_has_marker_meta() {
         let b = EditorBlock::read_more();
-        let meta = b.plugin.as_ref().expect("plugin meta");
+        // The constructor always sets plugin.
+        let meta = b.plugin.as_ref().expect("read_more always sets plugin");
         assert_eq!(&*meta.block_type_name, "lopress:more");
         assert_eq!(meta.editor.as_deref(), Some("more"));
         assert!(meta.builtin);
@@ -233,4 +235,3 @@ mod read_more_ctor_tests {
         assert!(matches!(b.body, BlockBody::Inline(ref runs) if runs.is_empty()));
     }
 }
-

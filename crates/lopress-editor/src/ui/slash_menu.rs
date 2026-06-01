@@ -36,9 +36,18 @@ pub fn slash_menu_items() -> Vec<(&'static str, SlashChoice)> {
         ("Heading 1", SlashChoice::Kind(BlockKind::Heading(1))),
         ("Heading 2", SlashChoice::Kind(BlockKind::Heading(2))),
         ("Heading 3", SlashChoice::Kind(BlockKind::Heading(3))),
-        ("Code block", SlashChoice::Kind(BlockKind::Code { lang: Rc::from("") })),
-        ("Unordered list", SlashChoice::Kind(BlockKind::List { ordered: false })),
-        ("Ordered list", SlashChoice::Kind(BlockKind::List { ordered: true })),
+        (
+            "Code block",
+            SlashChoice::Kind(BlockKind::Code { lang: Rc::from("") }),
+        ),
+        (
+            "Unordered list",
+            SlashChoice::Kind(BlockKind::List { ordered: false }),
+        ),
+        (
+            "Ordered list",
+            SlashChoice::Kind(BlockKind::List { ordered: true }),
+        ),
         ("Read more", SlashChoice::ReadMore),
     ]
 }

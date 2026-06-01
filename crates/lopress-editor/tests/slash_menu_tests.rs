@@ -21,10 +21,22 @@ fn slash_menu_items_match_acceptance_list() {
         ]
     );
     // Spot-check a few kinds — heading levels in particular.
-    assert!(matches!(items[1].1, SlashChoice::Kind(BlockKind::Heading(1))));
-    assert!(matches!(items[3].1, SlashChoice::Kind(BlockKind::Heading(3))));
-    assert!(matches!(items[5].1, SlashChoice::Kind(BlockKind::List { ordered: false })));
-    assert!(matches!(items[6].1, SlashChoice::Kind(BlockKind::List { ordered: true })));
+    assert!(matches!(
+        items[1].1,
+        SlashChoice::Kind(BlockKind::Heading(1))
+    ));
+    assert!(matches!(
+        items[3].1,
+        SlashChoice::Kind(BlockKind::Heading(3))
+    ));
+    assert!(matches!(
+        items[5].1,
+        SlashChoice::Kind(BlockKind::List { ordered: false })
+    ));
+    assert!(matches!(
+        items[6].1,
+        SlashChoice::Kind(BlockKind::List { ordered: true })
+    ));
     assert!(matches!(items[7].1, SlashChoice::ReadMore));
 }
 

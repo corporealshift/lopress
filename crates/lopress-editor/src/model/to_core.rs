@@ -123,37 +123,6 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
     }
 }
 
-#[cfg(test)]
-mod more_marker_tests {
-    use super::*;
-    use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, PluginMeta};
-    use std::rc::Rc;
-
-    fn marker_block() -> EditorBlock {
-        EditorBlock {
-            id: BlockId::new(),
-            kind: BlockKind::Paragraph,
-            body: BlockBody::Inline(vec![]),
-            plugin: Some(PluginMeta {
-                block_type_name: Rc::from("lopress:more"),
-                attrs: serde_json::Map::new(),
-                attr_decls: Rc::from([]),
-                builtin: true,
-                editor: Some(Rc::from("more")),
-                native: None,
-            }),
-        }
-    }
-
-    #[test]
-    fn marker_serializes_to_empty_container() {
-        let core = block_to_core(&marker_block());
-        assert_eq!(core.r#type, "lopress:more");
-        assert!(core.children.is_empty(), "marker must have no children");
-        assert!(core.text.is_none());
-    }
-}
-
 fn empty_attrs() -> Value {
     Value::Object(Map::new())
 }
@@ -216,5 +185,36 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
         attrs,
         children: vec![inner],
         text: None,
+    }
+}
+
+#[cfg(test)]
+mod more_marker_tests {
+    use super::*;
+    use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, PluginMeta};
+    use std::rc::Rc;
+
+    fn marker_block() -> EditorBlock {
+        EditorBlock {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph,
+            body: BlockBody::Inline(vec![]),
+            plugin: Some(PluginMeta {
+                block_type_name: Rc::from("lopress:more"),
+                attrs: serde_json::Map::new(),
+                attr_decls: Rc::from([]),
+                builtin: true,
+                editor: Some(Rc::from("more")),
+                native: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn marker_serializes_to_empty_container() {
+        let core = block_to_core(&marker_block());
+        assert_eq!(core.r#type, "lopress:more");
+        assert!(core.children.is_empty(), "marker must have no children");
+        assert!(core.text.is_none());
     }
 }

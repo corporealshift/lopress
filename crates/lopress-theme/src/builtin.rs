@@ -118,7 +118,13 @@ mod tests {
             tag: None,
         };
         let html = engine
-            .render("index.html", &RenderContext { site: &site, page: &page })
+            .render(
+                "index.html",
+                &RenderContext {
+                    site: &site,
+                    page: &page,
+                },
+            )
             .unwrap();
         // The post title is always rendered, proving the loop runs.
         assert!(html.contains("P"), "index must render post title");

@@ -506,7 +506,8 @@ mod tests {
 
     #[test]
     fn post_summaries_populate_excerpt_when_marker_present() {
-        let src = "---\ntitle: T\n---\nteaser\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nrest\n";
+        let src =
+            "---\ntitle: T\n---\nteaser\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nrest\n";
         let doc = parse(src).unwrap();
         let posts = vec![DiscoveredPost {
             source_path: std::path::PathBuf::from("p.md"),
@@ -516,6 +517,9 @@ mod tests {
         let reg = PluginRegistry::default();
         let summaries = post_summaries(&posts, &reg, &tera::Tera::default());
         assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].excerpt_html.as_deref(), Some("<p>teaser</p>\n"));
+        assert_eq!(
+            summaries[0].excerpt_html.as_deref(),
+            Some("<p>teaser</p>\n")
+        );
     }
 }

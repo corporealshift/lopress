@@ -895,6 +895,7 @@ mod body_to_flat_text_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
 mod read_more_guard_tests {
     use super::*;
 
@@ -908,7 +909,8 @@ mod read_more_guard_tests {
     #[test]
     fn first_marker_inserts_second_is_rejected() {
         let mut doc = doc_with_para();
-        let anchor = doc.blocks[0].id;
+        // The doc has exactly one paragraph block from `doc_with_para`.
+        let anchor = doc.blocks.first().unwrap().id;
 
         let first = apply(
             &mut doc,
@@ -920,7 +922,8 @@ mod read_more_guard_tests {
         assert!(first.is_some(), "first marker should insert");
         assert_eq!(doc.blocks.len(), 2);
 
-        let anchor2 = doc.blocks[0].id;
+        // After insertion, the first block is still the original paragraph.
+        let anchor2 = doc.blocks.first().unwrap().id;
         let second = apply(
             &mut doc,
             BlockAction::InsertAfter {

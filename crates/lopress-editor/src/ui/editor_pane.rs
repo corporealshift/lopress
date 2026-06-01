@@ -89,7 +89,7 @@ pub fn editor_pane(
                 let on_action_for_select = on_action_for_menu.clone();
                 // Omit "Read more" when the document already has a marker.
                 let has_more = current_doc.with_untracked(|d| {
-                    d.as_ref().map_or(false, |doc| {
+                    d.as_ref().is_some_and(|doc| {
                         doc.blocks.iter().any(|b| {
                             b.plugin
                                 .as_ref()
@@ -99,21 +99,17 @@ pub fn editor_pane(
                 });
                 let items: Vec<_> = crate::ui::slash_menu::slash_menu_items()
                     .into_iter()
-                    .filter(|(_, choice)| {
-                        !(has_more && matches!(choice, SlashChoice::ReadMore))
-                    })
+                    .filter(|(_, choice)| !(has_more && matches!(choice, SlashChoice::ReadMore)))
                     .collect();
-                let on_select = move |choice: SlashChoice| {
-                    match choice {
-                        SlashChoice::Kind(new_kind) => {
-                            on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
-                        }
-                        SlashChoice::ReadMore => {
-                            on_action_for_select(BlockAction::InsertAfter {
-                                anchor: block_id,
-                                new_block: Box::new(EditorBlock::read_more()),
-                            });
-                        }
+                let on_select = move |choice: SlashChoice| match choice {
+                    SlashChoice::Kind(new_kind) => {
+                        on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
+                    }
+                    SlashChoice::ReadMore => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::read_more()),
+                        });
                     }
                 };
                 let on_close = move || {
