@@ -158,6 +158,68 @@ fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
 }
 
 #[test]
+fn stale_builtin_list_commit_after_change_to_heading_coerces_without_panicking() {
+    // Regression repro of the toolbar "H2"-on-a-list crash. Clicking a kind
+    // button on a focused list dispatches ChangeType{Heading}, which flattens
+    // the list body to Inline. The list editor — unmounted by the ensuing
+    // editor-pane rebuild — then fires its FocusLost flush: a *built-in*
+    // EditBlockBody{List} for the now-Heading block. Unlike the inline editor,
+    // the list editor is never pre-committed by the toolbar (the toolbar has no
+    // handle to the list buffer), so this flush is the *only* path that carries
+    // freshly-typed list text into the model — coerce_body_to_kind flattens it
+    // to the heading's Inline shape. A previous pre-coercion debug_assert
+    // panicked on this legitimate built-in commit; the model must instead coerce
+    // it and keep the text.
+    let item = |t: &str| ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain(t)],
+    };
+    let block = EditorBlock::list(false, vec![item("alpha"), item("beta")]);
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+
+    // 1. Toolbar dispatches ChangeType to Heading 2 (no pre-commit for lists).
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(2),
+        },
+    );
+    // 2. Stale built-in FocusLost flush from the unmounted list editor, carrying
+    //    a freshly-typed third item that only ever lived in the editor buffer.
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::List(vec![
+                item("alpha"),
+                item("beta"),
+                item("gamma"),
+            ])),
+            built_in: true,
+        },
+    );
+
+    let block = &doc.blocks[0];
+    assert!(
+        matches!(block.kind, BlockKind::Heading(2)),
+        "kind should stay Heading(2), got {:?}",
+        block.kind
+    );
+    assert!(
+        matches!(block.body, BlockBody::Inline(_)),
+        "body must be coerced to Inline so the block renders, got {:?}",
+        block.body
+    );
+    assert!(
+        run_text(block).contains("gamma"),
+        "the flush's freshly-typed list text must survive coercion, got {:?}",
+        run_text(block)
+    );
+}
+
+#[test]
 fn split_heading_keeps_level() {
     let block = EditorBlock::heading(2, vec![InlineRun::plain("Title goes here")]);
     let id = block.id;

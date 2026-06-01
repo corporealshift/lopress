@@ -22,22 +22,22 @@ use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
-use floem::views::{dyn_container, empty, h_stack, stack, Decorators};
+use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
 /// Border color for the block that currently holds focus.
 const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
 
-/// How far the floating toolbar sits above its block, as a negative top inset.
-/// Matches the toolbar's natural rendered height so it clears the block. The
-/// toolbar is an absolutely-positioned overlay, so it reserves no layout space
-/// and never shifts the document when focus moves between blocks.
+/// Fixed height of the in-flow toolbar slot above the focused block. The
+/// focused block is pulled up by exactly this amount (see `wrap_block`) so the
+/// toolbar visually floats over the block above without shifting the document.
+/// A fixed height keeps the upward pull and the slot height in lockstep so
+/// there is zero net shift regardless of the toolbar's natural content size.
 const TOOLBAR_HEIGHT_PX: f32 = 36.;
 
-/// Small vertical breathing room between blocks. The toolbar overlay still
-/// floats over the block above when focused; this just keeps blocks from
-/// sitting flush against each other.
+/// Small vertical breathing room between blocks, so they don't sit flush
+/// against each other.
 const BLOCK_GAP_PX: f64 = 8.;
 
 /// Background tint for the block under the pointer. Subtle so it reads as a
@@ -181,26 +181,52 @@ fn wrap_block(
         }
     });
 
-    // Floating toolbar: mounts only when this block is focused, absolutely
-    // positioned just above the block so it reserves no layout space and never
-    // shifts the document when focus moves.
-    let toolbar_overlay = dyn_container(
-        move || focus_pub.block.get() == Some(block_id),
-        move |is_focused| {
-            if is_focused {
-                block_toolbar_for(block_id, kind.clone(), focus_pub, on_action.clone()).into_any()
+    // Toolbar slot: an in-flow first row that mounts the toolbar only when this
+    // block is focused (a fixed-height box then; zero-height otherwise). It must
+    // be in-flow — not an absolute overlay — to stay clickable: floem 0.2 gates
+    // pointer descent on `layout_rect().with_origin(local_location)`. An
+    // absolutely positioned child overflowing *above* its parent (a negative
+    // `inset_top`) grows the parent's union height but re-anchors it at the
+    // parent's own positive origin, shifting the hit rectangle downward — so the
+    // toolbar painted above the block was visible but never hit-tested, and its
+    // buttons were dead. Keeping it in flow makes its layout box coincide with
+    // where it paints, so clicks land.
+    let toolbar_slot = {
+        let on_action = on_action.clone();
+        dyn_container(
+            move || focus_pub.block.get() == Some(block_id),
+            move |is_focused| {
+                if is_focused {
+                    block_toolbar_for(block_id, kind.clone(), focus_pub, on_action.clone())
+                        .into_any()
+                } else {
+                    empty().into_any()
+                }
+            },
+        )
+        .style(move |s| {
+            if focus_pub.block.get() == Some(block_id) {
+                s.width_full().height(TOOLBAR_HEIGHT_PX)
             } else {
-                empty().into_any()
+                s.height(0.)
             }
-        },
-    )
-    .style(|s| {
-        s.position(floem::style::Position::Absolute)
-            .inset_top(-f64::from(TOOLBAR_HEIGHT_PX))
-            .inset_left(f64::from(HANDLE_WIDTH))
-    });
+        })
+    };
 
-    stack((row_with_border, toolbar_overlay))
-        .style(|s| s.width_full().margin_top(BLOCK_GAP_PX))
+    v_stack((toolbar_slot, row_with_border))
+        .style(move |s| {
+            // Keep an 8px gap between blocks. When this block is focused, the
+            // in-flow toolbar would push everything below it down by its height;
+            // cancel that by pulling the whole block up by exactly that height,
+            // so the toolbar floats over the block above and the document never
+            // shifts as focus moves between blocks.
+            let focused = focus_pub.block.get() == Some(block_id);
+            let margin_top = if focused {
+                BLOCK_GAP_PX - f64::from(TOOLBAR_HEIGHT_PX)
+            } else {
+                BLOCK_GAP_PX
+            };
+            s.width_full().margin_top(margin_top)
+        })
         .into_any()
 }

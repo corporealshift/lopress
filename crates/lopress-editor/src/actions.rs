@@ -65,9 +65,10 @@ pub enum BlockAction {
         block_id: BlockId,
         new_body: Box<BlockBody>,
         /// True when this commit originates from a built-in editor widget
-        /// (paragraph, heading, code, list). Used by the debug_assert in
-        /// apply_edit_block_body to distinguish internal regressions from
-        /// plugin-originated input — plugin commits always degrade gracefully.
+        /// (paragraph, heading, code, list) rather than plugin-originated input.
+        /// Provenance metadata: surfaced in `apply_edit_block_body`'s
+        /// coercion-invariant assertion. Both provenances are coerced to the
+        /// block's kind, so neither can leave the block in an unrenderable shape.
         built_in: bool,
     },
     /// Insert `new_block` immediately after `anchor`. If `anchor` is missing,
@@ -725,24 +726,31 @@ fn apply_edit_block_body(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
-    // Debug assertion: catch shape-mismatched commits from built-in sources.
-    // (`get_mut` because `block.body` is mutated below; the assert and
-    // `coerce_body_to_kind` only take immutable reborrows of `block`.)
-    // Plugin-originated input (built_in: false) always degrades gracefully —
-    // it can carry any body shape from a third-party editor. Built-in widgets
-    // (built_in: true) should only emit bodies matching the block's kind; a
-    // mismatch here is an internal regression.
-    debug_assert!(
-        !built_in || body_matches_kind(&block.kind, &new_body),
-        "built-in EditBlockBody mismatch: block {:?} kind {:?}, body {:?}",
-        id,
-        block.kind,
-        new_body
-    );
     // Coerce the incoming body to the block's kind so a stale or out-of-order
     // commit can never leave the block in an unrenderable shape. See
     // `coerce_body_to_kind`.
+    //
+    // A *mismatched* incoming body is expected, not a bug: a built-in editor
+    // (built_in: true) legitimately emits a stale body after a ChangeType swaps
+    // the kind out from under a still-mounted editor — the FocusLost flush
+    // races the editor-pane rebuild and lands after the kind changed. For
+    // Code/List blocks this flush is in fact the only path that carries
+    // freshly-typed text into the model (the toolbar can't pre-commit them), so
+    // we must accept and coerce it, not reject it. (An earlier assertion keyed
+    // on `built_in` panicked here on that legitimate flow.)
     let new_body = canonicalize_body(&coerce_body_to_kind(&block.kind, new_body));
+    // Invariant: coercion always yields a body whose shape matches the block's
+    // kind, so the stored (kind, body) pair is always renderable. This catches
+    // bugs in `coerce_body_to_kind` itself rather than false-flagging the
+    // (expected) stale commit above. `built_in` is surfaced for provenance.
+    debug_assert!(
+        body_matches_kind(&block.kind, &new_body),
+        "coerced EditBlockBody still mismatches kind: block {:?} kind {:?}, body {:?}, built_in {}",
+        id,
+        block.kind,
+        new_body,
+        built_in
+    );
     if canonicalize_body(&block.body) == new_body {
         return None;
     }
