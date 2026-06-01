@@ -109,10 +109,12 @@ impl CtrlAction {
             CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
                 new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+                built_in: false, // External input via control server.
             },
             CtrlAction::EditCode { block_id, new_text } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
                 new_body: Box::new(crate::model::types::BlockBody::Code(new_text)),
+                built_in: false, // External input via control server.
             },
             CtrlAction::EditAttrs {
                 block_id,
@@ -670,6 +672,7 @@ mod tests {
             BlockAction::EditBlockBody {
                 block_id,
                 ref new_body,
+                ..
             } => match new_body.as_ref() {
                 BlockBody::Inline(runs) => {
                     assert_eq!(block_id.raw(), raw);
@@ -692,6 +695,7 @@ mod tests {
             BlockAction::EditBlockBody {
                 block_id,
                 ref new_body,
+                ..
             } => match new_body.as_ref() {
                 BlockBody::Code(text) => {
                     assert_eq!(block_id.raw(), raw);

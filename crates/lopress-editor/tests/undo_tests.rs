@@ -123,6 +123,7 @@ fn undo_stack_push_and_pop() {
     let action = BlockAction::EditBlockBody {
         block_id: id,
         new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("edited")])),
+        built_in: false,
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
@@ -152,6 +153,7 @@ fn undo_stack_redo_available_after_undo() {
     let action = BlockAction::EditBlockBody {
         block_id: id,
         new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("edited")])),
+        built_in: false,
     };
     let (canonical, inverse) = apply(&mut doc, action).unwrap();
     stack.push_after_apply(canonical, inverse);
@@ -186,6 +188,7 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     let a1 = BlockAction::EditBlockBody {
         block_id: id,
         new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("ab")])),
+        built_in: false,
     };
     let (c1, i1) = apply(&mut doc, a1).unwrap();
     stack.push_after_apply(c1, i1);
@@ -193,6 +196,7 @@ fn each_edit_block_body_is_its_own_undo_entry() {
     let a2 = BlockAction::EditBlockBody {
         block_id: id,
         new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("abc")])),
+        built_in: false,
     };
     let (c2, i2) = apply(&mut doc, a2).unwrap();
     stack.push_after_apply(c2, i2);

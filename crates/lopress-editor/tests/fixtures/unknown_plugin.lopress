@@ -1,0 +1,10 @@
+---
+title: Unknown Plugin Test
+---
+# Heading
+
+<!-- lopress:video {"src":"unknown.mp4"} -->
+video content here
+<!-- /lopress:video -->
+
+After the video.

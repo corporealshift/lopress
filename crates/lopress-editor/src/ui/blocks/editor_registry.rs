@@ -45,7 +45,13 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
 /// driven `PluginMeta.attrs`, not from the `BlockKind::List` enum.
 fn list_editor_widget(ctx: &EditorContext) -> AnyView {
     let BlockBody::List(items) = &ctx.block.body else {
-        return floem::views::empty().into_any();
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[fallback] editor_registry list: {:?} has body {:?}",
+            ctx.block.id, ctx.block.body
+        );
+        return crate::ui::blocks::fallback::fallback_block_view(ctx.block, ctx.focus_pub)
+            .into_any();
     };
     let ordered = ctx
         .block
@@ -72,7 +78,13 @@ fn list_editor_widget(ctx: &EditorContext) -> AnyView {
 /// and calls `code_editor::editable_code_view`.
 fn code_editor_widget(ctx: &EditorContext) -> AnyView {
     let BlockBody::Code(body) = &ctx.block.body else {
-        return floem::views::empty().into_any();
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[fallback] editor_registry code: {:?} has body {:?}",
+            ctx.block.id, ctx.block.body
+        );
+        return crate::ui::blocks::fallback::fallback_block_view(ctx.block, ctx.focus_pub)
+            .into_any();
     };
     let lang = ctx
         .block

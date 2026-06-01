@@ -15,7 +15,6 @@ use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
-use crate::ui::dnd::DndState;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -40,7 +39,6 @@ pub fn plugin_block_view(
     focus_target: RwSignal<Option<BlockId>>,
     focus_pub: FocusPublisher,
     current_doc: RwSignal<Option<EditorDoc>>,
-    _dnd: DndState,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
 ) -> AnyView {
@@ -371,6 +369,13 @@ fn render_body(
             on_undo,
             on_redo,
         ),
-        _ => floem::views::empty().into_any(),
+        _ => {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[fallback] plugin block {:?}: kind/body mismatch ({:?} + {:?})",
+                block.id, block.kind, block.body
+            );
+            crate::ui::blocks::fallback::fallback_block_view(block, focus_pub).into_any()
+        }
     }
 }

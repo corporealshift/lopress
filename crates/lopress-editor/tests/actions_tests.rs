@@ -35,6 +35,40 @@ fn run_text(block: &EditorBlock) -> String {
 }
 
 #[test]
+fn change_type_on_opaque_block_is_noop_to_prevent_data_loss() {
+    // An Opaque (unknown-plugin) block has no sensible conversion to another
+    // kind. Changing only its kind yields {kind: X, body: Opaque}, which
+    // `to_core` cannot serialize — the block is silently lost on save. So
+    // ChangeType on an Opaque block must be a no-op, leaving it intact and
+    // round-trippable; recovery for these blocks is via Delete only.
+    let block = EditorBlock::opaque(
+        "lopress:video".to_string(),
+        json!({ "type": "lopress:video", "attrs": { "src": "x.mp4" } }),
+    );
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Paragraph,
+        },
+    );
+
+    assert_eq!(doc.blocks.len(), 1, "block must not be dropped");
+    assert!(
+        matches!(&doc.blocks[0].kind, BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"),
+        "kind must stay Opaque, got {:?}",
+        doc.blocks[0].kind
+    );
+    assert!(
+        matches!(doc.blocks[0].body, BlockBody::Opaque(_)),
+        "body must stay Opaque so it round-trips through to_core"
+    );
+}
+
+#[test]
 fn split_paragraph_at_middle() {
     let (id, block) = paragraph_with_id("hello world");
     let mut doc = doc_with(vec![block]);
@@ -88,6 +122,7 @@ fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("let x = 1;")])),
+            built_in: false,
         },
     );
     // 2. Change type to Code.
@@ -104,6 +139,7 @@ fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("let x = 1;")])),
+            built_in: false,
         },
     );
 
@@ -119,6 +155,68 @@ fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
         block.body
     );
     assert_eq!(run_text(block), "let x = 1;");
+}
+
+#[test]
+fn stale_builtin_list_commit_after_change_to_heading_coerces_without_panicking() {
+    // Regression repro of the toolbar "H2"-on-a-list crash. Clicking a kind
+    // button on a focused list dispatches ChangeType{Heading}, which flattens
+    // the list body to Inline. The list editor — unmounted by the ensuing
+    // editor-pane rebuild — then fires its FocusLost flush: a *built-in*
+    // EditBlockBody{List} for the now-Heading block. Unlike the inline editor,
+    // the list editor is never pre-committed by the toolbar (the toolbar has no
+    // handle to the list buffer), so this flush is the *only* path that carries
+    // freshly-typed list text into the model — coerce_body_to_kind flattens it
+    // to the heading's Inline shape. A previous pre-coercion debug_assert
+    // panicked on this legitimate built-in commit; the model must instead coerce
+    // it and keep the text.
+    let item = |t: &str| ListItem {
+        id: BlockId::new(),
+        runs: vec![InlineRun::plain(t)],
+    };
+    let block = EditorBlock::list(false, vec![item("alpha"), item("beta")]);
+    let id = block.id;
+    let mut doc = doc_with(vec![block]);
+
+    // 1. Toolbar dispatches ChangeType to Heading 2 (no pre-commit for lists).
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Heading(2),
+        },
+    );
+    // 2. Stale built-in FocusLost flush from the unmounted list editor, carrying
+    //    a freshly-typed third item that only ever lived in the editor buffer.
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::List(vec![
+                item("alpha"),
+                item("beta"),
+                item("gamma"),
+            ])),
+            built_in: true,
+        },
+    );
+
+    let block = &doc.blocks[0];
+    assert!(
+        matches!(block.kind, BlockKind::Heading(2)),
+        "kind should stay Heading(2), got {:?}",
+        block.kind
+    );
+    assert!(
+        matches!(block.body, BlockBody::Inline(_)),
+        "body must be coerced to Inline so the block renders, got {:?}",
+        block.body
+    );
+    assert!(
+        run_text(block).contains("gamma"),
+        "the flush's freshly-typed list text must survive coercion, got {:?}",
+        run_text(block)
+    );
 }
 
 #[test]
@@ -349,6 +447,7 @@ fn edit_block_body_inline_replaces_runs() {
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("new")])),
+            built_in: false,
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -364,6 +463,7 @@ fn edit_block_body_code_replaces_text() {
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(BlockBody::Code("new".into())),
+            built_in: false,
         },
     );
     assert_eq!(run_text(&doc.blocks[0]), "new");
@@ -671,6 +771,7 @@ mod inverse_symmetry {
             BlockAction::EditBlockBody {
                 block_id: id,
                 new_body,
+                built_in: false,
             },
         );
     }
@@ -688,6 +789,7 @@ mod inverse_symmetry {
             BlockAction::EditBlockBody {
                 block_id: id,
                 new_body,
+                built_in: false,
             },
         );
     }
@@ -725,6 +827,7 @@ mod inverse_symmetry {
             BlockAction::EditBlockBody {
                 block_id: id,
                 new_body,
+                built_in: false,
             },
         );
     }
@@ -1273,4 +1376,93 @@ fn change_type_list_to_list_ordered_toggle_round_trips() {
         core.blocks[0].children[0].children[0].text.as_deref(),
         Some("item")
     );
+}
+
+// ============================================================================
+// Coercion tests — stale body shapes are converted to match the block's kind.
+// ============================================================================
+
+#[test]
+fn coerce_body_to_kind_inline_to_code_preserves_text() {
+    // Regression: a stale Inline commit on a Code block should coerce to
+    // Code body, preserving the text, not leave {kind: Code, body: Inline}.
+    let (id, block) = paragraph_with_id("hello world");
+    let mut doc = doc_with(vec![block]);
+
+    // First, change the kind to Code.
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::Code { lang: Rc::from("") },
+        },
+    );
+    assert!(matches!(
+        &doc.blocks[0].body,
+        BlockBody::Code(t) if t == "hello world"
+    ));
+
+    // Now apply a stale Inline body (the regression scenario).
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("stale")])),
+            built_in: false,
+        },
+    );
+    // Coercion should have converted the Inline to Code, preserving "stale".
+    assert!(matches!(&doc.blocks[0].body, BlockBody::Code(t) if t == "stale"));
+}
+
+#[test]
+fn coerce_body_to_kind_inline_to_list_preserves_text() {
+    let (id, block) = paragraph_with_id("line1\nline2");
+    let mut doc = doc_with(vec![block]);
+
+    // Change to List.
+    apply(
+        &mut doc,
+        BlockAction::ChangeType {
+            block_id: id,
+            new_kind: BlockKind::List { ordered: false },
+        },
+    );
+
+    // Stale Inline commit.
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(BlockBody::Inline(vec![InlineRun::plain("line1\nline2")])),
+            built_in: false,
+        },
+    );
+    // Should coerce to List with one item per line.
+    let BlockBody::List(items) = &doc.blocks[0].body else {
+        panic!("expected List body");
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].runs, vec![InlineRun::plain("line1")]);
+    assert_eq!(items[1].runs, vec![InlineRun::plain("line2")]);
+}
+
+#[test]
+fn coerce_body_to_kind_matching_body_unchanged() {
+    // When the body shape already matches the kind, coercion is a no-op.
+    let (id, block) = paragraph_with_id("hello");
+    let mut doc = doc_with(vec![block]);
+
+    let initial_body = doc.blocks[0].body.clone();
+    apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(initial_body.clone()),
+            built_in: false,
+        },
+    );
+    // The body should be unchanged (canonicalization may normalize runs).
+    // What matters is no panic and no silent data loss.
+    assert_eq!(doc.blocks.len(), 1);
 }

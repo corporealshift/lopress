@@ -64,6 +64,12 @@ pub enum BlockAction {
     EditBlockBody {
         block_id: BlockId,
         new_body: Box<BlockBody>,
+        /// True when this commit originates from a built-in editor widget
+        /// (paragraph, heading, code, list) rather than plugin-originated input.
+        /// Provenance metadata: surfaced in `apply_edit_block_body`'s
+        /// coercion-invariant assertion. Both provenances are coerced to the
+        /// block's kind, so neither can leave the block in an unrenderable shape.
+        built_in: bool,
     },
     /// Insert `new_block` immediately after `anchor`. If `anchor` is missing,
     /// appends to the end.
@@ -124,9 +130,11 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
             block_id,
             new_attrs,
         } => apply_edit_attrs(doc, block_id, *new_attrs),
-        BlockAction::EditBlockBody { block_id, new_body } => {
-            apply_edit_block_body(doc, block_id, *new_body)
-        }
+        BlockAction::EditBlockBody {
+            block_id,
+            new_body,
+            built_in,
+        } => apply_edit_block_body(doc, block_id, *new_body, built_in),
         BlockAction::EditFrontMatter { new_front_matter } => {
             apply_edit_front_matter(doc, *new_front_matter)
         }
@@ -202,7 +210,7 @@ fn apply_split(
             let mut new_text = text;
             new_text.insert(byte_offset.min(new_text.len()), '\n');
             let (_inner_canonical, inverse) =
-                apply_edit_block_body(doc, id, BlockBody::Code(new_text))?;
+                apply_edit_block_body(doc, id, BlockBody::Code(new_text), false)?;
             Some((
                 BlockAction::Split {
                     block_id: id,
@@ -272,7 +280,7 @@ fn apply_split(
             split_item_at_with_id(&mut new_items, pos, local, new_block_id);
             let minted_id = new_items.get(pos + 1)?.id;
             let (_inner_canonical, inverse) =
-                apply_edit_block_body(doc, id, BlockBody::List(new_items))?;
+                apply_edit_block_body(doc, id, BlockBody::List(new_items), false)?;
             Some((
                 BlockAction::Split {
                     block_id: id,
@@ -445,6 +453,16 @@ fn apply_change_type(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
+    // Guard: an Opaque (unknown-plugin) body has no sensible conversion to
+    // another kind. Changing only the kind would leave `{kind, Opaque}`, which
+    // `to_core` cannot serialize — the block is silently dropped on save. The
+    // fallback view routes Opaque blocks through a focusable card whose toolbar
+    // can fire ChangeType, so guard it here at the model chokepoint: treat it as
+    // a no-op. These blocks are recoverable via Delete only (the fallback's
+    // warning says as much).
+    if matches!(block.body, BlockBody::Opaque(_)) {
+        return None;
+    }
     let old_kind = block.kind.clone();
     match (&new_kind, &block.body) {
         // ── To Inline (Paragraph / Heading) ──────────────────────────────
@@ -625,11 +643,27 @@ fn apply_edit_front_matter(
     ))
 }
 
+/// True when `body` is the expected shape for `kind`. Used by the
+/// debug_assert in apply_edit_block_body to distinguish valid from
+/// mismatched commits.
+fn body_matches_kind(kind: &BlockKind, body: &BlockBody) -> bool {
+    matches!(
+        (kind, body),
+        (
+            BlockKind::Paragraph | BlockKind::Heading(_),
+            BlockBody::Inline(_)
+        ) | (BlockKind::Code { .. }, BlockBody::Code(_))
+            | (BlockKind::List { .. }, BlockBody::List(_))
+            | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
+    )
+}
+
 /// Flatten any body to its plain text. Mirrors the flattening that
 /// `apply_change_type` performs: `Inline`/`List` runs are concatenated, list
 /// items are joined with `\n`, `Code` is already flat, and `Opaque` has no
-/// text.
-fn body_to_flat_text(body: &BlockBody) -> String {
+/// text. Shared between `apply_change_type` / `coerce_body_to_kind` and the
+/// render-layer fallback view so every code path presents the same text.
+pub(crate) fn body_to_flat_text(body: &BlockBody) -> String {
     match body {
         BlockBody::Inline(runs) => runs.iter().map(|r| r.text.as_str()).collect(),
         BlockBody::Code(text) => text.clone(),
@@ -688,13 +722,35 @@ fn apply_edit_block_body(
     doc: &mut EditorDoc,
     id: BlockId,
     new_body: BlockBody,
+    built_in: bool,
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
     // Coerce the incoming body to the block's kind so a stale or out-of-order
     // commit can never leave the block in an unrenderable shape. See
     // `coerce_body_to_kind`.
+    //
+    // A *mismatched* incoming body is expected, not a bug: a built-in editor
+    // (built_in: true) legitimately emits a stale body after a ChangeType swaps
+    // the kind out from under a still-mounted editor — the FocusLost flush
+    // races the editor-pane rebuild and lands after the kind changed. For
+    // Code/List blocks this flush is in fact the only path that carries
+    // freshly-typed text into the model (the toolbar can't pre-commit them), so
+    // we must accept and coerce it, not reject it. (An earlier assertion keyed
+    // on `built_in` panicked here on that legitimate flow.)
     let new_body = canonicalize_body(&coerce_body_to_kind(&block.kind, new_body));
+    // Invariant: coercion always yields a body whose shape matches the block's
+    // kind, so the stored (kind, body) pair is always renderable. This catches
+    // bugs in `coerce_body_to_kind` itself rather than false-flagging the
+    // (expected) stale commit above. `built_in` is surfaced for provenance.
+    debug_assert!(
+        body_matches_kind(&block.kind, &new_body),
+        "coerced EditBlockBody still mismatches kind: block {:?} kind {:?}, body {:?}, built_in {}",
+        id,
+        block.kind,
+        new_body,
+        built_in
+    );
     if canonicalize_body(&block.body) == new_body {
         return None;
     }
@@ -703,10 +759,12 @@ fn apply_edit_block_body(
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(new_body),
+            built_in: false, // Record/inverse: external provenance.
         },
         BlockAction::EditBlockBody {
             block_id: id,
             new_body: Box::new(old_body),
+            built_in: false, // Record/inverse: external provenance.
         },
     ))
 }
@@ -776,5 +834,50 @@ mod front_matter_tests {
             ..Default::default()
         };
         assert!(apply_edit_front_matter(&mut doc, same).is_none());
+    }
+}
+
+#[cfg(test)]
+mod body_to_flat_text_tests {
+    use super::*;
+
+    #[test]
+    fn inline_runs_concatenate() {
+        let body = BlockBody::Inline(vec![
+            InlineRun::plain("hello "),
+            InlineRun {
+                text: "world".into(),
+                bold: true,
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(body_to_flat_text(&body), "hello world");
+    }
+
+    #[test]
+    fn code_returns_text_as_is() {
+        let body = BlockBody::Code("fn main() {}".to_string());
+        assert_eq!(body_to_flat_text(&body), "fn main() {}");
+    }
+
+    #[test]
+    fn list_joins_items_with_newlines() {
+        let body = BlockBody::List(vec![
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("a")],
+            },
+            ListItem {
+                id: BlockId::new(),
+                runs: vec![InlineRun::plain("b")],
+            },
+        ]);
+        assert_eq!(body_to_flat_text(&body), "a\nb");
+    }
+
+    #[test]
+    fn opaque_returns_empty_string() {
+        let body = BlockBody::Opaque(serde_json::json!({ "foo": 42 }));
+        assert_eq!(body_to_flat_text(&body), "");
     }
 }

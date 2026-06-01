@@ -3,7 +3,7 @@
 use crate::actions::BlockAction;
 use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
-use crate::model::types::{BlockId, EditorDoc, InlineRun};
+use crate::model::types::{BlockId, BlockKind, EditorDoc, InlineRun};
 use crate::ui::blocks::style_span::InlineRunStyling;
 use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
@@ -151,7 +151,22 @@ pub fn editable_inline(
     let spans_sig = state.spans_sig;
     let on_action_for_commit = on_action.clone();
     let commit: CommitClosure = Rc::new(move || {
-        commit_from_editor(editor_sig, spans_sig, block_id, &on_action_for_commit);
+        // Suppress the commit when the block's kind is no longer inline-bodied.
+        // A ChangeType swaps the kind from Paragraph/Heading to Code/List
+        // while this editor is still mounted; the FocusLost that follows
+        // would emit a stale EditBlockBody{Inline} that overwrites the
+        // correct body shape for Code/List blocks.
+        let should_commit = current_doc.with_untracked(|maybe| {
+            maybe.as_ref().and_then(|doc| {
+                doc.blocks
+                    .iter()
+                    .find(|b| b.id == block_id)
+                    .map(|b| matches!(b.kind, BlockKind::Paragraph | BlockKind::Heading(_)))
+            })
+        });
+        if should_commit.unwrap_or(false) {
+            commit_from_editor(editor_sig, spans_sig, block_id, &on_action_for_commit);
+        }
     });
     let structural_key: StructuralKey = Rc::new(|_, _| None);
     mount_block_editor(
@@ -667,6 +682,7 @@ fn commit_from_editor(
     on_action(BlockAction::EditBlockBody {
         block_id,
         new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
+        built_in: true, // Built-in inline editor widget.
     });
 }
 

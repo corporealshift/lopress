@@ -54,6 +54,7 @@ fn make_code_commit(
             commit_on_action(BlockAction::EditBlockBody {
                 block_id,
                 new_body: Box::new(BlockBody::Code(live_text)),
+                built_in: true, // Built-in code editor widget.
             });
         }
     })

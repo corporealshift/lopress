@@ -43,6 +43,7 @@ fn edit_block_body_on_list_replaces_items() {
                 id: original_id,
                 runs: vec![InlineRun::plain("new")],
             }])),
+            built_in: false,
         },
     );
     assert_eq!(items_of(&doc), vec!["new"]);
@@ -182,8 +183,15 @@ fn editing_multiple_items_then_splitting_one_preserves_all_edits() {
             runs: vec![InlineRun::plain("item two edited")],
         },
     ]));
-    let (_canonical, inverse) =
-        apply(&mut doc, BlockAction::EditBlockBody { block_id, new_body }).unwrap();
+    let (_canonical, inverse) = apply(
+        &mut doc,
+        BlockAction::EditBlockBody {
+            block_id,
+            new_body,
+            built_in: false,
+        },
+    )
+    .unwrap();
 
     // All four items present with the right text — no edit was lost.
     let BlockBody::List(items) = &doc.blocks[0].body else {
