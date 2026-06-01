@@ -22,18 +22,23 @@ use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
-use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
+use floem::views::{dyn_container, empty, h_stack, stack, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
 /// Border color for the block that currently holds focus.
 const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
 
-/// Reserved height for the toolbar slot above each block. Matches the
-/// rendered toolbar's natural height including its bottom margin. Reserving
-/// the slot on every block prevents the document from shifting when focus
-/// moves between blocks.
+/// How far the floating toolbar sits above its block, as a negative top inset.
+/// Matches the toolbar's natural rendered height so it clears the block. The
+/// toolbar is an absolutely-positioned overlay, so it reserves no layout space
+/// and never shifts the document when focus moves between blocks.
 const TOOLBAR_HEIGHT_PX: f32 = 36.;
+
+/// Small vertical breathing room between blocks. The toolbar overlay still
+/// floats over the block above when focused; this just keeps blocks from
+/// sitting flush against each other.
+const BLOCK_GAP_PX: f64 = 8.;
 
 /// Background tint for the block under the pointer. Subtle so it reads as a
 /// hover hint, not a selection — its main job is making empty blocks (which
@@ -66,45 +71,10 @@ pub fn block_view(
             focus_target,
             focus_pub,
             current_doc,
-            dnd,
             Rc::clone(&on_undo),
             Rc::clone(&on_redo),
         );
-        // The toolbar slot still mounts above plugin blocks so kind / B / I
-        // toggles still work on the body editor.
-        let toolbar_slot = {
-            let on_action = on_action.clone();
-            let kind_for_slot = kind.clone();
-            dyn_container(
-                move || focus_pub.block.get() == Some(block_id),
-                move |is_focused| {
-                    if is_focused {
-                        block_toolbar_for(
-                            block_id,
-                            kind_for_slot.clone(),
-                            focus_pub,
-                            on_action.clone(),
-                        )
-                        .into_any()
-                    } else {
-                        empty().into_any()
-                    }
-                },
-            )
-            .style(|s| s.width_full().height(TOOLBAR_HEIGHT_PX))
-        };
-        let plugin_with_border = plugin_view.style(move |s| {
-            let focused = focus_pub.block.get() == Some(block_id);
-            let s = s.width_full().border(1.0).border_radius(4.0);
-            if focused {
-                s.border_color(FOCUS_BORDER)
-            } else {
-                s.border_color(floem::peniko::Color::TRANSPARENT)
-            }
-        });
-        return v_stack((toolbar_slot, plugin_with_border))
-            .style(|s| s.width_full())
-            .into_any();
+        return wrap_block(plugin_view, block_id, kind, dnd, focus_pub, on_action);
     }
 
     let body = match (&block.kind, &block.body) {
@@ -159,34 +129,26 @@ pub fn block_view(
         }
     };
 
-    // Anchored toolbar: rendered above this block's body iff this block is
-    // the focused one. Uses a `dyn_container` keyed on `focus_pub.block` so
-    // it appears/disappears reactively.
-    let toolbar_slot = {
-        let on_action = on_action.clone();
-        let kind_for_slot = kind.clone();
-        dyn_container(
-            move || focus_pub.block.get() == Some(block_id),
-            move |is_focused| {
-                if is_focused {
-                    block_toolbar_for(
-                        block_id,
-                        kind_for_slot.clone(),
-                        focus_pub,
-                        on_action.clone(),
-                    )
-                    .into_any()
-                } else {
-                    empty().into_any()
-                }
-            },
-        )
-        .style(|s| s.width_full().height(TOOLBAR_HEIGHT_PX))
-    };
+    wrap_block(body, block_id, kind, dnd, focus_pub, on_action)
+}
 
-    // Hover gutter: shows the drag handle when the user is over this block
-    // (or while it's being dragged). PointerEnter/PointerLeave on the
-    // h_stack container set the local hover signal.
+/// Wrap a block's body in the shared chrome: a drag-handle gutter, hover/focus
+/// styling, and a floating toolbar that appears above the focused block.
+///
+/// Both the plugin and built-in render paths funnel through here, so every
+/// block — paragraph, code, list, plugin, or fallback — is draggable and gets
+/// the same toolbar. The toolbar is absolutely positioned, so it reserves no
+/// vertical space (blocks sit flush) and never shifts the document when focus
+/// moves between blocks.
+fn wrap_block(
+    body: AnyView,
+    block_id: BlockId,
+    kind: BlockKind,
+    dnd: DndState,
+    focus_pub: FocusPublisher,
+    on_action: ActionSink,
+) -> AnyView {
+    // Hover gutter with the drag handle, left of the body.
     let hover: RwSignal<bool> = RwSignal::new(false);
     let handle = drag_handle(block_id, dnd, hover)
         .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.).items_center());
@@ -218,7 +180,27 @@ pub fn block_view(
             s.border_color(floem::peniko::Color::TRANSPARENT)
         }
     });
-    v_stack((toolbar_slot, row_with_border))
-        .style(|s| s.width_full())
+
+    // Floating toolbar: mounts only when this block is focused, absolutely
+    // positioned just above the block so it reserves no layout space and never
+    // shifts the document when focus moves.
+    let toolbar_overlay = dyn_container(
+        move || focus_pub.block.get() == Some(block_id),
+        move |is_focused| {
+            if is_focused {
+                block_toolbar_for(block_id, kind.clone(), focus_pub, on_action.clone()).into_any()
+            } else {
+                empty().into_any()
+            }
+        },
+    )
+    .style(|s| {
+        s.position(floem::style::Position::Absolute)
+            .inset_top(-f64::from(TOOLBAR_HEIGHT_PX))
+            .inset_left(f64::from(HANDLE_WIDTH))
+    });
+
+    stack((row_with_border, toolbar_overlay))
+        .style(|s| s.width_full().margin_top(BLOCK_GAP_PX))
         .into_any()
 }
