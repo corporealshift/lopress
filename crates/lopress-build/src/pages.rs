@@ -67,13 +67,20 @@ pub fn discover(
 }
 
 /// Build the list of PostSummary objects used by index/tag templates and feed.
-pub fn post_summaries(posts: &[DiscoveredPost], _base_url: &str) -> Vec<PostSummary> {
+pub fn post_summaries(
+    posts: &[DiscoveredPost],
+    registry: &PluginRegistry,
+    tera: &tera::Tera,
+) -> Vec<PostSummary> {
     let mut out: Vec<PostSummary> = posts
         .iter()
         .filter(|p| !p.doc.front_matter.draft)
         .map(|p| {
             let slug = p.slug.clone();
             let url = format!("/posts/{slug}/");
+            let excerpt_html = crate::render::render_excerpt(&p.doc, registry, tera)
+                .ok()
+                .flatten();
             PostSummary {
                 title: p
                     .doc
@@ -86,6 +93,7 @@ pub fn post_summaries(posts: &[DiscoveredPost], _base_url: &str) -> Vec<PostSumm
                 date: p.doc.front_matter.date,
                 tags: p.doc.front_matter.tags.clone(),
                 description: p.doc.front_matter.description.clone(),
+                excerpt_html,
             }
         })
         .collect();
@@ -108,7 +116,7 @@ pub fn render_all(
 ) -> Result<RenderStats, BuildError> {
     let www = workspace.www_dir();
     std::fs::create_dir_all(&www)?;
-    let summaries = post_summaries(posts, &workspace.config.site.base_url);
+    let summaries = post_summaries(posts, registry, tera_shared);
 
     let site_ctx = SiteCtx {
         title: workspace.config.site.title.clone(),
@@ -483,4 +491,25 @@ fn write_page(www: &Path, rel_dir: &str, html: &str) -> Result<(), BuildError> {
 fn join_url(base: &str, path: &str) -> String {
     let base = base.trim_end_matches('/');
     format!("{base}{path}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopress_core::parse;
+
+    #[test]
+    fn post_summaries_populate_excerpt_when_marker_present() {
+        let src = "---\ntitle: T\n---\nteaser\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nrest\n";
+        let doc = parse(src).unwrap();
+        let posts = vec![DiscoveredPost {
+            source_path: std::path::PathBuf::from("p.md"),
+            slug: "p".into(),
+            doc,
+        }];
+        let reg = PluginRegistry::default();
+        let summaries = post_summaries(&posts, &reg, &tera::Tera::default());
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].excerpt_html.as_deref(), Some("<p>teaser</p>\n"));
+    }
 }

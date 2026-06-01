@@ -107,7 +107,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     failures.extend(stats.failures.iter().cloned());
 
     // Build summaries for aggregate pages
-    let summaries = pages::post_summaries(&posts, &ws.config.site.base_url);
+    let summaries = pages::post_summaries(&posts, &registry, &tera);
 
     let site_ctx = SiteCtx {
         title: ws.config.site.title.clone(),

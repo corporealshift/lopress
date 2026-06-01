@@ -29,6 +29,9 @@ pub struct PostSummary {
     pub date: Option<NaiveDate>,
     pub tags: Vec<String>,
     pub description: Option<String>,
+    /// Rendered HTML of the blocks before a `lopress:more` marker, when the
+    /// post has one. `None` when the post has no marker.
+    pub excerpt_html: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
