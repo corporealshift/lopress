@@ -4,7 +4,7 @@ A desktop blog-authoring tool with a Gutenberg-style block editor and a built-in
 
 Point lopress at a directory. Write posts in a block editor. Save. The directory now contains a static website — HTML, CSS, images, optional JavaScript — ready to deploy anywhere.
 
-**Status: GUI editor MVP complete.** `lopress` (no args) opens the block editor. `lopress build`, `lopress new`, and `lopress serve` are also available as CLI subcommands. See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design.
+**Status: GUI editor MVP complete.** `lopress` (no args) opens the block editor, and `lopress new <dir>` scaffolds a new site. (`lopress build` / `lopress serve` are designed but not yet wired into the current binary.) See [`docs/superpowers/specs/2026-04-18-lopress-design.md`](docs/superpowers/specs/2026-04-18-lopress-design.md) for the full design.
 
 ## What lopress is
 
@@ -130,11 +130,10 @@ Create a new workspace and open the editor:
 ```
 cargo build --release
 ./target/release/lopress new my-site --title "My Blog" --base-url "https://myblog.example.com"
-./target/release/lopress my-site      # open GUI with the workspace pre-loaded
-./target/release/lopress              # open GUI welcome screen (pick workspace from file dialog)
+./target/release/lopress              # open the editor (welcome screen; pick a workspace)
 ```
 
-CLI-only workflow (no GUI required):
+CLI-only build workflow (planned — `build` is not yet wired into the binary):
 
 ```
 ./target/release/lopress build my-site
@@ -145,7 +144,7 @@ The `www/` output is a complete static site — copy it to any static host.
 
 ## Live preview
 
-While authoring, run:
+While authoring, run (planned — `serve` is not yet wired into the binary):
 
 ```
 ./target/release/lopress serve my-site

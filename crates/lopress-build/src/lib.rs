@@ -18,12 +18,14 @@
 
 pub mod build;
 pub mod cache;
+pub mod cli;
 pub mod error;
 pub mod feed;
 pub mod not_found;
 pub mod pages;
 pub mod render;
 pub mod robots;
+pub mod scaffold;
 pub mod site;
 pub mod sitemap;
 
