@@ -1,6 +1,7 @@
 use crate::cache::{self, PageEntry};
 use crate::error::{BuildError, PageFailure};
-use crate::render::render_body;
+use crate::image_index::ImageIndex;
+use crate::render::{render_body, render_excerpt};
 use crate::site::Workspace;
 use lopress_core::{parse, Document};
 use lopress_plugin::PluginRegistry;
@@ -71,6 +72,7 @@ pub fn post_summaries(
     posts: &[DiscoveredPost],
     registry: &PluginRegistry,
     tera: &tera::Tera,
+    image_index: &ImageIndex,
 ) -> Vec<PostSummary> {
     let mut out: Vec<PostSummary> = posts
         .iter()
@@ -78,7 +80,7 @@ pub fn post_summaries(
         .map(|p| {
             let slug = p.slug.clone();
             let url = format!("/posts/{slug}/");
-            let excerpt_html = crate::render::render_excerpt(&p.doc, registry, tera)
+            let excerpt_html = render_excerpt(&p.doc, registry, tera, image_index)
                 .ok()
                 .flatten();
             PostSummary {
@@ -113,10 +115,11 @@ pub fn render_all(
     pages: &[DiscoveredPost],
     cache: &mut crate::cache::BuildCache,
     force_full: bool,
+    image_index: &ImageIndex,
 ) -> Result<RenderStats, BuildError> {
     let www = workspace.www_dir();
     std::fs::create_dir_all(&www)?;
-    let summaries = post_summaries(posts, registry, tera_shared);
+    let summaries = post_summaries(posts, registry, tera_shared, image_index);
 
     let site_ctx = SiteCtx {
         title: workspace.config.site.title.clone(),
@@ -185,7 +188,15 @@ pub fn render_all(
         if should_skip {
             pages_skipped += 1;
         } else {
-            match render_one_post(&www, &site_ctx, p, registry, theme, tera_shared) {
+            match render_one_post(
+                &www,
+                &site_ctx,
+                p,
+                registry,
+                theme,
+                tera_shared,
+                image_index,
+            ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
                         remove_stale_outputs(&www, &old.outputs, &new_outputs);
@@ -251,7 +262,15 @@ pub fn render_all(
         if should_skip {
             pages_skipped += 1;
         } else {
-            match render_one_page(&www, &site_ctx, p, registry, theme, tera_shared) {
+            match render_one_page(
+                &www,
+                &site_ctx,
+                p,
+                registry,
+                theme,
+                tera_shared,
+                image_index,
+            ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
                         remove_stale_outputs(&www, &old.outputs, &new_outputs);
@@ -367,8 +386,9 @@ pub fn render_one_post(
     registry: &PluginRegistry,
     theme: &ThemeEngine,
     tera_shared: &tera::Tera,
+    image_index: &ImageIndex,
 ) -> Result<(), BuildError> {
-    let body_html = render_body(&post.doc, registry, tera_shared)?;
+    let body_html = render_body(&post.doc, registry, tera_shared, image_index)?;
     let slug = &post.slug;
     let url = format!("/posts/{slug}/");
     let canonical = join_url(&site.base_url, &url);
@@ -402,8 +422,9 @@ pub fn render_one_page(
     registry: &PluginRegistry,
     theme: &ThemeEngine,
     tera_shared: &tera::Tera,
+    image_index: &ImageIndex,
 ) -> Result<(), BuildError> {
-    let body_html = render_body(&p.doc, registry, tera_shared)?;
+    let body_html = render_body(&p.doc, registry, tera_shared, image_index)?;
     let slug = &p.slug;
     let url = format!("/{slug}/");
     let canonical = join_url(&site.base_url, &url);
@@ -515,7 +536,8 @@ mod tests {
             doc,
         }];
         let reg = PluginRegistry::default();
-        let summaries = post_summaries(&posts, &reg, &tera::Tera::default());
+        let summaries =
+            post_summaries(&posts, &reg, &tera::Tera::default(), &ImageIndex::default());
         assert_eq!(summaries.len(), 1);
         assert_eq!(
             summaries[0].excerpt_html.as_deref(),

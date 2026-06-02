@@ -252,3 +252,74 @@ fn home_page_shows_excerpt_with_read_more_link() {
     // (verified by the unit test in pages.rs), but the index template
     // must be updated to display it.
 }
+
+#[test]
+fn captioned_image_renders_figcaption() {
+    use image::{Rgb, RgbImage};
+
+    let (_tmp, root) = copy_fixture("with-images");
+    let images = root.join("src/images");
+    fs::create_dir_all(&images).unwrap();
+    let mut img = RgbImage::new(2000, 1500);
+    for p in img.pixels_mut() {
+        *p = Rgb([120, 180, 255]);
+    }
+    img.save(images.join("photo.jpg")).unwrap();
+
+    // Give the image a caption via the markdown title slot.
+    let album = root.join("src/posts/album.md");
+    fs::write(
+        &album,
+        "---\ntitle: Album\ndate: 2026-04-18\n---\n\n![photo](/images/photo.jpg \"A blue sky\")\n",
+    )
+    .unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "failures: {:?}",
+        report.failures
+    );
+
+    let post_html = fs::read_to_string(root.join("www/posts/album/index.html")).unwrap();
+    assert!(
+        post_html.contains("<figcaption>A blue sky</figcaption>"),
+        "expected figcaption, got:\n{post_html}"
+    );
+}
+
+#[test]
+fn images_render_as_responsive_picture() {
+    use image::{Rgb, RgbImage};
+
+    let (_tmp, root) = copy_fixture("with-images");
+    let images = root.join("src/images");
+    fs::create_dir_all(&images).unwrap();
+    let src_img = images.join("photo.jpg");
+    // 2000px wide so all three default widths (400/800/1600) produce variants.
+    let mut img = RgbImage::new(2000, 1500);
+    for p in img.pixels_mut() {
+        *p = Rgb([120, 180, 255]);
+    }
+    img.save(&src_img).unwrap();
+
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www = root.join("www");
+    let post_html = fs::read_to_string(www.join("posts/album/index.html")).unwrap();
+    assert!(
+        post_html.contains("<picture>"),
+        "expected responsive picture, got:\n{post_html}"
+    );
+    assert!(post_html.contains("image/webp"), "missing webp type");
+    assert!(
+        post_html.contains("photo.400w.webp"),
+        "missing 400w variant in srcset"
+    );
+    assert!(
+        post_html.contains("photo.800w.webp"),
+        "missing 800w variant in srcset"
+    );
+}

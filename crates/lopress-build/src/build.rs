@@ -93,6 +93,33 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let (pages_src, page_failures) = pages::discover(&ws.pages_dir(), "page")?;
     failures.extend(page_failures);
 
+    // Image pipeline — run before rendering so the renderer can emit a
+    // correct responsive srcset. Has its own per-file cache.
+    let mut image_index = crate::image_index::ImageIndex::default();
+    let mut img_cache = VariantCache::load(&ws.www_dir().join(".lopress-image-cache.json"))?;
+    let spec = VariantSpec {
+        widths: ws.config.build.image_variants.clone(),
+        ..VariantSpec::default()
+    };
+    let src_images = ws.images_dir();
+    let www_images = ws.www_dir().join("images");
+    if src_images.exists() {
+        for entry in walkdir::WalkDir::new(&src_images).min_depth(1) {
+            let entry = entry.map_err(std::io::Error::other)?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            match process_image(entry.path(), &www_images, &mut img_cache, &spec) {
+                Ok(result) => image_index.record(entry.path(), &result),
+                Err(e) => failures.push(PageFailure {
+                    path: entry.path().to_path_buf(),
+                    message: format!("image: {e}"),
+                }),
+            }
+        }
+    }
+    img_cache.save(&ws.www_dir().join(".lopress-image-cache.json"))?;
+
     // Render posts and pages (cache-aware)
     let stats = pages::render_all(
         &ws,
@@ -103,11 +130,12 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         &pages_src,
         &mut build_cache,
         force_full,
+        &image_index,
     )?;
     failures.extend(stats.failures.iter().cloned());
 
     // Build summaries for aggregate pages
-    let summaries = pages::post_summaries(&posts, &registry, &tera);
+    let summaries = pages::post_summaries(&posts, &registry, &tera, &image_index);
 
     let site_ctx = SiteCtx {
         title: ws.config.site.title.clone(),
@@ -185,30 +213,6 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
             }
         }
     }
-
-    // Image pipeline (always run — has its own per-file cache)
-    let mut img_cache = VariantCache::load(&ws.www_dir().join(".lopress-image-cache.json"))?;
-    let spec = VariantSpec {
-        widths: ws.config.build.image_variants.clone(),
-        ..VariantSpec::default()
-    };
-    let src_images = ws.images_dir();
-    let www_images = ws.www_dir().join("images");
-    if src_images.exists() {
-        for entry in walkdir::WalkDir::new(&src_images).min_depth(1) {
-            let entry = entry.map_err(std::io::Error::other)?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            if let Err(e) = process_image(entry.path(), &www_images, &mut img_cache, &spec) {
-                failures.push(PageFailure {
-                    path: entry.path().to_path_buf(),
-                    message: format!("image: {e}"),
-                });
-            }
-        }
-    }
-    img_cache.save(&ws.www_dir().join(".lopress-image-cache.json"))?;
 
     // Update and persist cache
     build_cache.config_hash = cfg_hash;

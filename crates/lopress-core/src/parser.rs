@@ -367,11 +367,12 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
             Event::HardBreak => text.push('\n'),
             Event::Start(Tag::Image {
                 dest_url,
-                title: _,
+                title,
                 id: _,
                 ..
             }) => {
                 let src = dest_url.to_string();
+                let caption = title.to_string();
                 let mut alt = String::new();
                 for inner in parser.by_ref() {
                     match inner {
@@ -380,9 +381,15 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
                         _ => {}
                     }
                 }
+                let mut attrs = serde_json::Map::new();
+                attrs.insert("src".into(), serde_json::Value::String(src));
+                attrs.insert("alt".into(), serde_json::Value::String(alt));
+                if !caption.is_empty() {
+                    attrs.insert("caption".into(), serde_json::Value::String(caption));
+                }
                 only_image = Some(Block {
                     r#type: "image".into(),
-                    attrs: json!({ "src": src, "alt": alt }),
+                    attrs: Value::Object(attrs),
                     children: vec![],
                     text: None,
                 });
@@ -560,6 +567,22 @@ after
             assert_eq!(col.r#type, "lopress:column");
             assert_eq!(col.children.len(), 1);
         }
+    }
+
+    #[test]
+    fn parses_image_caption_from_title() {
+        let d = parse("![alt](foo.jpg \"My caption\")\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["image"]);
+        assert_eq!(
+            d.blocks[0].attrs,
+            json!({ "src": "foo.jpg", "alt": "alt", "caption": "My caption" })
+        );
+    }
+
+    #[test]
+    fn parses_image_without_title_has_no_caption() {
+        let d = parse("![alt](foo.jpg)\n").unwrap();
+        assert_eq!(d.blocks[0].attrs, json!({ "src": "foo.jpg", "alt": "alt" }));
     }
 
     #[test]
