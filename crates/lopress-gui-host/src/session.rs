@@ -314,6 +314,40 @@ impl Session {
         lock(&self.serve_status).clone()
     }
 
+    /// Copy `src` into the workspace's `src/images/` and return its web path
+    /// (`/images/<filename>`). On a filename collision with different bytes, a
+    /// numeric suffix is appended; identical bytes reuse the existing file.
+    ///
+    /// # Errors
+    /// Returns `SaveError` on I/O failure.
+    pub fn import_image(&self, src: &Path) -> Result<String, SaveError> {
+        let images_dir = self.workspace.images_dir();
+        std::fs::create_dir_all(&images_dir).map_err(SaveError::Io)?;
+        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("bin");
+        let bytes = std::fs::read(src).map_err(SaveError::Io)?;
+
+        // Find a non-colliding name; reuse if identical bytes already present.
+        let mut filename = format!("{stem}.{ext}");
+        let mut n: u32 = 1;
+        loop {
+            let candidate = images_dir.join(&filename);
+            if !candidate.exists() {
+                break;
+            }
+            if std::fs::read(&candidate)
+                .map(|b| b == bytes)
+                .unwrap_or(false)
+            {
+                return Ok(format!("/images/{filename}"));
+            }
+            filename = format!("{stem}-{n}.{ext}");
+            n += 1;
+        }
+        std::fs::write(images_dir.join(&filename), &bytes).map_err(SaveError::Io)?;
+        Ok(format!("/images/{filename}"))
+    }
+
     /// URL for the given document in the browser.
     pub fn preview_url_for(&self, doc_ref: &DocumentRef) -> Option<String> {
         let status = lock(&self.serve_status).clone();

@@ -10,6 +10,7 @@
 
 use lopress_gui_host::{BuildStatus, ServeStatus, Session};
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn make_workspace() -> TempDir {
@@ -136,4 +137,50 @@ fn serve_responds_to_get() {
     let n = stream.read(&mut buf).unwrap();
     let response = String::from_utf8_lossy(&buf[..n]);
     assert!(response.starts_with("HTTP/1.1"));
+}
+
+#[test]
+fn import_image_copies_file_into_src_images() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+    // Create a source image file.
+    let src_img = dir.path().join("src").join("photo.png");
+    fs::write(&src_img, b"\x89PNG\r\n\x1a\nfake_png_bytes").unwrap();
+    let web = session.import_image(&src_img).unwrap();
+    assert!(web.starts_with("/images/"));
+    let filename = web.trim_start_matches("/images/");
+    assert!(dir
+        .path()
+        .join("src")
+        .join("images")
+        .join(filename)
+        .exists());
+}
+
+#[test]
+fn import_image_disambiguates_collisions() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+    // First import → creates photo_a.png.
+    let src1 = dir.path().join("src").join("photo_a.png");
+    fs::write(&src1, b"\x89PNG\r\n\x1a\nbytes_a").unwrap();
+    let web1 = session.import_image(&src1).unwrap();
+    assert_eq!(web1, "/images/photo_a.png");
+    // Different bytes with the same source name → disambiguate.
+    let src2 = dir.path().join("src").join("photo_a.png");
+    fs::write(&src2, b"\x89PNG\r\n\x1a\nbytes_b").unwrap();
+    let web2 = session.import_image(&src2).unwrap();
+    assert_eq!(web2, "/images/photo_a-1.png");
+    // Identical bytes to the first import → reuse photo_a.png.
+    let src3 = dir.path().join("src").join("photo_a.png");
+    fs::write(&src3, b"\x89PNG\r\n\x1a\nbytes_a").unwrap();
+    let web3 = session.import_image(&src3).unwrap();
+    assert_eq!(web3, "/images/photo_a.png");
+    // Verify the file on disk is the original bytes_a.
+    let disk = dir
+        .path()
+        .join("src")
+        .join("images")
+        .join("photo_a.png");
+    assert_eq!(fs::read(&disk).unwrap(), b"\x89PNG\r\n\x1a\nbytes_a");
 }
