@@ -23,6 +23,7 @@ pub enum KindTag {
     Heading(u8),
     Code,
     List { ordered: bool },
+    Image,
     Opaque,
 }
 
@@ -32,6 +33,7 @@ pub fn kind_tag(k: &BlockKind) -> KindTag {
         BlockKind::Heading(level) => KindTag::Heading(*level),
         BlockKind::Code { .. } => KindTag::Code,
         BlockKind::List { ordered } => KindTag::List { ordered: *ordered },
+        BlockKind::Image => KindTag::Image,
         BlockKind::Opaque { .. } => KindTag::Opaque,
     }
 }

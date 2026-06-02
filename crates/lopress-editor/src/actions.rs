@@ -706,7 +706,8 @@ fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_))
         | (BlockKind::Code { .. }, BlockBody::Code(_))
         | (BlockKind::List { .. }, BlockBody::List(_))
-        | (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => body,
+        | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
+        | (BlockKind::Image, BlockBody::Opaque(_)) => body,
 
         // → Inline (Paragraph / Heading).
         (BlockKind::Paragraph | BlockKind::Heading(_), _) => {
@@ -727,6 +728,9 @@ fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
         // → Opaque from a non-Opaque body: no editor widget commits into an
         // opaque block, so this is unreachable in practice — leave it untouched.
         (BlockKind::Opaque { .. }, _) => body,
+        // Image: body is always Opaque(Null); any mismatch is a programming
+        // error — return the body as-is rather than panic.
+        (BlockKind::Image, _) => body,
     }
 }
 

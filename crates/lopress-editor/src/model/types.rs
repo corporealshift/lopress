@@ -46,6 +46,7 @@ pub enum BlockKind {
     Heading(u8), // 1..=6
     Code { lang: Rc<str> },
     List { ordered: bool },
+    Image,
     Opaque { type_name: Rc<str> },
 }
 
@@ -139,6 +140,28 @@ impl PluginMeta {
         }
     }
 
+    /// The canonical `PluginMeta` for an image block. Native `image` claim,
+    /// built-in (chrome suppressed), edited via the `"image"` widget. `attrs`
+    /// carries `src` (+ optional `alt`/`caption`).
+    pub fn image(src: &str, alt: &str, caption: &str) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("src".to_string(), Value::String(src.to_string()));
+        if !alt.is_empty() {
+            attrs.insert("alt".to_string(), Value::String(alt.to_string()));
+        }
+        if !caption.is_empty() {
+            attrs.insert("caption".to_string(), Value::String(caption.to_string()));
+        }
+        Self {
+            block_type_name: Rc::from("image"),
+            attrs,
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("image")),
+            native: Some(Rc::from("image")),
+        }
+    }
+
     /// The canonical `PluginMeta` for the read-more marker.
     ///
     /// A comment-container block (no `native` claim), built-in (chrome
@@ -215,6 +238,44 @@ impl EditorBlock {
             body: BlockBody::Inline(vec![]),
             plugin: Some(PluginMeta::read_more()),
         }
+    }
+
+    /// An image block. State (src/alt/caption) lives in `PluginMeta.attrs`;
+    /// the body is an empty Opaque placeholder (images have no editable
+    /// text/children).
+    pub fn image(src: &str, alt: &str, caption: &str) -> Self {
+        Self {
+            id: BlockId::new(),
+            kind: BlockKind::Image,
+            body: BlockBody::Opaque(Value::Null),
+            plugin: Some(PluginMeta::image(src, alt, caption)),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
+mod image_ctor_tests {
+    use super::*;
+
+    #[test]
+    fn image_block_carries_attrs_in_meta() {
+        let b = EditorBlock::image("/images/p.jpg", "alt text", "");
+        assert!(matches!(b.kind, BlockKind::Image));
+        let meta = b.plugin.as_ref().unwrap();
+        assert_eq!(&*meta.block_type_name, "image");
+        assert_eq!(meta.editor.as_deref(), Some("image"));
+        assert_eq!(meta.native.as_deref(), Some("image"));
+        assert_eq!(
+            meta.attrs.get("src").and_then(|v| v.as_str()),
+            Some("/images/p.jpg")
+        );
+        assert_eq!(
+            meta.attrs.get("alt").and_then(|v| v.as_str()),
+            Some("alt text")
+        );
+        assert!(!meta.attrs.contains_key("caption"), "empty caption omitted");
+        assert!(matches!(b.body, BlockBody::Opaque(serde_json::Value::Null)));
     }
 }
 

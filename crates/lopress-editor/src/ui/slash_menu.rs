@@ -27,6 +27,7 @@ const BORDER: Color = Color::rgb8(210, 210, 215);
 pub enum SlashChoice {
     Kind(BlockKind),
     ReadMore,
+    Image,
 }
 
 /// The choices offered by the slash menu, in display order.
@@ -48,6 +49,7 @@ pub fn slash_menu_items() -> Vec<(&'static str, SlashChoice)> {
             "Ordered list",
             SlashChoice::Kind(BlockKind::List { ordered: true }),
         ),
+        ("Image", SlashChoice::Image),
         ("Read more", SlashChoice::ReadMore),
     ]
 }

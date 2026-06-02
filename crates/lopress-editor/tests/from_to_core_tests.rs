@@ -452,3 +452,16 @@ fn read_more_marker_survives_editor_round_trip() {
     let out = serialize(&core_back);
     assert_eq!(out, src);
 }
+
+#[test]
+fn image_block_round_trips_with_caption() {
+    let mut reg = PluginRegistry::default();
+    reg.load_base_plugins().unwrap();
+    let src = "![the alt](/images/p.jpg \"A caption\")\n";
+    let core = lopress_core::parse(src).unwrap();
+    let edoc = doc_from_core(&core, &reg);
+    // The image becomes a BlockKind::Image with attrs in PluginMeta.
+    assert_eq!(edoc.blocks.len(), 1);
+    let back = doc_to_core(&edoc);
+    assert_eq!(serialize(&back), src);
+}

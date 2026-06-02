@@ -1,0 +1,15 @@
+# Built-in "base" plugin: the image block, claiming the native core `image`
+# type. Embedded at compile time via include_str! — see load_base_plugins.
+name    = "lopress-image"
+version = "0.1.0"
+
+[[blocks]]
+name    = "image"
+editor  = "image"
+native  = "image"
+builtin = true
+
+[blocks.attrs]
+src     = { type = "string", required = true, ui = "hidden" }
+alt     = { type = "string", ui = "text" }
+caption = { type = "string", ui = "text" }

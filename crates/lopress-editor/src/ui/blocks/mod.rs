@@ -9,6 +9,7 @@ pub mod code_editor;
 pub mod editor_registry;
 pub mod fallback;
 pub mod heading;
+pub mod image;
 pub mod inline_editor;
 pub mod list;
 pub mod opaque;

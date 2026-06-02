@@ -258,6 +258,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                         BlockKind::Heading(n) => format!("Heading{n}"),
                         BlockKind::Code { .. } => "Code".to_string(),
                         BlockKind::List { .. } => "List".to_string(),
+                        BlockKind::Image => "Image".to_string(),
                         BlockKind::Opaque { type_name } => format!("Opaque({type_name})"),
                     };
                     serde_json::json!({ "id": id, "kind": kind, "text": text })

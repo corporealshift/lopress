@@ -36,6 +36,7 @@ pub fn editor_pane(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
+    on_insert_image: Rc<dyn Fn(BlockId)>,
 ) -> impl IntoView {
     let focus_pub = FocusPublisher {
         block: RwSignal::new(None),
@@ -101,6 +102,7 @@ pub fn editor_pane(
                     .into_iter()
                     .filter(|(_, choice)| !(has_more && matches!(choice, SlashChoice::ReadMore)))
                     .collect();
+                let on_insert_image_for_select = on_insert_image.clone();
                 let on_select = move |choice: SlashChoice| match choice {
                     SlashChoice::Kind(new_kind) => {
                         on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
@@ -110,6 +112,9 @@ pub fn editor_pane(
                             anchor: block_id,
                             new_block: Box::new(EditorBlock::read_more()),
                         });
+                    }
+                    SlashChoice::Image => {
+                        on_insert_image_for_select(block_id);
                     }
                 };
                 let on_close = move || {
