@@ -274,10 +274,7 @@ mod image_ctor_tests {
             meta.attrs.get("alt").and_then(|v| v.as_str()),
             Some("alt text")
         );
-        assert!(
-            !meta.attrs.contains_key("caption"),
-            "empty caption omitted"
-        );
+        assert!(!meta.attrs.contains_key("caption"), "empty caption omitted");
         assert!(matches!(b.body, BlockBody::Opaque(serde_json::Value::Null)));
     }
 }

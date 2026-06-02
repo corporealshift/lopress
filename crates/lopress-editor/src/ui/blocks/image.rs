@@ -58,8 +58,13 @@ pub fn image_widget(ctx: &EditorContext) -> AnyView {
         block_id,
         ctx.on_action.clone(),
     );
-    let caption_field =
-        attr_field("caption".to_string(), caption, attrs, block_id, ctx.on_action.clone());
+    let caption_field = attr_field(
+        "caption".to_string(),
+        caption,
+        attrs,
+        block_id,
+        ctx.on_action.clone(),
+    );
 
     v_stack((
         preview,
@@ -72,11 +77,7 @@ pub fn image_widget(ctx: &EditorContext) -> AnyView {
 
 /// Build a bordered placeholder view showing the filename and alt text.
 fn build_placeholder_preview(src: &str, alt: &str) -> AnyView {
-    let filename = src
-        .split('/')
-        .last()
-        .unwrap_or(src)
-        .to_string();
+    let filename = src.split('/').next_back().unwrap_or(src).to_string();
     let alt_owned = alt.to_string();
     let lbl = label(move || {
         if alt_owned.is_empty() {
@@ -130,7 +131,10 @@ fn attr_field(
 
 /// Build a simple label + field row.
 fn labeled(label_text: &'static str, field: impl IntoView + 'static) -> impl IntoView + 'static {
-    let lbl = label(|| label_text.to_string())
-        .style(|s| s.min_width(70.).color(Color::rgb8(110, 100, 130)).font_size(12.));
+    let lbl = label(|| label_text.to_string()).style(|s| {
+        s.min_width(70.)
+            .color(Color::rgb8(110, 100, 130))
+            .font_size(12.)
+    });
     h_stack((lbl, field)).style(|s| s.gap(8.).items_center())
 }

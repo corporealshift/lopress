@@ -128,7 +128,11 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
         "image" => {
             let src = b.attrs.get("src").and_then(|v| v.as_str()).unwrap_or("");
             let alt = b.attrs.get("alt").and_then(|v| v.as_str()).unwrap_or("");
-            let caption = b.attrs.get("caption").and_then(|v| v.as_str()).unwrap_or("");
+            let caption = b
+                .attrs
+                .get("caption")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if caption.is_empty() {
                 let _ = writeln!(out, "![{alt}]({src})");
             } else {

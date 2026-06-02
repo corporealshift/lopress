@@ -45,8 +45,9 @@ fn slash_menu_items_match_acceptance_list() {
 #[test]
 fn slash_items_include_image() {
     let items = slash_menu_items();
-    assert!(items.iter().any(|(label, choice)| *label == "Image"
-        && matches!(choice, SlashChoice::Image)));
+    assert!(items
+        .iter()
+        .any(|(label, choice)| *label == "Image" && matches!(choice, SlashChoice::Image)));
 }
 
 #[test]

@@ -10,7 +10,6 @@
 
 use lopress_gui_host::{BuildStatus, ServeStatus, Session};
 use std::fs;
-use std::path::Path;
 use tempfile::TempDir;
 
 fn make_workspace() -> TempDir {
@@ -177,10 +176,6 @@ fn import_image_disambiguates_collisions() {
     let web3 = session.import_image(&src3).unwrap();
     assert_eq!(web3, "/images/photo_a.png");
     // Verify the file on disk is the original bytes_a.
-    let disk = dir
-        .path()
-        .join("src")
-        .join("images")
-        .join("photo_a.png");
+    let disk = dir.path().join("src").join("images").join("photo_a.png");
     assert_eq!(fs::read(&disk).unwrap(), b"\x89PNG\r\n\x1a\nbytes_a");
 }
