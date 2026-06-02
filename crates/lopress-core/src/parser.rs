@@ -2,7 +2,7 @@ use crate::delimiter;
 use crate::error::ParseError;
 use crate::frontmatter;
 use crate::types::{Block, Document};
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{html, CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use serde_json::{json, Value};
 
 /// Parse a markdown source (with optional front-matter) into a Document.
@@ -13,6 +13,14 @@ pub fn parse(src: &str) -> Result<Document, ParseError> {
         front_matter,
         blocks,
     })
+}
+
+/// Render a markdown string to HTML using pulldown-cmark.
+pub fn render_markdown(markdown: &str) -> String {
+    let parser = Parser::new(markdown);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 fn parse_body(body: &str) -> Result<Vec<Block>, ParseError> {

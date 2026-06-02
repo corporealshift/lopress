@@ -174,24 +174,49 @@ fn render_custom(
         write_block(&mut inner_html, c, registry, tera, image_index)?;
     }
     let plugin_name = &plugin.manifest.name;
-    let Some(template_name) = &decl.template else {
-        // Base (built-in) block with no HTML template — handled by the
-        // editor, not the static renderer. Emit the inner HTML directly.
-        out.push_str(&inner_html);
-        if !inner_html.is_empty() && !inner_html.ends_with('\n') {
+
+    // HTML template path (existing behavior).
+    if let Some(template_name) = &decl.template {
+        let template_key = format!("{plugin_name}::{template_name}");
+        let mut ctx = tera::Context::new();
+        ctx.insert("attrs", &b.attrs);
+        ctx.insert("inner_html", &inner_html);
+        let rendered = tera
+            .render(&template_key, &ctx)
+            .map_err(|e| BuildError::Config(format!("template {template_key}: {e}")))?;
+        out.push_str(&rendered);
+        if !rendered.ends_with('\n') {
             out.push('\n');
         }
         return Ok(());
-    };
-    let template_key = format!("{plugin_name}::{template_name}");
-    let mut ctx = tera::Context::new();
-    ctx.insert("attrs", &b.attrs);
-    ctx.insert("inner_html", &inner_html);
-    let rendered = tera
-        .render(&template_key, &ctx)
-        .map_err(|e| BuildError::Config(format!("template {template_key}: {e}")))?;
-    out.push_str(&rendered);
-    if !rendered.ends_with('\n') {
+    }
+
+    // Markdown template path (new behavior).
+    if let Some(md_template_name) = &decl.markdown_template {
+        let template_key = format!("{plugin_name}::{md_template_name}");
+        let mut ctx = tera::Context::new();
+        // Insert each attr at the top level so templates can use bare field
+        // names like `{{ name }}` alongside `{{ attrs.name }}`.
+        if let Some(obj) = b.attrs.as_object() {
+            for (k, v) in obj {
+                ctx.insert(k, v);
+            }
+        }
+        let rendered = tera
+            .render(&template_key, &ctx)
+            .map_err(|e| BuildError::Config(format!("markdown template {template_key}: {e}")))?;
+        // Render the Tera-interpolated markdown to HTML.
+        let md_html = lopress_core::render_markdown(&rendered);
+        out.push_str(&md_html);
+        if !md_html.ends_with('\n') {
+            out.push('\n');
+        }
+        return Ok(());
+    }
+
+    // Base (built-in) block with no template — emit inner HTML directly.
+    out.push_str(&inner_html);
+    if !inner_html.is_empty() && !inner_html.ends_with('\n') {
         out.push('\n');
     }
     Ok(())
@@ -422,5 +447,118 @@ mod tests {
         let html = render_body(&doc, &reg, &tera, &ImageIndex::default()).unwrap();
         assert!(html.contains("data-x=\"v\""));
         assert!(html.contains("<p>inner</p>"));
+    }
+
+    #[test]
+    fn markdown_template_interpolates_and_presents_as_html() {
+        use lopress_plugin::{BlockDecl, LoadedPlugin, PluginManifest};
+        let mut reg = PluginRegistry::default();
+        reg.insert(LoadedPlugin {
+            root: std::path::PathBuf::from("/does/not/exist"),
+            manifest: PluginManifest {
+                name: "demo".into(),
+                version: "0.1.0".into(),
+                theme: false,
+                blocks: vec![BlockDecl {
+                    name: "lopress:demo".into(),
+                    template: None,
+                    markdown_template: Some("blocks/demo.md".into()),
+                    attrs: Default::default(),
+                    renderer: None,
+                    editor: None,
+                    builtin: false,
+                    native: None,
+                    css: Vec::new(),
+                    js: Vec::new(),
+                }],
+            },
+        })
+        .unwrap();
+
+        let mut tera = Tera::default();
+        tera.add_raw_template(
+            "demo::blocks/demo.md",
+            "**About {{ name }}**\n\n{{ bio }}",
+        )
+        .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:demo".into(),
+                attrs: json!({"name":"Jane","bio":"Loves **Rust**"}),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &reg, &tera, &ImageIndex::default()).unwrap();
+        assert!(
+            html.contains("<strong>About Jane</strong>"),
+            "name interpolated: {html}"
+        );
+        assert!(html.contains("<strong>Rust</strong>"), "markdown in field value renders: {html}");
+    }
+
+    #[test]
+    fn checkbox_attr_drives_if_conditional_in_markdown_template() {
+        use lopress_plugin::{BlockDecl, LoadedPlugin, PluginManifest};
+        let mut reg = PluginRegistry::default();
+        reg.insert(LoadedPlugin {
+            root: std::path::PathBuf::from("/does/not/exist"),
+            manifest: PluginManifest {
+                name: "demo".into(),
+                version: "0.1.0".into(),
+                theme: false,
+                blocks: vec![BlockDecl {
+                    name: "lopress:demo".into(),
+                    template: None,
+                    markdown_template: Some("blocks/demo.md".into()),
+                    attrs: Default::default(),
+                    renderer: None,
+                    editor: None,
+                    builtin: false,
+                    native: None,
+                    css: Vec::new(),
+                    js: Vec::new(),
+                }],
+            },
+        })
+        .unwrap();
+
+        let mut tera = Tera::default();
+        tera.add_raw_template(
+            "demo::blocks/demo.md",
+            "{{ name }}\n{% if spoiler %}\n> ⚠️ Contains spoilers.\n{% endif %}",
+        )
+        .unwrap();
+
+        // spoiler = true
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:demo".into(),
+                attrs: json!({"name":"Jane","spoiler":true}),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &reg, &tera, &ImageIndex::default()).unwrap();
+        assert!(html.contains("<blockquote>"), "spoiler blockquote present: {html}");
+
+        // spoiler = false
+        let doc2 = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:demo".into(),
+                attrs: json!({"name":"Jane","spoiler":false}),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html2 = render_body(&doc2, &reg, &tera, &ImageIndex::default()).unwrap();
+        assert!(
+            !html2.contains("<blockquote>"),
+            "no spoiler blockquote: {html2}"
+        );
     }
 }
