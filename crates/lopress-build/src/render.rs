@@ -215,8 +215,8 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lopress_core::FrontMatter;
     use lopress_assets::{ImageResult, Variant};
+    use lopress_core::FrontMatter;
     use serde_json::json;
     use std::path::PathBuf;
     use tera::Tera;
@@ -234,7 +234,10 @@ mod tests {
                 format: "webp".into(),
             })
             .collect();
-        idx.record(&PathBuf::from(format!("/src/images/{original}")), &ImageResult { files });
+        idx.record(
+            &PathBuf::from(format!("/src/images/{original}")),
+            &ImageResult { files },
+        );
     }
 
     #[test]
@@ -252,15 +255,24 @@ mod tests {
                 Block::paragraph("after"),
             ],
         };
-        let html = render_body(&doc, &empty_registry(), &Tera::default(), &ImageIndex::default())
-            .unwrap();
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
         assert_eq!(html, "<p>before</p>\n<p>after</p>\n");
     }
 
     #[test]
     fn image_in_index_renders_picture_with_srcset() {
         let mut idx = ImageIndex::default();
-        seed_index(&mut idx, "photo.jpg", &[(400, "photo.400w.webp"), (800, "photo.800w.webp")]);
+        seed_index(
+            &mut idx,
+            "photo.jpg",
+            &[(400, "photo.400w.webp"), (800, "photo.800w.webp")],
+        );
         let doc = Document {
             front_matter: FrontMatter::default(),
             blocks: vec![Block {
@@ -312,8 +324,13 @@ mod tests {
                 Block::paragraph("hidden"),
             ],
         };
-        let ex = render_excerpt(&doc, &empty_registry(), &Tera::default(), &ImageIndex::default())
-            .unwrap();
+        let ex = render_excerpt(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
         assert_eq!(ex.as_deref(), Some("<p>teaser</p>\n"));
     }
 
@@ -323,8 +340,13 @@ mod tests {
             front_matter: FrontMatter::default(),
             blocks: vec![Block::paragraph("only")],
         };
-        let ex = render_excerpt(&doc, &empty_registry(), &Tera::default(), &ImageIndex::default())
-            .unwrap();
+        let ex = render_excerpt(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
         assert!(ex.is_none());
     }
 

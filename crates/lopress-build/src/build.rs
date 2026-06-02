@@ -96,8 +96,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     // Image pipeline — run before rendering so the renderer can emit a
     // correct responsive srcset. Has its own per-file cache.
     let mut image_index = crate::image_index::ImageIndex::default();
-    let mut img_cache =
-        VariantCache::load(&ws.www_dir().join(".lopress-image-cache.json"))?;
+    let mut img_cache = VariantCache::load(&ws.www_dir().join(".lopress-image-cache.json"))?;
     let spec = VariantSpec {
         widths: ws.config.build.image_variants.clone(),
         ..VariantSpec::default()

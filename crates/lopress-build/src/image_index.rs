@@ -75,9 +75,21 @@ mod tests {
         let mut idx = ImageIndex::default();
         let result = ImageResult {
             files: vec![
-                Variant { filename: PathBuf::from("photo.800w.webp"), width: 800, format: "webp".into() },
-                Variant { filename: PathBuf::from("photo.400w.webp"), width: 400, format: "webp".into() },
-                Variant { filename: PathBuf::from("photo.800w.jpg"), width: 800, format: "jpg".into() },
+                Variant {
+                    filename: PathBuf::from("photo.800w.webp"),
+                    width: 800,
+                    format: "webp".into(),
+                },
+                Variant {
+                    filename: PathBuf::from("photo.400w.webp"),
+                    width: 400,
+                    format: "webp".into(),
+                },
+                Variant {
+                    filename: PathBuf::from("photo.800w.jpg"),
+                    width: 800,
+                    format: "jpg".into(),
+                },
             ],
         };
         idx.record(Path::new("/src/images/photo.jpg"), &result);

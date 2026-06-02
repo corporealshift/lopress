@@ -80,8 +80,9 @@ pub fn post_summaries(
         .map(|p| {
             let slug = p.slug.clone();
             let url = format!("/posts/{slug}/");
-            let excerpt_html =
-                render_excerpt(&p.doc, registry, tera, image_index).ok().flatten();
+            let excerpt_html = render_excerpt(&p.doc, registry, tera, image_index)
+                .ok()
+                .flatten();
             PostSummary {
                 title: p
                     .doc
@@ -187,7 +188,15 @@ pub fn render_all(
         if should_skip {
             pages_skipped += 1;
         } else {
-            match render_one_post(&www, &site_ctx, p, registry, theme, tera_shared, image_index) {
+            match render_one_post(
+                &www,
+                &site_ctx,
+                p,
+                registry,
+                theme,
+                tera_shared,
+                image_index,
+            ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
                         remove_stale_outputs(&www, &old.outputs, &new_outputs);
@@ -253,7 +262,15 @@ pub fn render_all(
         if should_skip {
             pages_skipped += 1;
         } else {
-            match render_one_page(&www, &site_ctx, p, registry, theme, tera_shared, image_index) {
+            match render_one_page(
+                &www,
+                &site_ctx,
+                p,
+                registry,
+                theme,
+                tera_shared,
+                image_index,
+            ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
                         remove_stale_outputs(&www, &old.outputs, &new_outputs);
@@ -519,7 +536,8 @@ mod tests {
             doc,
         }];
         let reg = PluginRegistry::default();
-        let summaries = post_summaries(&posts, &reg, &tera::Tera::default(), &ImageIndex::default());
+        let summaries =
+            post_summaries(&posts, &reg, &tera::Tera::default(), &ImageIndex::default());
         assert_eq!(summaries.len(), 1);
         assert_eq!(
             summaries[0].excerpt_html.as_deref(),
