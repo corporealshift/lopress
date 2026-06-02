@@ -10,7 +10,7 @@
 
 use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use crate::ui::blocks::{code_editor, list, read_more};
+use crate::ui::blocks::{code_editor, image, list, read_more};
 use floem::reactive::RwSignal;
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
@@ -37,6 +37,7 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
         "list" => Some(list_editor_widget),
         "code" => Some(code_editor_widget),
         "more" => Some(read_more::read_more_widget),
+        "image" => Some(image::image_widget),
         _ => None,
     }
 }
@@ -118,5 +119,10 @@ mod tests {
         assert!(editor_for("more").is_some());
         assert!(editor_for("paragraph").is_none());
         assert!(editor_for("bogus").is_none());
+    }
+
+    #[test]
+    fn editor_for_resolves_image() {
+        assert!(editor_for("image").is_some());
     }
 }
