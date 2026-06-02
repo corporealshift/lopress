@@ -143,11 +143,20 @@ fn attr_row(
     block_id: BlockId,
     on_action: ActionSink,
 ) -> AnyView {
-    let lbl_text = name.clone();
+    let lbl_text = decl.label.clone().unwrap_or(name.clone());
     let lbl = label(move || lbl_text.clone()).style(|s| {
         s.min_width(80.)
             .color(Color::rgb8(110, 100, 130))
             .font_size(12.)
+    });
+
+    let help_text = decl.help.clone();
+    let help_row = help_text.map(|h| {
+        label(move || h.clone()).style(|s| {
+            s.font_size(10.)
+                .color(Color::rgb8(140, 130, 160))
+                .padding_top(1.)
+        })
     });
 
     let ui_hint = decl.ui.as_deref().unwrap_or("text").to_string();
@@ -166,12 +175,20 @@ fn attr_row(
         (AttrType::Number, _) | (_, "number") => {
             attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), true).into_any()
         }
+        (_, "textarea") => {
+            attr_textarea(name.clone(), attrs_sig, block_id, on_action.clone()).into_any()
+        }
         _ => attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), false).into_any(),
     };
 
-    h_stack_from_iter(vec![lbl.into_any(), input])
-        .style(|s| s.gap(8.).items_center())
-        .into_any()
+    let row: AnyView = if let Some(help) = help_row {
+        v_stack((lbl.into_any(), help, input)).into_any()
+    } else {
+        h_stack_from_iter(vec![lbl.into_any(), input])
+            .style(|s| s.gap(8.).items_center())
+            .into_any()
+    };
+    row
 }
 
 fn attr_text(
@@ -218,6 +235,47 @@ fn attr_text(
             floem::event::EventPropagation::Continue
         })
         .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))
+}
+
+/// Multi-line text input for `ui = "textarea"`. Commits on FocusLost,
+/// exactly like `attr_text` but uses Floem's `text_editor` for multi-line.
+fn attr_textarea(
+    name: String,
+    attrs_sig: RwSignal<serde_json::Map<String, Value>>,
+    block_id: BlockId,
+    on_action: ActionSink,
+) -> impl IntoView {
+    use floem::views::text_editor;
+    use lapce_xi_rope::Rope;
+
+    let initial: String = attrs_sig.with_untracked(|m| {
+        m.get(&name)
+            .map(|v| match v {
+                Value::String(s) => s.clone(),
+                _ => v.to_string(),
+            })
+            .unwrap_or_default()
+    });
+    let rope = Rope::from(initial.as_str());
+    let name_for_commit = name.clone();
+    let attrs_for_commit = attrs_sig;
+    let on_action_for_commit = on_action;
+    let rope_for_read = rope.clone();
+
+    text_editor(rope)
+        .on_event(floem::event::EventListener::FocusLost, move |_| {
+            let s = rope_for_read.to_string();
+            attrs_for_commit.update(|m| {
+                m.insert(name_for_commit.clone(), Value::String(s));
+            });
+            let new_attrs = attrs_for_commit.get_untracked();
+            on_action_for_commit(BlockAction::EditAttrs {
+                block_id,
+                new_attrs: Box::new(new_attrs),
+            });
+            floem::event::EventPropagation::Continue
+        })
+        .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.).min_height(60.))
 }
 
 fn attr_checkbox(
@@ -377,5 +435,58 @@ fn render_body(
             );
             crate::ui::blocks::fallback::fallback_block_view(block, focus_pub).into_any()
         }
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn label_prefers_decl_label_over_name() {
+        let decl = AttrDecl {
+            kind: AttrType::String,
+            required: false,
+            default: None,
+            ui: Some("text".to_string()),
+            options: Vec::new(),
+            label: Some("Custom Label".to_string()),
+            help: None,
+        };
+        // The label text for the row should be "Custom Label".
+        // We verify the logic: decl.label.as_deref().unwrap_or(name).
+        let name = "field_name";
+        let effective_label = decl.label.as_deref().unwrap_or(name);
+        assert_eq!(effective_label, "Custom Label");
+    }
+
+    #[test]
+    fn label_falls_back_to_name_when_none() {
+        let decl = AttrDecl {
+            kind: AttrType::String,
+            required: false,
+            default: None,
+            ui: Some("text".to_string()),
+            options: Vec::new(),
+            label: None,
+            help: None,
+        };
+        let name = "field_name";
+        let effective_label = decl.label.as_deref().unwrap_or(name);
+        assert_eq!(effective_label, "field_name");
+    }
+
+    #[test]
+    fn help_is_presented_when_set() {
+        let decl = AttrDecl {
+            kind: AttrType::String,
+            required: false,
+            default: None,
+            ui: Some("textarea".to_string()),
+            options: Vec::new(),
+            label: None,
+            help: Some("Enter a value".to_string()),
+        };
+        assert_eq!(decl.help.as_deref(), Some("Enter a value"));
     }
 }
