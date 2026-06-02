@@ -252,3 +252,39 @@ fn home_page_shows_excerpt_with_read_more_link() {
     // (verified by the unit test in pages.rs), but the index template
     // must be updated to display it.
 }
+
+#[test]
+fn images_render_as_responsive_picture() {
+    use image::{Rgb, RgbImage};
+
+    let (_tmp, root) = copy_fixture("with-images");
+    let images = root.join("src/images");
+    fs::create_dir_all(&images).unwrap();
+    let src_img = images.join("photo.jpg");
+    // 2000px wide so all three default widths (400/800/1600) produce variants.
+    let mut img = RgbImage::new(2000, 1500);
+    for p in img.pixels_mut() {
+        *p = Rgb([120, 180, 255]);
+    }
+    img.save(&src_img).unwrap();
+
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let www = root.join("www");
+    let post_html = fs::read_to_string(www.join("posts/album/index.html")).unwrap();
+    assert!(
+        post_html.contains("<picture>"),
+        "expected responsive picture, got:\n{post_html}"
+    );
+    assert!(post_html.contains("image/webp"), "missing webp type");
+    assert!(
+        post_html.contains("photo.400w.webp"),
+        "missing 400w variant in srcset"
+    );
+    assert!(
+        post_html.contains("photo.800w.webp"),
+        "missing 800w variant in srcset"
+    );
+}
