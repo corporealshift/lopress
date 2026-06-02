@@ -20,6 +20,7 @@ use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::actions::BlockAction;
 use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
@@ -234,6 +235,36 @@ fn editing_view(
         Rc::clone(&save.mark_dirty),
     );
 
+    // ── Image import callback ────────────────────────────────────────
+    let editing_for_image = Rc::clone(&editing);
+    let on_action_for_image = on_action.clone();
+    let on_insert_image: Rc<dyn Fn(crate::model::types::BlockId)> =
+        Rc::new(move |anchor: crate::model::types::BlockId| {
+            // Native file dialog (rfd) — same crate used by the workspace picker.
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"])
+                .pick_file()
+            else {
+                return; // cancelled
+            };
+            let web = {
+                let st = editing_for_image.borrow();
+                let Some(state) = st.as_ref() else {
+                    return; // no open session to import into
+                };
+                state.session.import_image(&path)
+            };
+            match web {
+                Ok(src) => {
+                    on_action_for_image(BlockAction::InsertAfter {
+                        anchor,
+                        new_block: Box::new(crate::model::types::EditorBlock::image(&src, "", "")),
+                    });
+                }
+                Err(e) => eprintln!("image import failed: {e}"),
+            }
+        });
+
     // Cloned for the debug ctrl wiring near the end of this function;
     // `on_action` itself is moved into the dyn_container view closure.
     #[cfg(debug_assertions)]
@@ -252,6 +283,9 @@ fn editing_view(
     // P/H1/H2/Code/UL/OL buttons) do too — discriminant comparison covers
     // Heading(1) vs Heading(2), List{ordered:false} vs ordered:true, etc.
     let pane_key = pane_key::build_pane_key(current_doc);
+    // Clone `on_insert_image` into the dyn_container closure (same pattern
+    // as on_undo / on_redo) so the editor_pane call site has it.
+    let on_insert_image_for_pane = Rc::clone(&on_insert_image);
     let on_action_for_editor = on_action.clone();
     let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
         Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
@@ -264,7 +298,7 @@ fn editing_view(
                 current_doc,
                 on_undo.clone(),
                 on_redo.clone(),
-                Rc::new(|_| {}), // TODO Task 8: wire the real image import callback
+                on_insert_image_for_pane.clone(),
             )
             .into_any(),
             None => empty().into_any(),
