@@ -390,6 +390,7 @@ mod tests {
                 blocks: vec![BlockDecl {
                     name: "lopress:demo".into(),
                     template: Some("blocks/demo.html".into()),
+                    markdown_template: None,
                     attrs: Default::default(),
                     renderer: None,
                     editor: None,

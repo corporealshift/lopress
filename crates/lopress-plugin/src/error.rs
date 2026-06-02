@@ -16,4 +16,6 @@ pub enum PluginError {
     DuplicateBlock(String),
     #[error("duplicate native claim `{0}` — two plugins claim the same core type")]
     DuplicateNative(String),
+    #[error("`{field1}` and `{field2}` are mutually exclusive on the same block")]
+    MutualExclusion { field1: String, field2: String },
 }
