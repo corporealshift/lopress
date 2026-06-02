@@ -561,4 +561,57 @@ mod tests {
             "no spoiler blockquote: {html2}"
         );
     }
+
+    #[test]
+    fn author_bio_plugin_renders_markdown_template_through_pipeline() {
+        use lopress_plugin::load_dir;
+
+        // Load the author-bio fixture from the test fixtures.
+        let fixtures_dir = std::path::PathBuf::from(
+            env!("CARGO_MANIFEST_DIR")
+        ).join("tests").join("fixtures").join("with-plugin").join("plugins");
+        let registry = load_dir(&fixtures_dir, None).unwrap();
+
+        // The author-bio plugin should be registered.
+        let (_, decl) = registry
+            .block("lopress:author-bio")
+            .expect("author-bio block should be registered");
+        assert_eq!(
+            decl.markdown_template.as_deref(),
+            Some("blocks/author-bio.md")
+        );
+
+        // Build a Tera that knows the author-bio markdown template.
+        let mut tera = Tera::default();
+        let plugin_dir = fixtures_dir.join("author-bio");
+        let md_src = std::fs::read_to_string(plugin_dir.join("blocks/author-bio.md"))
+            .expect("markdown template file exists");
+        tera.add_raw_template("author-bio::blocks/author-bio.md", &md_src)
+            .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:author-bio".into(),
+                attrs: json!({
+                    "name": "Jane",
+                    "bio": "Loves **Rust** and **Rust**",
+                    "spoiler": true
+                }),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &registry, &tera, &ImageIndex::default()).unwrap();
+
+        // Check that the markdown template was interpolated AND the result
+        // was rendered through the md→HTML pipeline.
+        assert!(
+            html.contains("<strong>About Jane</strong>"),
+            "name rendered: {html}"
+        );
+        assert!(html.contains("<strong>Rust</strong>"), "markdown in bio rendered: {html}");
+        assert!(html.contains("<blockquote>"), "spoiler blockquote: {html}");
+        assert!(html.contains("Contains spoilers"), "spoiler text: {html}");
+    }
 }
