@@ -5,8 +5,8 @@ use crate::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use crate::ui::blocks::block_view;
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{gap_drop_zone, DndState};
-use crate::ui::slash_menu::slash_menu;
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
+use crate::ui::slash_menu::{slash_menu, SlashChoice};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{
     button, dyn_container, empty, label, scroll, stack, v_stack_from_iter, Decorators,
 };
@@ -87,14 +87,36 @@ pub fn editor_pane(
             None => empty().into_any(),
             Some(block_id) => {
                 let on_action_for_select = on_action_for_menu.clone();
-                let on_select = move |new_kind| {
-                    on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
+                // Omit "Read more" when the document already has a marker.
+                let has_more = current_doc.with_untracked(|d| {
+                    d.as_ref().is_some_and(|doc| {
+                        doc.blocks.iter().any(|b| {
+                            b.plugin
+                                .as_ref()
+                                .is_some_and(|m| &*m.block_type_name == "lopress:more")
+                        })
+                    })
+                });
+                let items: Vec<_> = crate::ui::slash_menu::slash_menu_items()
+                    .into_iter()
+                    .filter(|(_, choice)| !(has_more && matches!(choice, SlashChoice::ReadMore)))
+                    .collect();
+                let on_select = move |choice: SlashChoice| match choice {
+                    SlashChoice::Kind(new_kind) => {
+                        on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
+                    }
+                    SlashChoice::ReadMore => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::read_more()),
+                        });
+                    }
                 };
                 let on_close = move || {
                     slash_menu_open.set(None);
                     focus_target.set(Some(block_id));
                 };
-                slash_menu(on_select, on_close)
+                slash_menu(items, on_select, on_close)
                     .style(|s| s.margin_top(40.).margin_horiz(floem::unit::PxPctAuto::Auto))
                     .into_any()
             }

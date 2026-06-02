@@ -34,9 +34,6 @@ pub fn build_action_sink(
             slash_menu_open.set(Some(block_id));
             return;
         }
-        if slash_menu_open.get_untracked().is_some() {
-            slash_menu_open.set(None);
-        }
 
         // Pre-focus must read pre-apply state (the block before the one
         // being merged into its predecessor). Capture it before the apply
@@ -65,6 +62,14 @@ pub fn build_action_sink(
         });
         if recorded.is_some() {
             on_action_mark_dirty();
+            // Dismiss the slash menu only when an action actually mutates the
+            // document. A no-op action — e.g. the empty-buffer `EditBlockBody`
+            // commit emitted when the slash popup grabs focus from the
+            // just-opened block — must NOT close the menu, or the menu opens
+            // and instantly closes (it never appears to the user).
+            if slash_menu_open.get_untracked().is_some() {
+                slash_menu_open.set(None);
+            }
         }
         if let Some((canonical, inverse)) = recorded {
             undo_stack.update(|s| s.push_after_apply(canonical, inverse));

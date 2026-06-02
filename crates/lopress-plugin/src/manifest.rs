@@ -196,6 +196,29 @@ template = "blocks/video.html"
     }
 
     #[test]
+    fn parses_read_more_marker_manifest() {
+        let src = r#"
+name    = "lopress-more"
+version = "0.1.0"
+
+[[blocks]]
+name    = "lopress:more"
+editor  = "more"
+builtin = true
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert_eq!(m.name, "lopress-more");
+        assert_eq!(m.blocks.len(), 1);
+        let b = &m.blocks[0];
+        assert_eq!(b.name, "lopress:more");
+        assert_eq!(b.editor.as_deref(), Some("more"));
+        assert!(b.builtin);
+        assert!(b.native.is_none());
+        assert!(b.template.is_none());
+        assert!(b.attrs.is_empty());
+    }
+
+    #[test]
     fn parses_native_and_asset_fields() {
         let src = r#"
 name = "lopress-list"

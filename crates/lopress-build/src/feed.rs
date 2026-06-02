@@ -54,6 +54,7 @@ fn escape(s: &str) -> String {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use lopress_theme::PostSummary;
     use tempfile::TempDir;
 
     #[test]
@@ -70,6 +71,7 @@ mod tests {
                 date: Some(NaiveDate::from_ymd_opt(2026, 4, 18).unwrap()),
                 tags: vec![],
                 description: Some("d".into()),
+                excerpt_html: None,
             }],
         };
         write(d.path(), &site).unwrap();

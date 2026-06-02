@@ -84,4 +84,52 @@ mod tests {
     fn default_css_is_non_empty() {
         assert!(default_css().contains("body"));
     }
+
+    #[test]
+    fn index_renders_excerpt_and_read_more() {
+        let engine = default_engine().unwrap();
+        let summary = PostSummary {
+            title: "P".into(),
+            slug: "p".into(),
+            url: "/posts/p/".into(),
+            date: None,
+            tags: vec![],
+            description: None,
+            excerpt_html: Some("<p>teaser</p>".into()),
+        };
+        let site = SiteCtx {
+            title: "S".into(),
+            base_url: "https://e.com".into(),
+            nav: vec![],
+            posts: vec![summary.clone()],
+        };
+        let page = PageCtx {
+            kind: PageKind::Index,
+            title: "S".into(),
+            slug: String::new(),
+            url: "/".into(),
+            canonical: "https://e.com/".into(),
+            description: None,
+            og_image: None,
+            date: None,
+            tags: vec![],
+            body_html: String::new(),
+            posts: vec![summary],
+            tag: None,
+        };
+        let html = engine
+            .render(
+                "index.html",
+                &RenderContext {
+                    site: &site,
+                    page: &page,
+                },
+            )
+            .unwrap();
+        // The post title is always rendered, proving the loop runs.
+        assert!(html.contains("P"), "index must render post title");
+        // excerpt_html is rendered via the safe filter.
+        assert!(html.contains("teaser"), "index must render excerpt_html");
+        assert!(html.contains("Read more"), "index must show Read more link");
+    }
 }

@@ -70,6 +70,7 @@ impl PluginRegistry {
         const BASE_MANIFESTS: &[&str] = &[
             include_str!("../../../base_plugins/list/manifest.toml"),
             include_str!("../../../base_plugins/code/manifest.toml"),
+            include_str!("../../../base_plugins/more/manifest.toml"),
         ];
         for src in BASE_MANIFESTS {
             let manifest = parse_manifest_str(src)?;
@@ -110,6 +111,16 @@ mod tests {
         assert!(decl.attrs.contains_key("lang"));
         let (_, native_decl) = reg.native_block("code").expect("code claims native code");
         assert_eq!(native_decl.name, "code");
+    }
+
+    #[test]
+    fn load_base_plugins_registers_the_more_block() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_, decl) = reg.block("lopress:more").expect("more block registered");
+        assert!(decl.builtin);
+        assert_eq!(decl.editor.as_deref(), Some("more"));
+        assert!(decl.native.is_none());
     }
 
     #[test]

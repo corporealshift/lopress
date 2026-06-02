@@ -16,3 +16,4 @@ h1, h2, h3 { line-height: 1.2; }
 .tags a { font-size: 0.8rem; color: var(--accent); text-decoration: none; }
 pre { background: #f5f5f5; padding: 0.75rem; overflow: auto; border-radius: 4px; }
 code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 3px; }
+.read-more { display: inline-block; margin-top: 0.25rem; font-size: 0.9rem; }

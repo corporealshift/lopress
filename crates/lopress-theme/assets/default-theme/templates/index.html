@@ -7,7 +7,12 @@
     <li>
       <a href="{{ p.url }}">{{ p.title }}</a>
       {% if p.date %}<time datetime="{{ p.date }}">{{ p.date }}</time>{% endif %}
-      {% if p.description %}<p class="excerpt">{{ p.description }}</p>{% endif %}
+      {% if p.excerpt_html %}
+      <div class="excerpt">{{ p.excerpt_html | safe }}</div>
+      <a class="read-more" href="{{ p.url }}">Read more →</a>
+      {% elif p.description %}
+      <p class="excerpt">{{ p.description }}</p>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

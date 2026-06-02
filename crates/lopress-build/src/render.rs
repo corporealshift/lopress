@@ -19,6 +19,26 @@ pub fn render_body(
     Ok(out)
 }
 
+/// Render the blocks that precede the first `lopress:more` marker to HTML.
+/// Returns `None` when the document has no marker.
+pub fn render_excerpt(
+    doc: &Document,
+    registry: &PluginRegistry,
+    tera: &Tera,
+) -> Result<Option<String>, BuildError> {
+    if !doc.blocks.iter().any(|b| b.r#type == "lopress:more") {
+        return Ok(None);
+    }
+    let mut out = String::new();
+    for b in &doc.blocks {
+        if b.r#type == "lopress:more" {
+            break;
+        }
+        write_block(&mut out, b, registry, tera)?;
+    }
+    Ok(Some(out))
+}
+
 fn write_block(
     out: &mut String,
     b: &Block,
@@ -74,6 +94,10 @@ fn write_block(
             let src = escape(b.attrs.get("src").and_then(|v| v.as_str()).unwrap_or(""));
             let alt = escape(b.attrs.get("alt").and_then(|v| v.as_str()).unwrap_or(""));
             let _ = writeln!(out, "<img src=\"{src}\" alt=\"{alt}\">");
+        }
+        "lopress:more" => {
+            // The read-more marker is invisible on the full page; the excerpt
+            // boundary is handled by `render_excerpt`.
         }
         custom if custom.starts_with("lopress:") => {
             render_custom(out, b, custom, registry, tera)?;
@@ -151,6 +175,54 @@ mod tests {
 
     fn empty_registry() -> PluginRegistry {
         PluginRegistry::default()
+    }
+
+    #[test]
+    fn marker_renders_to_nothing_in_body() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![
+                Block::paragraph("before"),
+                Block {
+                    r#type: "lopress:more".into(),
+                    attrs: json!({}),
+                    children: vec![],
+                    text: None,
+                },
+                Block::paragraph("after"),
+            ],
+        };
+        let html = render_body(&doc, &empty_registry(), &Tera::default()).unwrap();
+        assert_eq!(html, "<p>before</p>\n<p>after</p>\n");
+    }
+
+    #[test]
+    fn excerpt_is_blocks_before_marker() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![
+                Block::paragraph("teaser"),
+                Block {
+                    r#type: "lopress:more".into(),
+                    attrs: json!({}),
+                    children: vec![],
+                    text: None,
+                },
+                Block::paragraph("hidden"),
+            ],
+        };
+        let ex = render_excerpt(&doc, &empty_registry(), &Tera::default()).unwrap();
+        assert_eq!(ex.as_deref(), Some("<p>teaser</p>\n"));
+    }
+
+    #[test]
+    fn excerpt_is_none_without_marker() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block::paragraph("only")],
+        };
+        let ex = render_excerpt(&doc, &empty_registry(), &Tera::default()).unwrap();
+        assert!(ex.is_none());
     }
 
     #[test]

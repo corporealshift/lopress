@@ -440,3 +440,15 @@ fn unregistered_plugin_type_loads_as_opaque() {
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }
+
+#[test]
+fn read_more_marker_survives_editor_round_trip() {
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let src = "before\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nafter\n";
+    let core = parse(src).unwrap();
+    let editor = doc_from_core(&core, &registry);
+    let core_back = doc_to_core(&editor);
+    let out = serialize(&core_back);
+    assert_eq!(out, src);
+}
