@@ -88,3 +88,10 @@ fn code_fence_round_trips() {
     let out = serialize(&doc);
     assert_eq!(out, src);
 }
+
+#[test]
+fn image_with_caption_round_trips() {
+    let src = "![alt](foo.jpg \"My caption\")\n";
+    let doc = parse(src).unwrap();
+    assert_eq!(serialize(&doc), src);
+}
