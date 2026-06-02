@@ -254,6 +254,41 @@ fn home_page_shows_excerpt_with_read_more_link() {
 }
 
 #[test]
+fn captioned_image_renders_figcaption() {
+    use image::{Rgb, RgbImage};
+
+    let (_tmp, root) = copy_fixture("with-images");
+    let images = root.join("src/images");
+    fs::create_dir_all(&images).unwrap();
+    let mut img = RgbImage::new(2000, 1500);
+    for p in img.pixels_mut() {
+        *p = Rgb([120, 180, 255]);
+    }
+    img.save(images.join("photo.jpg")).unwrap();
+
+    // Give the image a caption via the markdown title slot.
+    let album = root.join("src/posts/album.md");
+    fs::write(
+        &album,
+        "---\ntitle: Album\ndate: 2026-04-18\n---\n\n![photo](/images/photo.jpg \"A blue sky\")\n",
+    )
+    .unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "failures: {:?}",
+        report.failures
+    );
+
+    let post_html = fs::read_to_string(root.join("www/posts/album/index.html")).unwrap();
+    assert!(
+        post_html.contains("<figcaption>A blue sky</figcaption>"),
+        "expected figcaption, got:\n{post_html}"
+    );
+}
+
+#[test]
 fn images_render_as_responsive_picture() {
     use image::{Rgb, RgbImage};
 
