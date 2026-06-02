@@ -17,6 +17,7 @@ fn slash_menu_items_match_acceptance_list() {
             "Code block",
             "Unordered list",
             "Ordered list",
+            "Image",
             "Read more",
         ]
     );
@@ -37,7 +38,15 @@ fn slash_menu_items_match_acceptance_list() {
         items[6].1,
         SlashChoice::Kind(BlockKind::List { ordered: true })
     ));
-    assert!(matches!(items[7].1, SlashChoice::ReadMore));
+    assert!(matches!(items[7].1, SlashChoice::Image));
+    assert!(matches!(items[8].1, SlashChoice::ReadMore));
+}
+
+#[test]
+fn slash_items_include_image() {
+    let items = slash_menu_items();
+    assert!(items.iter().any(|(label, choice)| *label == "Image"
+        && matches!(choice, SlashChoice::Image)));
 }
 
 #[test]

@@ -264,6 +264,7 @@ fn editing_view(
                 current_doc,
                 on_undo.clone(),
                 on_redo.clone(),
+                Rc::new(|_| {}), // TODO Task 8: wire the real image import callback
             )
             .into_any(),
             None => empty().into_any(),
