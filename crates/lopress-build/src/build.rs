@@ -75,16 +75,23 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     }
     for plugin in &registry.plugins {
         for block in &plugin.manifest.blocks {
-            // Base (built-in) blocks are editor-only and ship no HTML
-            // template — there is nothing to register for the static build.
-            let Some(template) = &block.template else {
-                continue;
-            };
             let plugin_name = &plugin.manifest.name;
-            let key = format!("{plugin_name}::{template}");
-            let src = std::fs::read_to_string(plugin.root.join(template))?;
-            tera.add_raw_template(&key, &src)
-                .map_err(|e| BuildError::Config(format!("plugin template `{key}`: {e}")))?;
+
+            // Register HTML template (existing path).
+            if let Some(template) = &block.template {
+                let key = format!("{plugin_name}::{template}");
+                let src = std::fs::read_to_string(plugin.root.join(template))?;
+                tera.add_raw_template(&key, &src)
+                    .map_err(|e| BuildError::Config(format!("plugin template `{key}`: {e}")))?;
+            }
+
+            // Register markdown template (new path).
+            if let Some(md_template) = &block.markdown_template {
+                let key = format!("{plugin_name}::{md_template}");
+                let src = std::fs::read_to_string(plugin.root.join(md_template))?;
+                tera.add_raw_template(&key, &src)
+                    .map_err(|e| BuildError::Config(format!("plugin markdown template `{key}`: {e}")))?;
+            }
         }
     }
 
@@ -317,4 +324,39 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), BuildError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use lopress_plugin::{BlockDecl, LoadedPlugin, PluginManifest, PluginRegistry};
+
+    #[test]
+    fn markdown_template_field_is_accessible() {
+        // Minimal test: the struct compiles with the new field and it's
+        // readable. Full Tera registration coverage lives in Task 3.
+        let mut reg = PluginRegistry::default();
+        reg.insert(LoadedPlugin {
+            root: std::path::PathBuf::from("/does/not/exist"),
+            manifest: PluginManifest {
+                name: "demo".into(),
+                version: "0.1.0".into(),
+                theme: false,
+                blocks: vec![BlockDecl {
+                    name: "lopress:demo".into(),
+                    template: None,
+                    markdown_template: Some("blocks/demo.md".into()),
+                    attrs: Default::default(),
+                    renderer: None,
+                    editor: None,
+                    builtin: false,
+                    native: None,
+                    css: Vec::new(),
+                    js: Vec::new(),
+                }],
+            },
+        })
+        .unwrap();
+        let block = &reg.plugins[0].manifest.blocks[0];
+        assert_eq!(block.markdown_template.as_deref(), Some("blocks/demo.md"));
+    }
 }
