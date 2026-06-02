@@ -155,6 +155,7 @@ fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     match decl.editor.as_deref() {
         Some("list") => native_list_from_core(b, decl),
         Some("code") => native_code_from_core(b, decl),
+        Some("image") => native_image_from_core(b, decl),
         _ => EditorBlock::opaque(
             b.r#type.clone(),
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
@@ -243,4 +244,23 @@ fn native_code_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         native: decl.native.as_deref().map(Rc::from),
     });
     block
+}
+
+/// Build an image `EditorBlock` from a core `image` block. `src`/`alt`/`caption`
+/// come from the core block's attrs and are stamped into `PluginMeta.attrs`;
+/// the body is an empty Opaque placeholder.
+fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    EditorBlock {
+        id: BlockId::new(),
+        kind: BlockKind::Image,
+        body: BlockBody::Opaque(Value::Null),
+        plugin: Some(PluginMeta {
+            block_type_name: Rc::from(decl.name.as_str()),
+            attrs: block_attrs_as_object(&b.attrs),
+            attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
+            builtin: decl.builtin,
+            editor: decl.editor.as_deref().map(Rc::from),
+            native: decl.native.as_deref().map(Rc::from),
+        }),
+    }
 }
