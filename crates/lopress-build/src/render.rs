@@ -175,7 +175,7 @@ fn render_custom(
     }
     let plugin_name = &plugin.manifest.name;
 
-    // HTML template path (existing behavior).
+    // HTML template path
     if let Some(template_name) = &decl.template {
         let template_key = format!("{plugin_name}::{template_name}");
         let mut ctx = tera::Context::new();
@@ -191,7 +191,7 @@ fn render_custom(
         return Ok(());
     }
 
-    // Markdown template path (new behavior).
+    // Markdown template path - 3rd party plugins
     if let Some(md_template_name) = &decl.markdown_template {
         let template_key = format!("{plugin_name}::{md_template_name}");
         let mut ctx = tera::Context::new();

@@ -77,7 +77,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         for block in &plugin.manifest.blocks {
             let plugin_name = &plugin.manifest.name;
 
-            // Register HTML template (existing path).
+            // Register HTML template
             if let Some(template) = &block.template {
                 let key = format!("{plugin_name}::{template}");
                 let src = std::fs::read_to_string(plugin.root.join(template))?;
@@ -85,7 +85,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
                     .map_err(|e| BuildError::Config(format!("plugin template `{key}`: {e}")))?;
             }
 
-            // Register markdown template (new path).
+            // Register markdown template
             if let Some(md_template) = &block.markdown_template {
                 let key = format!("{plugin_name}::{md_template}");
                 let src = std::fs::read_to_string(plugin.root.join(md_template))?;
