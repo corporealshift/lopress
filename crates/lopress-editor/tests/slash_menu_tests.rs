@@ -6,7 +6,7 @@ use lopress_editor::ui::slash_menu::{slash_menu_items, SlashChoice};
 #[test]
 fn slash_menu_items_match_acceptance_list() {
     let items = slash_menu_items();
-    let labels: Vec<&'static str> = items.iter().map(|(l, _)| *l).collect();
+    let labels: Vec<String> = items.iter().map(|(l, _)| l.clone()).collect();
     assert_eq!(
         labels,
         vec![

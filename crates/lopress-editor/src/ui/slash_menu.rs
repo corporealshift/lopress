@@ -28,29 +28,30 @@ pub enum SlashChoice {
     Kind(BlockKind),
     ReadMore,
     Image,
+    Plugin { type_name: Rc<str> },
 }
 
 /// The choices offered by the slash menu, in display order.
-pub fn slash_menu_items() -> Vec<(&'static str, SlashChoice)> {
+pub fn slash_menu_items() -> Vec<(String, SlashChoice)> {
     vec![
-        ("Paragraph", SlashChoice::Kind(BlockKind::Paragraph)),
-        ("Heading 1", SlashChoice::Kind(BlockKind::Heading(1))),
-        ("Heading 2", SlashChoice::Kind(BlockKind::Heading(2))),
-        ("Heading 3", SlashChoice::Kind(BlockKind::Heading(3))),
+        ("Paragraph".to_string(), SlashChoice::Kind(BlockKind::Paragraph)),
+        ("Heading 1".to_string(), SlashChoice::Kind(BlockKind::Heading(1))),
+        ("Heading 2".to_string(), SlashChoice::Kind(BlockKind::Heading(2))),
+        ("Heading 3".to_string(), SlashChoice::Kind(BlockKind::Heading(3))),
         (
-            "Code block",
+            "Code block".to_string(),
             SlashChoice::Kind(BlockKind::Code { lang: Rc::from("") }),
         ),
         (
-            "Unordered list",
+            "Unordered list".to_string(),
             SlashChoice::Kind(BlockKind::List { ordered: false }),
         ),
         (
-            "Ordered list",
+            "Ordered list".to_string(),
             SlashChoice::Kind(BlockKind::List { ordered: true }),
         ),
-        ("Image", SlashChoice::Image),
-        ("Read more", SlashChoice::ReadMore),
+        ("Image".to_string(), SlashChoice::Image),
+        ("Read more".to_string(), SlashChoice::ReadMore),
     ]
 }
 
@@ -59,7 +60,7 @@ pub fn slash_menu_items() -> Vec<(&'static str, SlashChoice)> {
 /// already exists). `on_select` fires with the chosen `SlashChoice` on
 /// Enter or click; `on_close` fires whenever the popup should be dismissed.
 pub fn slash_menu<F, C>(
-    items: Vec<(&'static str, SlashChoice)>,
+    items: Vec<(String, SlashChoice)>,
     on_select: F,
     on_close: C,
 ) -> impl IntoView
@@ -73,7 +74,7 @@ where
     let items_for_key: Vec<_> = items.clone();
     let mut rows: Vec<AnyView> = Vec::with_capacity(len);
     for (i, (lbl, choice)) in items.into_iter().enumerate() {
-        let lbl_owned = lbl.to_string();
+        let lbl_owned = lbl.clone();
         let on_select_for_row = on_select.clone();
         let on_close_for_row = on_close.clone();
         let choice_for_row = choice.clone();

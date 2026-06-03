@@ -37,6 +37,7 @@ pub fn editor_pane(
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
     on_insert_image: Rc<dyn Fn(BlockId)>,
+    inserter_items: Rc<[crate::model::inserter::PluginInserterItem]>,
 ) -> impl IntoView {
     let focus_pub = FocusPublisher {
         block: RwSignal::new(None),
@@ -102,6 +103,22 @@ pub fn editor_pane(
                     .into_iter()
                     .filter(|(_, choice)| !(has_more && matches!(choice, SlashChoice::ReadMore)))
                     .collect();
+
+                // Append plugin block rows after the built-in entries.
+                let mut plugin_rows: Vec<(String, SlashChoice)> = Vec::new();
+                for item in inserter_items.iter() {
+                    plugin_rows.push((
+                        item.title.clone(),
+                        SlashChoice::Plugin {
+                            type_name: item.type_name.clone(),
+                        },
+                    ));
+                }
+                let items: Vec<_> = items
+                    .into_iter()
+                    .chain(plugin_rows.into_iter())
+                    .collect();
+                let inserter_items_for_select = Rc::clone(&inserter_items);
                 let on_insert_image_for_select = on_insert_image.clone();
                 let on_select = move |choice: SlashChoice| match choice {
                     SlashChoice::Kind(new_kind) => {
@@ -115,6 +132,17 @@ pub fn editor_pane(
                     }
                     SlashChoice::Image => {
                         on_insert_image_for_select(block_id);
+                    }
+                    SlashChoice::Plugin { type_name } => {
+                        if let Some(item) = inserter_items_for_select
+                            .iter()
+                            .find(|i| i.type_name.as_ref() == type_name.as_ref())
+                        {
+                            on_action_for_select(BlockAction::InsertAfter {
+                                anchor: block_id,
+                                new_block: Box::new(EditorBlock::from_plugin_item(item)),
+                            });
+                        }
                     }
                 };
                 let on_close = move || {
