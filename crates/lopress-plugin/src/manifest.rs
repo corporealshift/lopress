@@ -17,13 +17,12 @@ pub struct PluginManifest {
 pub struct BlockDecl {
     pub name: String,
     /// HTML template path, relative to the plugin root. Absent for built-in
-    /// ("base") plugins, which provide an editor rather than a renderer.
+    /// ("base") plugins, which provide an editor widget rather than a static
+    /// template.
     #[serde(default)]
     pub template: Option<String>,
     #[serde(default)]
     pub attrs: BTreeMap<String, AttrDecl>,
-    #[serde(default)]
-    pub renderer: Option<String>,
     #[serde(default)]
     pub editor: Option<String>,
     /// When true this block ships as part of the core codebase. The editor
@@ -49,6 +48,15 @@ pub struct BlockDecl {
     /// markdown template, and the result flows through the md→HTML pipeline.
     #[serde(default)]
     pub markdown_template: Option<String>,
+    /// Inserter menu label. When absent, the editor derives one from `name`.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Inserter menu description / secondary line.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Inserter grouping bucket (e.g. "Text", "Media"). Falls back to "Blocks".
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -358,5 +366,42 @@ template = "blocks/video.html"
 "#;
         let m = parse_manifest_str(src).unwrap();
         assert!(m.blocks[0].markdown_template.is_none());
+    }
+
+    #[test]
+    fn parses_title_description_category() {
+        let src = r#"
+name = "callout"
+version = "0.1.0"
+
+[[blocks]]
+name              = "lopress:callout"
+markdown_template = "blocks/callout.md"
+title             = "Callout"
+description       = "A highlighted note"
+category          = "Text"
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        let b = &m.blocks[0];
+        assert_eq!(b.title.as_deref(), Some("Callout"));
+        assert_eq!(b.description.as_deref(), Some("A highlighted note"));
+        assert_eq!(b.category.as_deref(), Some("Text"));
+    }
+
+    #[test]
+    fn title_description_category_default_to_none() {
+        let src = r#"
+name = "video"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:video"
+template = "blocks/video.html"
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        let b = &m.blocks[0];
+        assert!(b.title.is_none());
+        assert!(b.description.is_none());
+        assert!(b.category.is_none());
     }
 }

@@ -1,0 +1,16 @@
+# Callout / admonition block — a highlighted note, tip, warning, or danger box.
+# Markdown-template-form block: the body field is markdown and renders as prose.
+name    = "callout"
+version = "0.1.0"
+
+[[blocks]]
+name             = "lopress:callout"
+markdown_template = "blocks/callout.md"
+title            = "Callout"
+category         = "Text"
+description      = "Highlighted note, tip, warning, or danger admonition"
+
+[blocks.attrs]
+variant = { type = "string", ui = "select", options = ["note", "tip", "warning", "danger"], default = "note", label = "Style" }
+title   = { type = "string", ui = "text",     label = "Title" }
+body    = { type = "string", ui = "textarea",  label = "Body", help = "Supports markdown" }

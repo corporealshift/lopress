@@ -170,6 +170,19 @@ fn editing_view(
         });
     let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
 
+    // Compute the plugin inserter list once at view-build time. The registry
+    // is stable for a loaded workspace; recomputing per keystroke is wasteful.
+    let initial_inserter_items: Rc<[crate::model::inserter::PluginInserterItem]> = Rc::from(
+        crate::model::inserter::inserter_items(
+            &editing
+                .borrow()
+                .as_ref()
+                .map(|s| s.plugin_registry.clone())
+                .unwrap_or_default(),
+        )
+        .into_boxed_slice(),
+    );
+
     let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
 
     let editing_for_open = Rc::clone(&editing);
@@ -286,6 +299,7 @@ fn editing_view(
     // Clone `on_insert_image` into the dyn_container closure (same pattern
     // as on_undo / on_redo) so the editor_pane call site has it.
     let on_insert_image_for_pane = Rc::clone(&on_insert_image);
+    let inserter_items_for_pane = Rc::clone(&initial_inserter_items);
     let on_action_for_editor = on_action.clone();
     let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
         Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
@@ -299,6 +313,7 @@ fn editing_view(
                 on_undo.clone(),
                 on_redo.clone(),
                 on_insert_image_for_pane.clone(),
+                inserter_items_for_pane.clone(),
             )
             .into_any(),
             None => empty().into_any(),

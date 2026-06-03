@@ -417,12 +417,14 @@ mod tests {
                     template: Some("blocks/demo.html".into()),
                     markdown_template: None,
                     attrs: Default::default(),
-                    renderer: None,
                     editor: None,
                     builtin: false,
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
@@ -464,12 +466,14 @@ mod tests {
                     template: None,
                     markdown_template: Some("blocks/demo.md".into()),
                     attrs: Default::default(),
-                    renderer: None,
                     editor: None,
                     builtin: false,
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
@@ -514,12 +518,14 @@ mod tests {
                     template: None,
                     markdown_template: Some("blocks/demo.md".into()),
                     attrs: Default::default(),
-                    renderer: None,
                     editor: None,
                     builtin: false,
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
@@ -621,5 +627,110 @@ mod tests {
         );
         assert!(html.contains("<blockquote>"), "spoiler blockquote: {html}");
         assert!(html.contains("Contains spoilers"), "spoiler text: {html}");
+    }
+
+    #[test]
+    fn bundled_callout_plugin_renders_div_wrapped_markdown() {
+        use lopress_plugin::load_dir;
+
+        // Load the bundled callout plugin from the repo `plugins/` dir
+        // (CARGO_MANIFEST_DIR is `<repo>/crates/lopress-build`).
+        let plugins_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins");
+        let registry = load_dir(&plugins_dir, None).unwrap();
+
+        let (_, decl) = registry
+            .block("lopress:callout")
+            .expect("callout block should be registered");
+        assert_eq!(decl.markdown_template.as_deref(), Some("blocks/callout.md"));
+
+        let mut tera = Tera::default();
+        let md_src = std::fs::read_to_string(plugins_dir.join("callout/blocks/callout.md"))
+            .expect("callout template file exists");
+        tera.add_raw_template("callout::blocks/callout.md", &md_src)
+            .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:callout".into(),
+                attrs: json!({
+                    "variant": "warning",
+                    "title": "Heads up",
+                    "body": "Be **careful** here.",
+                }),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &registry, &tera, &ImageIndex::default()).unwrap();
+
+        // The variant drives the CSS class, and both the title and the body
+        // field's own markdown render through the md→HTML pipeline.
+        assert!(
+            html.contains(r#"class="callout callout-warning""#),
+            "variant class present: {html}"
+        );
+        assert!(
+            html.contains("<strong>Heads up</strong>"),
+            "title rendered: {html}"
+        );
+        assert!(
+            html.contains("<strong>careful</strong>"),
+            "body markdown rendered: {html}"
+        );
+    }
+
+    #[test]
+    fn bundled_button_plugin_renders_html_template() {
+        use lopress_plugin::load_dir;
+
+        let plugins_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins");
+        let registry = load_dir(&plugins_dir, None).unwrap();
+
+        let (_, decl) = registry
+            .block("lopress:button")
+            .expect("button block should be registered");
+        assert_eq!(decl.template.as_deref(), Some("blocks/button.html"));
+
+        let mut tera = Tera::default();
+        let html_src = std::fs::read_to_string(plugins_dir.join("button/blocks/button.html"))
+            .expect("button template file exists");
+        tera.add_raw_template("button::blocks/button.html", &html_src)
+            .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:button".into(),
+                attrs: json!({
+                    "text": "Click me",
+                    "url": "/go",
+                    "variant": "primary",
+                    "new_tab": true,
+                }),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &registry, &tera, &ImageIndex::default()).unwrap();
+
+        assert!(
+            html.contains(r#"class="btn btn-primary""#),
+            "variant class: {html}"
+        );
+        // Tera auto-escapes `.html` templates, so `/` in the URL renders as the
+        // `&#x2F;` entity (valid — browsers decode it). Assert the escaped form.
+        assert!(html.contains(r#"href="&#x2F;go""#), "url: {html}");
+        assert!(html.contains("Click me"), "label: {html}");
+        assert!(
+            html.contains(r#"target="_blank""#),
+            "new_tab opens blank: {html}"
+        );
     }
 }

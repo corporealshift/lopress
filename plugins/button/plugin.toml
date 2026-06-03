@@ -1,0 +1,17 @@
+# Button block — a call-to-action link styled as a button.
+# HTML-template block: attrs interpolate into a Tera HTML template at build time.
+name    = "button"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:button"
+template    = "blocks/button.html"
+title       = "Button"
+category    = "Design"
+description = "A call-to-action link styled as a button"
+
+[blocks.attrs]
+text    = { type = "string", ui = "text",   required = true, label = "Label" }
+url     = { type = "string", ui = "text",   required = true, label = "URL" }
+variant = { type = "string", ui = "select", options = ["primary", "secondary"], default = "primary", label = "Style" }
+new_tab = { type = "bool",   ui = "checkbox", default = false, label = "Open in new tab" }
