@@ -251,6 +251,30 @@ impl EditorBlock {
             plugin: Some(PluginMeta::image(src, alt, caption)),
         }
     }
+
+    /// A fresh plugin comment-container block for insertion from the slash menu.
+    ///
+    /// The block is `Opaque` with an empty body (`Value::Null`) and carries
+    /// `PluginMeta` with default attribute values from the inserter item.
+    /// This shape round-trips through `to_core` as a `<!-- lopress:NAME {attrs} -->`
+    /// / `<!-- /lopress:NAME -->` comment container.
+    pub fn from_plugin_item(item: &crate::model::inserter::PluginInserterItem) -> Self {
+        Self {
+            id: BlockId::new(),
+            kind: BlockKind::Opaque {
+                type_name: item.type_name.clone(),
+            },
+            body: BlockBody::Opaque(Value::Null),
+            plugin: Some(PluginMeta {
+                block_type_name: item.type_name.clone(),
+                attrs: item.default_attrs.clone(),
+                attr_decls: item.attr_decls.clone(),
+                builtin: false,
+                editor: None,
+                native: None,
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -294,5 +318,46 @@ mod read_more_ctor_tests {
         assert!(meta.builtin);
         assert!(meta.native.is_none());
         assert!(matches!(b.body, BlockBody::Inline(ref runs) if runs.is_empty()));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
+mod plugin_inserter_ctor_tests {
+    use super::*;
+    use crate::model::inserter::PluginInserterItem;
+    use lopress_plugin::AttrDecl;
+    use serde_json::Map;
+    use std::rc::Rc;
+
+    fn test_item() -> PluginInserterItem {
+        let mut attrs = Map::new();
+        attrs.insert("foo".to_string(), Value::String("bar".to_string()));
+        PluginInserterItem {
+            type_name: Rc::from("lopress:test"),
+            title: "Test".to_string(),
+            category: "Blocks".to_string(),
+            attr_decls: Rc::from([]),
+            default_attrs: attrs,
+        }
+    }
+
+    #[test]
+    fn from_plugin_item_builds_opaque_block_with_meta() {
+        let item = test_item();
+        let b = EditorBlock::from_plugin_item(&item);
+        assert!(matches!(b.kind, BlockKind::Opaque { .. }));
+        if let BlockKind::Opaque { type_name } = &b.kind {
+            assert_eq!(&**type_name, "lopress:test");
+        } else {
+            panic!("expected Opaque kind");
+        }
+        assert!(matches!(b.body, BlockBody::Opaque(serde_json::Value::Null)));
+        let meta = b.plugin.as_ref().expect("plugin meta present");
+        assert_eq!(&*meta.block_type_name, "lopress:test");
+        assert_eq!(meta.attrs.get("foo").and_then(Value::as_str), Some("bar"));
+        assert!(!meta.builtin);
+        assert!(meta.editor.is_none());
+        assert!(meta.native.is_none());
     }
 }
