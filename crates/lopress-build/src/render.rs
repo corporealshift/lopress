@@ -622,4 +622,58 @@ mod tests {
         assert!(html.contains("<blockquote>"), "spoiler blockquote: {html}");
         assert!(html.contains("Contains spoilers"), "spoiler text: {html}");
     }
+
+    #[test]
+    fn bundled_callout_plugin_renders_div_wrapped_markdown() {
+        use lopress_plugin::load_dir;
+
+        // Load the bundled callout plugin from the repo `plugins/` dir
+        // (CARGO_MANIFEST_DIR is `<repo>/crates/lopress-build`).
+        let plugins_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins");
+        let registry = load_dir(&plugins_dir, None).unwrap();
+
+        let (_, decl) = registry
+            .block("lopress:callout")
+            .expect("callout block should be registered");
+        assert_eq!(decl.markdown_template.as_deref(), Some("blocks/callout.md"));
+
+        let mut tera = Tera::default();
+        let md_src = std::fs::read_to_string(plugins_dir.join("callout/blocks/callout.md"))
+            .expect("callout template file exists");
+        tera.add_raw_template("callout::blocks/callout.md", &md_src)
+            .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:callout".into(),
+                attrs: json!({
+                    "variant": "warning",
+                    "title": "Heads up",
+                    "body": "Be **careful** here.",
+                }),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &registry, &tera, &ImageIndex::default()).unwrap();
+
+        // The variant drives the CSS class, and both the title and the body
+        // field's own markdown render through the md→HTML pipeline.
+        assert!(
+            html.contains(r#"class="callout callout-warning""#),
+            "variant class present: {html}"
+        );
+        assert!(
+            html.contains("<strong>Heads up</strong>"),
+            "title rendered: {html}"
+        );
+        assert!(
+            html.contains("<strong>careful</strong>"),
+            "body markdown rendered: {html}"
+        );
+    }
 }
