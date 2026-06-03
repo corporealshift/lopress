@@ -1,0 +1,11 @@
+name = "author-bio"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:author-bio"
+markdown_template = "blocks/author-bio.md"
+
+[blocks.attrs]
+name    = { type = "string", ui = "text",     required = true,  label = "Author name" }
+bio     = { type = "string", ui = "textarea",                 label = "Short bio",    help = "A short biography" }
+spoiler = { type = "bool",   ui = "checkbox", default = false, label = "Mark as spoiler" }

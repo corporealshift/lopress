@@ -43,6 +43,12 @@ pub struct BlockDecl {
     /// `<head>`. Parsed and exposed; build-side injection is a follow-up.
     #[serde(default)]
     pub js: Vec<String>,
+    /// Tera markdown-template path, relative to the plugin root.
+    /// Mutually exclusive with `template`. When present, the block
+    /// is a *template-form* block: form values interpolate into this
+    /// markdown template, and the result flows through the md→HTML pipeline.
+    #[serde(default)]
+    pub markdown_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -65,8 +71,28 @@ pub struct AttrDecl {
     pub default: Option<serde_json::Value>,
     #[serde(default)]
     pub ui: Option<String>,
+    /// Human-friendly field caption. When absent, the form falls back to
+    /// the attr key name.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Helper / description text shown beneath the label.
+    #[serde(default)]
+    pub help: Option<String>,
     #[serde(default)]
     pub options: Vec<String>,
+}
+
+/// Validate a parsed manifest for semantic constraints.
+fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
+    for block in &manifest.blocks {
+        if block.template.is_some() && block.markdown_template.is_some() {
+            return Err(PluginError::MutualExclusion {
+                field1: "template".to_string(),
+                field2: "markdown_template".to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 pub fn parse_manifest(path: &Path) -> Result<PluginManifest, PluginError> {
@@ -78,16 +104,19 @@ pub fn parse_manifest(path: &Path) -> Result<PluginManifest, PluginError> {
         path: path.to_path_buf(),
         message: e.to_string(),
     })?;
+    validate_manifest(&manifest)?;
     Ok(manifest)
 }
 
 /// Parse a manifest from an in-memory TOML string. Used for base plugins
 /// embedded via `include_str!`, which have no path on disk.
 pub fn parse_manifest_str(src: &str) -> Result<PluginManifest, PluginError> {
-    toml::from_str(src).map_err(|e| PluginError::Manifest {
+    let manifest: PluginManifest = toml::from_str(src).map_err(|e| PluginError::Manifest {
         path: std::path::PathBuf::from("<embedded>"),
         message: e.to_string(),
-    })
+    })?;
+    validate_manifest(&manifest)?;
+    Ok(manifest)
 }
 
 #[cfg(test)]
@@ -254,5 +283,80 @@ template = "blocks/video.html"
         assert!(b.native.is_none());
         assert!(b.css.is_empty());
         assert!(b.js.is_empty());
+    }
+
+    #[test]
+    fn parses_markdown_template_field() {
+        let src = r#"
+name = "author-bio"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:author-bio"
+markdown_template = "blocks/author-bio.md"
+
+[blocks.attrs]
+name    = { type = "string", ui = "text",     required = true,  label = "Author name" }
+bio     = { type = "string", ui = "textarea",                 label = "Short bio",    help = "A short biography" }
+spoiler = { type = "bool",   ui = "checkbox", default = false, label = "Mark as spoiler" }
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert_eq!(m.blocks.len(), 1);
+        let b = &m.blocks[0];
+        assert_eq!(b.markdown_template.as_deref(), Some("blocks/author-bio.md"));
+        assert!(b.template.is_none());
+        assert_eq!(b.attrs["name"].label.as_deref(), Some("Author name"));
+        assert_eq!(b.attrs["bio"].label.as_deref(), Some("Short bio"));
+        assert_eq!(b.attrs["bio"].help.as_deref(), Some("A short biography"));
+        assert_eq!(b.attrs["bio"].ui.as_deref(), Some("textarea"));
+    }
+
+    #[test]
+    fn errors_when_both_template_and_markdown_template_set() {
+        let src = r#"
+name = "bad"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:bad"
+template = "blocks/bad.html"
+markdown_template = "blocks/bad.md"
+"#;
+        let err = parse_manifest_str(src).unwrap_err();
+        assert!(
+            matches!(err, PluginError::MutualExclusion { field1, field2 } if field1 == "template" && field2 == "markdown_template")
+        );
+    }
+
+    #[test]
+    fn label_and_help_default_to_none() {
+        let src = r#"
+name = "minimal"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:minimal"
+template = "blocks/minimal.html"
+
+[blocks.attrs]
+foo = { type = "string" }
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert_eq!(m.blocks[0].attrs["foo"].label, None);
+        assert_eq!(m.blocks[0].attrs["foo"].help, None);
+    }
+
+    #[test]
+    fn markdown_template_defaults_to_none() {
+        let src = r#"
+name = "video"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:video"
+template = "blocks/video.html"
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert!(m.blocks[0].markdown_template.is_none());
     }
 }

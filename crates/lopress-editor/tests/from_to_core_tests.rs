@@ -465,3 +465,25 @@ fn image_block_round_trips_with_caption() {
     let back = doc_to_core(&edoc);
     assert_eq!(serialize(&back), src);
 }
+
+#[test]
+fn template_form_block_round_trips_as_comment_container() {
+    let src = "<!-- lopress:author-bio {\"name\":\"Jane\",\"bio\":\"Loves **Rust**\",\"spoiler\":true} -->\n<!-- /lopress:author-bio -->\n";
+    let core = lopress_core::parse(src).unwrap();
+    // The block should have type "lopress:author-bio" with attrs and no children.
+    assert_eq!(core.blocks.len(), 1);
+    let b = &core.blocks[0];
+    assert_eq!(b.r#type, "lopress:author-bio");
+    assert_eq!(b.attrs.get("name").and_then(|v| v.as_str()), Some("Jane"));
+    assert_eq!(
+        b.attrs.get("bio").and_then(|v| v.as_str()),
+        Some("Loves **Rust**")
+    );
+    assert_eq!(b.attrs.get("spoiler").and_then(|v| v.as_bool()), Some(true));
+    assert!(b.children.is_empty());
+    // Round-trip: the Document must be structurally equal (JSON key order
+    // may differ because serde_json::Map is a BTreeMap).
+    let back = lopress_core::serialize(&core);
+    let core_back = lopress_core::parse(&back).unwrap();
+    assert_eq!(core_back, core);
+}
