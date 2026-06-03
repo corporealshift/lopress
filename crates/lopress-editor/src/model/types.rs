@@ -259,12 +259,15 @@ impl EditorBlock {
     /// This shape round-trips through `to_core` as a `<!-- lopress:NAME {attrs} -->`
     /// / `<!-- /lopress:NAME -->` comment container.
     pub fn from_plugin_item(item: &crate::model::inserter::PluginInserterItem) -> Self {
+        // Mirror exactly what `plugin_block_from_core` produces for a loaded
+        // comment-container plugin block (its `editor`-less default arm): a
+        // `Paragraph` kind with an empty `Inline` body. Using `Opaque`/`Opaque(Null)`
+        // here would make the plugin block view render the scary "raw content,
+        // can't be edited" fallback panel instead of just the attr form.
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Opaque {
-                type_name: item.type_name.clone(),
-            },
-            body: BlockBody::Opaque(Value::Null),
+            kind: BlockKind::Paragraph,
+            body: BlockBody::Inline(Vec::new()),
             plugin: Some(PluginMeta {
                 block_type_name: item.type_name.clone(),
                 attrs: item.default_attrs.clone(),
@@ -342,16 +345,13 @@ mod plugin_inserter_ctor_tests {
     }
 
     #[test]
-    fn from_plugin_item_builds_opaque_block_with_meta() {
+    fn from_plugin_item_builds_comment_container_block_with_meta() {
         let item = test_item();
         let b = EditorBlock::from_plugin_item(&item);
-        assert!(matches!(b.kind, BlockKind::Opaque { .. }));
-        if let BlockKind::Opaque { type_name } = &b.kind {
-            assert_eq!(&**type_name, "lopress:test");
-        } else {
-            unreachable!("BlockKind::Opaque discriminant matched above")
-        }
-        assert!(matches!(b.body, BlockBody::Opaque(serde_json::Value::Null)));
+        // Mirrors a loaded comment-container plugin block: Paragraph kind,
+        // empty Inline body, identity carried in PluginMeta.
+        assert!(matches!(b.kind, BlockKind::Paragraph));
+        assert!(matches!(&b.body, BlockBody::Inline(runs) if runs.is_empty()));
         let meta = b.plugin.as_ref().expect("plugin meta present");
         assert_eq!(&*meta.block_type_name, "lopress:test");
         assert_eq!(meta.attrs.get("foo").and_then(Value::as_str), Some("bar"));

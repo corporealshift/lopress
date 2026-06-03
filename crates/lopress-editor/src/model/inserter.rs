@@ -4,7 +4,7 @@
 //! it has a `template` OR a `markdown_template`, is not `builtin`,
 //! and does not claim a `native` core type.
 
-use lopress_plugin::{AttrDecl, PluginRegistry};
+use lopress_plugin::{AttrDecl, AttrType, PluginRegistry};
 use serde_json::{Map, Value};
 use std::rc::Rc;
 
@@ -22,9 +22,9 @@ pub struct PluginInserterItem {
     pub category: String,
     /// Attribute declarations from the manifest, in declaration order.
     pub attr_decls: Rc<[AttrDecl]>,
-    /// Default attribute values: for each `AttrDecl` that has a `default`,
-    /// the corresponding key→value pair. Used to seed the fresh block's
-    /// `PluginMeta.attrs`.
+    /// Initial attribute values for a freshly inserted block: an entry for
+    /// *every* declared attr (manifest default, or a type-appropriate empty).
+    /// Used to seed the fresh block's `PluginMeta.attrs`.
     pub default_attrs: Map<String, Value>,
 }
 
@@ -57,14 +57,35 @@ pub fn derive_title(name: &str) -> String {
         .join(" ")
 }
 
-/// Build the default-attrs map from a list of `AttrDecl`.
+/// Build the initial attrs map for a freshly inserted block.
 ///
-/// For each decl that has a `default`, include the key→value pair.
+/// Seeds an entry for *every* declared attr: the manifest `default` when
+/// present, otherwise a type-appropriate empty value (`""`, `false`, `0`,
+/// `[]`, `{}`). A complete attrs map matters because the plugin attr-form
+/// pairs declarations with attr values *by position* — a partial map (only
+/// defaulted attrs) would misalign the labels and values.
 fn build_default_attrs(attrs: &std::collections::BTreeMap<String, AttrDecl>) -> Map<String, Value> {
     attrs
         .iter()
-        .filter_map(|(k, v)| v.default.as_ref().map(|d| (k.clone(), d.clone())))
+        .map(|(k, decl)| {
+            let value = decl
+                .default
+                .clone()
+                .unwrap_or_else(|| empty_for(&decl.kind));
+            (k.clone(), value)
+        })
         .collect()
+}
+
+/// A type-appropriate empty value for an attr that has no manifest default.
+fn empty_for(kind: &AttrType) -> Value {
+    match kind {
+        AttrType::String => Value::String(String::new()),
+        AttrType::Bool => Value::Bool(false),
+        AttrType::Number => Value::Number(0.into()),
+        AttrType::Array => Value::Array(Vec::new()),
+        AttrType::Object => Value::Object(Map::new()),
+    }
 }
 
 /// Compute the list of insertable plugin blocks from the registry.
@@ -306,7 +327,10 @@ mod tests {
         );
         let defaults = build_default_attrs(&attrs);
         assert_eq!(defaults.get("foo").and_then(Value::as_str), Some("bar"));
-        assert!(!defaults.contains_key("baz"), "no default → omitted");
+        // Every declared attr is seeded; one without a default gets a
+        // type-appropriate empty (a Bool → `false`) so the attr-form's
+        // position-based decl/value pairing stays aligned.
+        assert_eq!(defaults.get("baz").and_then(Value::as_bool), Some(false));
     }
 
     #[test]
