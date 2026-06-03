@@ -676,4 +676,55 @@ mod tests {
             "body markdown rendered: {html}"
         );
     }
+
+    #[test]
+    fn bundled_button_plugin_renders_html_template() {
+        use lopress_plugin::load_dir;
+
+        let plugins_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins");
+        let registry = load_dir(&plugins_dir, None).unwrap();
+
+        let (_, decl) = registry
+            .block("lopress:button")
+            .expect("button block should be registered");
+        assert_eq!(decl.template.as_deref(), Some("blocks/button.html"));
+
+        let mut tera = Tera::default();
+        let html_src = std::fs::read_to_string(plugins_dir.join("button/blocks/button.html"))
+            .expect("button template file exists");
+        tera.add_raw_template("button::blocks/button.html", &html_src)
+            .unwrap();
+
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "lopress:button".into(),
+                attrs: json!({
+                    "text": "Click me",
+                    "url": "/go",
+                    "variant": "primary",
+                    "new_tab": true,
+                }),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(&doc, &registry, &tera, &ImageIndex::default()).unwrap();
+
+        assert!(
+            html.contains(r#"class="btn btn-primary""#),
+            "variant class: {html}"
+        );
+        // Tera auto-escapes `.html` templates, so `/` in the URL renders as the
+        // `&#x2F;` entity (valid — browsers decode it). Assert the escaped form.
+        assert!(html.contains(r#"href="&#x2F;go""#), "url: {html}");
+        assert!(html.contains("Click me"), "label: {html}");
+        assert!(
+            html.contains(r#"target="_blank""#),
+            "new_tab opens blank: {html}"
+        );
+    }
 }
