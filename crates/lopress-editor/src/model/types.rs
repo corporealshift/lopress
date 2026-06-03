@@ -326,7 +326,6 @@ mod read_more_ctor_tests {
 mod plugin_inserter_ctor_tests {
     use super::*;
     use crate::model::inserter::PluginInserterItem;
-    use lopress_plugin::AttrDecl;
     use serde_json::Map;
     use std::rc::Rc;
 
@@ -350,7 +349,7 @@ mod plugin_inserter_ctor_tests {
         if let BlockKind::Opaque { type_name } = &b.kind {
             assert_eq!(&**type_name, "lopress:test");
         } else {
-            panic!("expected Opaque kind");
+            unreachable!("BlockKind::Opaque discriminant matched above")
         }
         assert!(matches!(b.body, BlockBody::Opaque(serde_json::Value::Null)));
         let meta = b.plugin.as_ref().expect("plugin meta present");

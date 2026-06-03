@@ -97,13 +97,19 @@ fn is_insertable(decl: &lopress_plugin::BlockDecl) -> bool {
 }
 
 /// Build a single `PluginInserterItem` from a plugin + block decl pair.
-fn make_item(_plugin: &lopress_plugin::LoadedPlugin, decl: &lopress_plugin::BlockDecl) -> PluginInserterItem {
+fn make_item(
+    _plugin: &lopress_plugin::LoadedPlugin,
+    decl: &lopress_plugin::BlockDecl,
+) -> PluginInserterItem {
     let type_name: Rc<str> = decl.name.clone().into();
     let title = decl
         .title
         .clone()
         .unwrap_or_else(|| derive_title(&decl.name));
-    let category = decl.category.clone().unwrap_or_else(|| "Blocks".to_string());
+    let category = decl
+        .category
+        .clone()
+        .unwrap_or_else(|| "Blocks".to_string());
     let attr_decls: Rc<[AttrDecl]> = Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>());
     let default_attrs = build_default_attrs(&decl.attrs);
 
@@ -117,16 +123,15 @@ fn make_item(_plugin: &lopress_plugin::LoadedPlugin, decl: &lopress_plugin::Bloc
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+// Indexing in tests is deliberate — we assert exact element counts and
+// positions; a panic in a test is a failing test, which is the desired behavior.
 mod tests {
     use super::*;
     use lopress_plugin::{AttrType, BlockDecl, LoadedPlugin, PluginManifest};
     use std::collections::BTreeMap;
 
-    fn make_plugin(
-        name: &str,
-        blocks: Vec<BlockDecl>,
-    ) -> LoadedPlugin {
+    fn make_plugin(name: &str, blocks: Vec<BlockDecl>) -> LoadedPlugin {
         LoadedPlugin {
             root: std::path::PathBuf::from("/fake"),
             manifest: PluginManifest {
@@ -182,7 +187,15 @@ mod tests {
         let mut reg = PluginRegistry::default();
         reg.insert(make_plugin(
             "base",
-            vec![make_decl("list", None, None, true, Some("list"), None, None)],
+            vec![make_decl(
+                "list",
+                None,
+                None,
+                true,
+                Some("list"),
+                None,
+                None,
+            )],
         ))
         .unwrap();
         let items = inserter_items(&reg);
@@ -194,7 +207,15 @@ mod tests {
         let mut reg = PluginRegistry::default();
         reg.insert(make_plugin(
             "ext",
-            vec![make_decl("lopress:embed", None, None, false, Some("embed"), None, None)],
+            vec![make_decl(
+                "lopress:embed",
+                None,
+                None,
+                false,
+                Some("embed"),
+                None,
+                None,
+            )],
         ))
         .unwrap();
         let items = inserter_items(&reg);
@@ -293,10 +314,21 @@ mod tests {
         let mut reg = PluginRegistry::default();
         reg.insert(make_plugin(
             "editor-only",
-            vec![make_decl("lopress:foo", None, None, false, None, None, None)],
+            vec![make_decl(
+                "lopress:foo",
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+            )],
         ))
         .unwrap();
         let items = inserter_items(&reg);
-        assert!(items.is_empty(), "blocks without template/markdown_template are excluded");
+        assert!(
+            items.is_empty(),
+            "blocks without template/markdown_template are excluded"
+        );
     }
 }

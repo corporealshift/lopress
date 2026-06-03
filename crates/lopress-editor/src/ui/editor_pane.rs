@@ -114,10 +114,7 @@ pub fn editor_pane(
                         },
                     ));
                 }
-                let items: Vec<_> = items
-                    .into_iter()
-                    .chain(plugin_rows.into_iter())
-                    .collect();
+                let items: Vec<_> = items.into_iter().chain(plugin_rows).collect();
                 let inserter_items_for_select = Rc::clone(&inserter_items);
                 let on_insert_image_for_select = on_insert_image.clone();
                 let on_select = move |choice: SlashChoice| match choice {

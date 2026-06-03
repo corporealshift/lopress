@@ -34,10 +34,22 @@ pub enum SlashChoice {
 /// The choices offered by the slash menu, in display order.
 pub fn slash_menu_items() -> Vec<(String, SlashChoice)> {
     vec![
-        ("Paragraph".to_string(), SlashChoice::Kind(BlockKind::Paragraph)),
-        ("Heading 1".to_string(), SlashChoice::Kind(BlockKind::Heading(1))),
-        ("Heading 2".to_string(), SlashChoice::Kind(BlockKind::Heading(2))),
-        ("Heading 3".to_string(), SlashChoice::Kind(BlockKind::Heading(3))),
+        (
+            "Paragraph".to_string(),
+            SlashChoice::Kind(BlockKind::Paragraph),
+        ),
+        (
+            "Heading 1".to_string(),
+            SlashChoice::Kind(BlockKind::Heading(1)),
+        ),
+        (
+            "Heading 2".to_string(),
+            SlashChoice::Kind(BlockKind::Heading(2)),
+        ),
+        (
+            "Heading 3".to_string(),
+            SlashChoice::Kind(BlockKind::Heading(3)),
+        ),
         (
             "Code block".to_string(),
             SlashChoice::Kind(BlockKind::Code { lang: Rc::from("") }),
