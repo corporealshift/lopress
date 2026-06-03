@@ -423,6 +423,9 @@ mod tests {
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
@@ -470,6 +473,9 @@ mod tests {
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
@@ -520,6 +526,9 @@ mod tests {
                     native: None,
                     css: Vec::new(),
                     js: Vec::new(),
+                    title: None,
+                    description: None,
+                    category: None,
                 }],
             },
         })
