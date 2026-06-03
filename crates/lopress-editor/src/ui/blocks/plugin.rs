@@ -275,7 +275,12 @@ fn attr_textarea(
             });
             floem::event::EventPropagation::Continue
         })
-        .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.).min_height(60.))
+        .style(|s| {
+            s.font_size(12.)
+                .padding_horiz(4.)
+                .min_width(160.)
+                .min_height(60.)
+        })
 }
 
 fn attr_checkbox(

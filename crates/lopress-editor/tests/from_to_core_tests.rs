@@ -475,7 +475,10 @@ fn template_form_block_round_trips_as_comment_container() {
     let b = &core.blocks[0];
     assert_eq!(b.r#type, "lopress:author-bio");
     assert_eq!(b.attrs.get("name").and_then(|v| v.as_str()), Some("Jane"));
-    assert_eq!(b.attrs.get("bio").and_then(|v| v.as_str()), Some("Loves **Rust**"));
+    assert_eq!(
+        b.attrs.get("bio").and_then(|v| v.as_str()),
+        Some("Loves **Rust**")
+    );
     assert_eq!(b.attrs.get("spoiler").and_then(|v| v.as_bool()), Some(true));
     assert!(b.children.is_empty());
     // Round-trip: the Document must be structurally equal (JSON key order

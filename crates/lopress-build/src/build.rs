@@ -89,8 +89,9 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
             if let Some(md_template) = &block.markdown_template {
                 let key = format!("{plugin_name}::{md_template}");
                 let src = std::fs::read_to_string(plugin.root.join(md_template))?;
-                tera.add_raw_template(&key, &src)
-                    .map_err(|e| BuildError::Config(format!("plugin markdown template `{key}`: {e}")))?;
+                tera.add_raw_template(&key, &src).map_err(|e| {
+                    BuildError::Config(format!("plugin markdown template `{key}`: {e}"))
+                })?;
             }
         }
     }
