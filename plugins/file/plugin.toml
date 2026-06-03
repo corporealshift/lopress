@@ -1,0 +1,15 @@
+# File block — a download link to an attached file.
+# HTML-template block.
+name    = "file"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:file"
+template    = "blocks/file.html"
+title       = "File"
+category    = "Media"
+description = "A download link to an attached file"
+
+[blocks.attrs]
+url   = { type = "string", ui = "text", required = true, label = "File URL" }
+label = { type = "string", ui = "text", required = true, label = "Link text" }
