@@ -17,13 +17,12 @@ pub struct PluginManifest {
 pub struct BlockDecl {
     pub name: String,
     /// HTML template path, relative to the plugin root. Absent for built-in
-    /// ("base") plugins, which provide an editor rather than a renderer.
+    /// ("base") plugins, which provide an editor widget rather than a static
+    /// template.
     #[serde(default)]
     pub template: Option<String>,
     #[serde(default)]
     pub attrs: BTreeMap<String, AttrDecl>,
-    #[serde(default)]
-    pub renderer: Option<String>,
     #[serde(default)]
     pub editor: Option<String>,
     /// When true this block ships as part of the core codebase. The editor

@@ -347,7 +347,6 @@ mod tests {
                     template: None,
                     markdown_template: Some("blocks/demo.md".into()),
                     attrs: Default::default(),
-                    renderer: None,
                     editor: None,
                     builtin: false,
                     native: None,

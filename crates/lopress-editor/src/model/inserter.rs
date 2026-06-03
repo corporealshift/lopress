@@ -191,7 +191,6 @@ mod tests {
             template: template.map(String::from),
             markdown_template: markdown_template.map(String::from),
             attrs,
-            renderer: None,
             editor: None,
             builtin,
             native: native.map(String::from),
