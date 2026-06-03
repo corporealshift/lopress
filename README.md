@@ -66,10 +66,12 @@ Opened in any markdown tool, the prose renders normally; custom blocks appear as
 
 A plugin is a directory under `<workspace>/plugins/<name>/` with a `plugin.toml` manifest. Plugins can provide:
 
-- **Block types** — declare attributes (text, number, bool, select, image-picker, …), supply an HTML template, and optionally ship JS/CSS that loads on pages using the block.
+- **Block types** — declare form attributes (text, textarea, number, bool, select, …) and supply either a Tera **HTML** template or a Tera **markdown** template; optionally ship JS/CSS that loads on pages using the block.
 - **Themes** — a plugin with `theme = true` provides the template set (`layout.html`, `post.html`, `index.html`, `page.html`, `tag.html`) and a stylesheet.
 
 A built-in default theme ships with the binary, so fresh sites work without installing anything.
+
+**See [`docs/plugins.md`](docs/plugins.md) for the full `plugin.toml` manifest reference** — every field, the three block flavors, attribute/UI options, template context, and worked examples.
 
 Planned as phase-2 escape hatches (not v1): WASM renderers for blocks whose output can't be expressed as a template, and custom JS-based editor UIs for blocks whose settings don't fit the declarative form model.
 
