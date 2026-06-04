@@ -177,9 +177,7 @@ native = "list"
     fn base_plugins_include_table() {
         let mut reg = PluginRegistry::default();
         reg.load_base_plugins().unwrap();
-        let (_p, decl) = reg
-            .native_block("table")
-            .expect("table native block");
+        let (_p, decl) = reg.native_block("table").expect("table native block");
         assert_eq!(decl.editor.as_deref(), Some("table"));
         assert_eq!(decl.native.as_deref(), Some("table"));
         assert!(decl.builtin);

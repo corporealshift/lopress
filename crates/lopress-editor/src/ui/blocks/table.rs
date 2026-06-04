@@ -23,7 +23,9 @@ use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::Editor;
-use floem::views::{button, h_stack, h_stack_from_iter, label, v_stack, v_stack_from_iter, Decorators};
+use floem::views::{
+    button, h_stack, h_stack_from_iter, label, v_stack, v_stack_from_iter, Decorators,
+};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
 use std::cell::RefCell;
@@ -42,7 +44,12 @@ type FocusedCell = RwSignal<Option<(usize, usize)>>;
 
 /// Rebuild a `TableData` from the live cell buffers, preserving the original
 /// `align` and the row/cell ids captured at build time.
-fn collect_table(handles: &CellHandles, align: &[Align], row_ids: &[BlockId], cell_ids: &[Vec<BlockId>]) -> TableData {
+fn collect_table(
+    handles: &CellHandles,
+    align: &[Align],
+    row_ids: &[BlockId],
+    cell_ids: &[Vec<BlockId>],
+) -> TableData {
     let n_rows = row_ids.len();
     let mut rows: Vec<TableRow> = row_ids
         .iter()
@@ -53,7 +60,10 @@ fn collect_table(handles: &CellHandles, align: &[Align], row_ids: &[BlockId], ce
                 .get(r)
                 .map(|ids| {
                     ids.iter()
-                        .map(|&cid| TableCell { id: cid, runs: vec![] })
+                        .map(|&cid| TableCell {
+                            id: cid,
+                            runs: vec![],
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -84,8 +94,12 @@ fn collect_table(handles: &CellHandles, align: &[Align], row_ids: &[BlockId], ce
 pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
     let BlockBody::Table(data) = &ctx.block.body else {
         #[cfg(debug_assertions)]
-        eprintln!("[fallback] table widget: {:?} has non-table body", ctx.block.id);
-        return crate::ui::blocks::fallback::fallback_block_view(ctx.block, ctx.focus_pub).into_any();
+        eprintln!(
+            "[fallback] table widget: {:?} has non-table body",
+            ctx.block.id
+        );
+        return crate::ui::blocks::fallback::fallback_block_view(ctx.block, ctx.focus_pub)
+            .into_any();
     };
     let block_id = ctx.block.id;
     let on_action = ctx.on_action.clone();
@@ -97,7 +111,11 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
 
     let align = data.align.clone();
     let row_ids: Vec<BlockId> = data.rows.iter().map(|r| r.id).collect();
-    let cell_ids: Vec<Vec<BlockId>> = data.rows.iter().map(|r| r.cells.iter().map(|c| c.id).collect()).collect();
+    let cell_ids: Vec<Vec<BlockId>> = data
+        .rows
+        .iter()
+        .map(|r| r.cells.iter().map(|c| c.id).collect())
+        .collect();
     let handles: CellHandles = Rc::new(RefCell::new(Vec::new()));
     let focused_cell: FocusedCell = RwSignal::new(None);
 
@@ -119,7 +137,7 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
 
             // Track focus → focused_cell, so the strip knows the active row/col.
             let focused_cell_for_cell = focused_cell; // RwSignal is Copy
-            // Commit closure: rebuild the full table body from all cells.
+                                                      // Commit closure: rebuild the full table body from all cells.
             let commit_handles = Rc::clone(&handles);
             let commit_on_action = on_action.clone();
             let (c_align, c_row_ids, c_cell_ids) = collect_ctx.clone();
@@ -184,7 +202,8 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
                         .min_width(80.)
                         .flex_grow(1.0);
                     if is_header {
-                        s.background(HEADER_BG).font_weight(floem::text::Weight::SEMIBOLD)
+                        s.background(HEADER_BG)
+                            .font_weight(floem::text::Weight::SEMIBOLD)
                     } else {
                         s
                     }
@@ -196,14 +215,20 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
                 });
             cell_views.push(cell_view.into_any());
         }
-        row_views.push(h_stack_from_iter(cell_views).style(|s| s.width_full()).into_any());
+        row_views.push(
+            h_stack_from_iter(cell_views)
+                .style(|s| s.width_full())
+                .into_any(),
+        );
     }
 
     let grid = v_stack_from_iter(row_views).style(|s| s.width_full());
 
     let strip = control_strip(block_id, on_action.clone(), focused_cell, focus_pub);
 
-    v_stack((strip, grid)).style(|s| s.width_full().padding_vert(4.)).into_any()
+    v_stack((strip, grid))
+        .style(|s| s.width_full().padding_vert(4.))
+        .into_any()
 }
 
 /// A single button view, wrapped in `Rc<dyn Fn() -> AnyView>` so it can be
@@ -219,7 +244,9 @@ fn control_strip(
 ) -> AnyView {
     use floem::views::empty;
 
-    let mk = move |lbl: &'static str, make_action: Rc<dyn Fn((usize, usize)) -> Option<BlockAction>>| -> BtnView {
+    let mk = move |lbl: &'static str,
+                   make_action: Rc<dyn Fn((usize, usize)) -> Option<BlockAction>>|
+          -> BtnView {
         let on_action = on_action.clone();
         let lbl_owned: Rc<String> = Rc::new(lbl.to_string());
         let make_action = Rc::clone(&make_action);
@@ -243,13 +270,62 @@ fn control_strip(
         })
     };
 
-    let add_row = mk("+ Row", Rc::new(move |(r, _c)| Some(BlockAction::TableInsertRow { block_id, at: r + 1 })));
-    let del_row = mk("− Row", Rc::new(move |(r, _c)| Some(BlockAction::TableDeleteRow { block_id, row: r })));
-    let add_col = mk("+ Col", Rc::new(move |(_r, c)| Some(BlockAction::TableInsertColumn { block_id, at: c + 1 })));
-    let del_col = mk("− Col", Rc::new(move |(_r, c)| Some(BlockAction::TableDeleteColumn { block_id, col: c })));
-    let al_l = mk("L", Rc::new(move |(_r, c)| Some(BlockAction::TableSetAlign { block_id, col: c, align: Align::Left })));
-    let al_c = mk("C", Rc::new(move |(_r, c)| Some(BlockAction::TableSetAlign { block_id, col: c, align: Align::Center })));
-    let al_r = mk("R", Rc::new(move |(_r, c)| Some(BlockAction::TableSetAlign { block_id, col: c, align: Align::Right })));
+    let add_row = mk(
+        "+ Row",
+        Rc::new(move |(r, _c)| {
+            Some(BlockAction::TableInsertRow {
+                block_id,
+                at: r + 1,
+            })
+        }),
+    );
+    let del_row = mk(
+        "− Row",
+        Rc::new(move |(r, _c)| Some(BlockAction::TableDeleteRow { block_id, row: r })),
+    );
+    let add_col = mk(
+        "+ Col",
+        Rc::new(move |(_r, c)| {
+            Some(BlockAction::TableInsertColumn {
+                block_id,
+                at: c + 1,
+            })
+        }),
+    );
+    let del_col = mk(
+        "− Col",
+        Rc::new(move |(_r, c)| Some(BlockAction::TableDeleteColumn { block_id, col: c })),
+    );
+    let al_l = mk(
+        "L",
+        Rc::new(move |(_r, c)| {
+            Some(BlockAction::TableSetAlign {
+                block_id,
+                col: c,
+                align: Align::Left,
+            })
+        }),
+    );
+    let al_c = mk(
+        "C",
+        Rc::new(move |(_r, c)| {
+            Some(BlockAction::TableSetAlign {
+                block_id,
+                col: c,
+                align: Align::Center,
+            })
+        }),
+    );
+    let al_r = mk(
+        "R",
+        Rc::new(move |(_r, c)| {
+            Some(BlockAction::TableSetAlign {
+                block_id,
+                col: c,
+                align: Align::Right,
+            })
+        }),
+    );
 
     // Gate the strip to only show when this table holds focus.
     floem::views::dyn_container(

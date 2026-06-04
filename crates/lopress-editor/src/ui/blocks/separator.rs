@@ -15,12 +15,7 @@ pub fn separator_widget(ctx: &EditorContext) -> AnyView {
     let block_id = ctx.block.id;
     let focus_pub = ctx.focus_pub;
     empty()
-        .style(move |s| {
-            s.width_full()
-                .height(1.)
-                .margin_vert(10.)
-                .background(RULE)
-        })
+        .style(move |s| s.width_full().height(1.).margin_vert(10.).background(RULE))
         .on_event(EventListener::PointerDown, move |_| {
             focus_pub.block.set(Some(block_id));
             focus_pub.editor_and_spans.set(None);

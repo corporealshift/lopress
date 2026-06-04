@@ -89,15 +89,27 @@ pub enum BlockAction {
     /// Insert an empty row at index `at` (0..=rows.len()). New cells match the
     /// current column count. `at == 0` would insert above the header — callers
     /// pass `at >= 1`; the apply clamps into the body region defensively.
-    TableInsertRow { block_id: BlockId, at: usize },
+    TableInsertRow {
+        block_id: BlockId,
+        at: usize,
+    },
     /// Delete body row `row`. No-op (returns None) for the header row (0) or
     /// when it is the last remaining body row.
-    TableDeleteRow { block_id: BlockId, row: usize },
+    TableDeleteRow {
+        block_id: BlockId,
+        row: usize,
+    },
     /// Insert an empty column at index `at` (0..=col_count) across every row,
     /// with `Align::None`.
-    TableInsertColumn { block_id: BlockId, at: usize },
+    TableInsertColumn {
+        block_id: BlockId,
+        at: usize,
+    },
     /// Delete column `col` across every row. No-op when it is the last column.
-    TableDeleteColumn { block_id: BlockId, col: usize },
+    TableDeleteColumn {
+        block_id: BlockId,
+        col: usize,
+    },
     /// Set column `col`'s alignment.
     TableSetAlign {
         block_id: BlockId,
@@ -156,12 +168,8 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         BlockAction::EditFrontMatter { new_front_matter } => {
             apply_edit_front_matter(doc, *new_front_matter)
         }
-        BlockAction::TableInsertRow { block_id, at } => {
-            apply_table_insert_row(doc, block_id, at)
-        }
-        BlockAction::TableDeleteRow { block_id, row } => {
-            apply_table_delete_row(doc, block_id, row)
-        }
+        BlockAction::TableInsertRow { block_id, at } => apply_table_insert_row(doc, block_id, at),
+        BlockAction::TableDeleteRow { block_id, row } => apply_table_delete_row(doc, block_id, row),
         BlockAction::TableInsertColumn { block_id, at } => {
             apply_table_insert_column(doc, block_id, at)
         }
@@ -698,10 +706,7 @@ fn apply_edit_front_matter(
     ))
 }
 
-fn table_body_mut(
-    doc: &mut EditorDoc,
-    id: BlockId,
-) -> Option<&mut crate::model::types::TableData> {
+fn table_body_mut(doc: &mut EditorDoc, id: BlockId) -> Option<&mut crate::model::types::TableData> {
     let idx = find_idx(doc, id)?;
     match &mut doc.blocks.get_mut(idx)?.body {
         BlockBody::Table(data) => Some(data),
@@ -1175,8 +1180,14 @@ mod table_action_tests {
     fn insert_row_appends_and_undoes() {
         let mut doc = doc_with_table();
         let id = doc.blocks[0].id;
-        let (_c, inverse) =
-            apply(&mut doc, BlockAction::TableInsertRow { block_id: id, at: 2 }).unwrap();
+        let (_c, inverse) = apply(
+            &mut doc,
+            BlockAction::TableInsertRow {
+                block_id: id,
+                at: 2,
+            },
+        )
+        .unwrap();
         assert_eq!(table_data(&doc).rows.len(), 3);
         apply(&mut doc, inverse);
         assert_eq!(table_data(&doc).rows.len(), 2);
@@ -1189,13 +1200,19 @@ mod table_action_tests {
         // Deleting the header (row 0) is refused.
         assert!(apply(
             &mut doc,
-            BlockAction::TableDeleteRow { block_id: id, row: 0 }
+            BlockAction::TableDeleteRow {
+                block_id: id,
+                row: 0
+            }
         )
         .is_none());
         // Deleting the only body row is refused (must keep >= 1 body row).
         assert!(apply(
             &mut doc,
-            BlockAction::TableDeleteRow { block_id: id, row: 1 }
+            BlockAction::TableDeleteRow {
+                block_id: id,
+                row: 1
+            }
         )
         .is_none());
         assert_eq!(table_data(&doc).rows.len(), 2);
@@ -1205,19 +1222,19 @@ mod table_action_tests {
     fn insert_and_delete_column_roundtrip() {
         let mut doc = doc_with_table(); // 2 columns
         let id = doc.blocks[0].id;
-        let (_c, inv) =
-            apply(&mut doc, BlockAction::TableInsertColumn { block_id: id, at: 2 }).unwrap();
+        let (_c, inv) = apply(
+            &mut doc,
+            BlockAction::TableInsertColumn {
+                block_id: id,
+                at: 2,
+            },
+        )
+        .unwrap();
         assert_eq!(table_data(&doc).align.len(), 3);
-        assert!(table_data(&doc)
-            .rows
-            .iter()
-            .all(|r| r.cells.len() == 3));
+        assert!(table_data(&doc).rows.iter().all(|r| r.cells.len() == 3));
         apply(&mut doc, inv);
         assert_eq!(table_data(&doc).align.len(), 2);
-        assert!(table_data(&doc)
-            .rows
-            .iter()
-            .all(|r| r.cells.len() == 2));
+        assert!(table_data(&doc).rows.iter().all(|r| r.cells.len() == 2));
     }
 
     #[test]
@@ -1226,14 +1243,20 @@ mod table_action_tests {
         let id = doc.blocks[0].id;
         apply(
             &mut doc,
-            BlockAction::TableDeleteColumn { block_id: id, col: 0 },
+            BlockAction::TableDeleteColumn {
+                block_id: id,
+                col: 0,
+            },
         )
         .unwrap();
         assert_eq!(table_data(&doc).align.len(), 1);
         // Refuse to delete the last remaining column.
         assert!(apply(
             &mut doc,
-            BlockAction::TableDeleteColumn { block_id: id, col: 0 }
+            BlockAction::TableDeleteColumn {
+                block_id: id,
+                col: 0
+            }
         )
         .is_none());
     }

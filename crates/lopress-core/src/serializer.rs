@@ -189,9 +189,8 @@ fn write_table(out: &mut String, b: &Block) {
         })
         .unwrap_or_default();
 
-    let cell_text = |cell: &Block| -> String {
-        cell.text.as_deref().unwrap_or("").replace('|', "\\|")
-    };
+    let cell_text =
+        |cell: &Block| -> String { cell.text.as_deref().unwrap_or("").replace('|', "\\|") };
     let write_row = |out: &mut String, row: &Block| {
         out.push('|');
         for cell in &row.children {

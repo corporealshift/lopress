@@ -323,7 +323,13 @@ mod tests {
                 text: None,
             }],
         };
-        let html = render_body(&doc, &empty_registry(), &Tera::default(), &ImageIndex::default()).unwrap();
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
         assert_eq!(html, "<hr>\n");
     }
 
@@ -339,8 +345,18 @@ mod tests {
                         r#type: "table_row".into(),
                         attrs: json!({}),
                         children: vec![
-                            Block { r#type: "table_cell".into(), attrs: json!({}), children: vec![], text: Some("H1".into()) },
-                            Block { r#type: "table_cell".into(), attrs: json!({}), children: vec![], text: Some("H2".into()) },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("H1".into()),
+                            },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("H2".into()),
+                            },
                         ],
                         text: None,
                     },
@@ -348,8 +364,18 @@ mod tests {
                         r#type: "table_row".into(),
                         attrs: json!({}),
                         children: vec![
-                            Block { r#type: "table_cell".into(), attrs: json!({}), children: vec![], text: Some("a".into()) },
-                            Block { r#type: "table_cell".into(), attrs: json!({}), children: vec![], text: Some("b & c".into()) },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("a".into()),
+                            },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("b & c".into()),
+                            },
                         ],
                         text: None,
                     },
@@ -357,11 +383,23 @@ mod tests {
                 text: None,
             }],
         };
-        let html = render_body(&doc, &empty_registry(), &Tera::default(), &ImageIndex::default()).unwrap();
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
         assert!(html.contains("<table>"), "got: {html}");
         assert!(html.contains("<thead>"));
-        assert!(html.contains(r#"<th style="text-align:left">H1</th>"#), "got: {html}");
-        assert!(html.contains(r#"<th style="text-align:right">H2</th>"#), "got: {html}");
+        assert!(
+            html.contains(r#"<th style="text-align:left">H1</th>"#),
+            "got: {html}"
+        );
+        assert!(
+            html.contains(r#"<th style="text-align:right">H2</th>"#),
+            "got: {html}"
+        );
         assert!(html.contains("<tbody>"));
         assert!(html.contains(r#"<td style="text-align:left">a</td>"#));
         assert!(html.contains("b &amp; c"), "cell text escaped: {html}");

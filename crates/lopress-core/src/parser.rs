@@ -715,7 +715,10 @@ after
     #[test]
     fn parses_thematic_break_as_separator() {
         let d = parse("before\n\n---\n\nafter\n").unwrap();
-        assert_eq!(types(&d.blocks), vec!["paragraph", "separator", "paragraph"]);
+        assert_eq!(
+            types(&d.blocks),
+            vec!["paragraph", "separator", "paragraph"]
+        );
         let sep = &d.blocks[1];
         assert!(sep.children.is_empty());
         assert!(sep.text.is_none());

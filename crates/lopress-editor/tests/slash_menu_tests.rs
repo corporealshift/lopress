@@ -72,6 +72,10 @@ fn paragraph_entry_is_a_kind_choice() {
 #[test]
 fn includes_separator_and_table() {
     let items = slash_menu_items();
-    assert!(items.iter().any(|(l, c)| l == "Separator" && matches!(c, SlashChoice::Separator)));
-    assert!(items.iter().any(|(l, c)| l == "Table" && matches!(c, SlashChoice::Table)));
+    assert!(items
+        .iter()
+        .any(|(l, c)| l == "Separator" && matches!(c, SlashChoice::Separator)));
+    assert!(items
+        .iter()
+        .any(|(l, c)| l == "Table" && matches!(c, SlashChoice::Table)));
 }
