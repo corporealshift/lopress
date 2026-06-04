@@ -95,6 +95,12 @@ fn write_block(
             }
             let _ = writeln!(out, "</{tag}>");
         }
+        "separator" => {
+            out.push_str("<hr>\n");
+        }
+        "table" => {
+            write_table(out, b);
+        }
         "image" => {
             write_image(out, b, image_index);
         }
@@ -153,6 +159,47 @@ fn write_image(out: &mut String, b: &Block, image_index: &ImageIndex) {
         let _ = writeln!(out, "<figcaption>{c}</figcaption>");
     }
     out.push_str("</figure>\n");
+}
+
+/// Render a `table` block to `<table>`. `children[0]` is the header row
+/// (`<th>`); the rest are body rows (`<td>`). Per-column `text-align` comes
+/// from `attrs.align`. Cell text is escaped (inline-md→HTML is out of scope).
+fn write_table(out: &mut String, b: &Block) {
+    let aligns: Vec<&str> = b
+        .attrs
+        .get("align")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().map(|v| v.as_str().unwrap_or("none")).collect())
+        .unwrap_or_default();
+    let style_for = |col: usize| -> String {
+        match aligns.get(col).copied().unwrap_or("none") {
+            "left" => " style=\"text-align:left\"".to_string(),
+            "right" => " style=\"text-align:right\"".to_string(),
+            "center" => " style=\"text-align:center\"".to_string(),
+            _ => String::new(),
+        }
+    };
+
+    out.push_str("<table>\n");
+    let mut rows = b.children.iter();
+    if let Some(header) = rows.next() {
+        out.push_str("<thead>\n<tr>");
+        for (col, cell) in header.children.iter().enumerate() {
+            let txt = escape(cell.text.as_deref().unwrap_or(""));
+            let _ = write!(out, "<th{}>{txt}</th>", style_for(col));
+        }
+        out.push_str("</tr>\n</thead>\n");
+    }
+    out.push_str("<tbody>\n");
+    for row in rows {
+        out.push_str("<tr>");
+        for (col, cell) in row.children.iter().enumerate() {
+            let txt = escape(cell.text.as_deref().unwrap_or(""));
+            let _ = write!(out, "<td{}>{txt}</td>", style_for(col));
+        }
+        out.push_str("</tr>\n");
+    }
+    out.push_str("</tbody>\n</table>\n");
 }
 
 fn render_custom(
@@ -263,6 +310,99 @@ mod tests {
             &PathBuf::from(format!("/src/images/{original}")),
             &ImageResult { files },
         );
+    }
+
+    #[test]
+    fn renders_separator_as_hr() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "separator".into(),
+                attrs: json!({}),
+                children: vec![],
+                text: None,
+            }],
+        };
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
+        assert_eq!(html, "<hr>\n");
+    }
+
+    #[test]
+    fn renders_table_with_alignment() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "table".into(),
+                attrs: json!({ "align": ["left", "right"] }),
+                children: vec![
+                    Block {
+                        r#type: "table_row".into(),
+                        attrs: json!({}),
+                        children: vec![
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("H1".into()),
+                            },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("H2".into()),
+                            },
+                        ],
+                        text: None,
+                    },
+                    Block {
+                        r#type: "table_row".into(),
+                        attrs: json!({}),
+                        children: vec![
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("a".into()),
+                            },
+                            Block {
+                                r#type: "table_cell".into(),
+                                attrs: json!({}),
+                                children: vec![],
+                                text: Some("b & c".into()),
+                            },
+                        ],
+                        text: None,
+                    },
+                ],
+                text: None,
+            }],
+        };
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
+        assert!(html.contains("<table>"), "got: {html}");
+        assert!(html.contains("<thead>"));
+        assert!(
+            html.contains(r#"<th style="text-align:left">H1</th>"#),
+            "got: {html}"
+        );
+        assert!(
+            html.contains(r#"<th style="text-align:right">H2</th>"#),
+            "got: {html}"
+        );
+        assert!(html.contains("<tbody>"));
+        assert!(html.contains(r#"<td style="text-align:left">a</td>"#));
+        assert!(html.contains("b &amp; c"), "cell text escaped: {html}");
     }
 
     #[test]

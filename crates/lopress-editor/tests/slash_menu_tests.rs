@@ -19,6 +19,8 @@ fn slash_menu_items_match_acceptance_list() {
             "Ordered list",
             "Image",
             "Read more",
+            "Separator",
+            "Table",
         ]
     );
     // Spot-check a few kinds — heading levels in particular.
@@ -65,4 +67,15 @@ fn paragraph_entry_is_a_kind_choice() {
     let items = slash_menu_items();
     assert!(items.iter().any(|(label, choice)| *label == "Paragraph"
         && matches!(choice, SlashChoice::Kind(BlockKind::Paragraph))));
+}
+
+#[test]
+fn includes_separator_and_table() {
+    let items = slash_menu_items();
+    assert!(items
+        .iter()
+        .any(|(l, c)| l == "Separator" && matches!(c, SlashChoice::Separator)));
+    assert!(items
+        .iter()
+        .any(|(l, c)| l == "Table" && matches!(c, SlashChoice::Table)));
 }

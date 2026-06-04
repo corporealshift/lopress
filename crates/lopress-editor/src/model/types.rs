@@ -47,6 +47,7 @@ pub enum BlockKind {
     Code { lang: Rc<str> },
     List { ordered: bool },
     Image,
+    Table,
     Opaque { type_name: Rc<str> },
 }
 
@@ -55,6 +56,7 @@ pub enum BlockBody {
     Inline(Vec<InlineRun>),
     Code(String),
     List(Vec<ListItem>),
+    Table(TableData),
     Opaque(Value),
 }
 
@@ -62,6 +64,57 @@ pub enum BlockBody {
 pub struct ListItem {
     pub id: BlockId,
     pub runs: Vec<InlineRun>,
+}
+
+/// Column alignment for a table. Maps to the `attrs.align` strings on disk
+/// ("none"/"left"/"center"/"right") and to GFM delimiter-row tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+impl Align {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Align::None => "none",
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+        }
+    }
+
+    pub fn from_str_lenient(s: &str) -> Self {
+        match s {
+            "left" => Align::Left,
+            "center" => Align::Center,
+            "right" => Align::Right,
+            _ => Align::None,
+        }
+    }
+}
+
+/// One table cell: an id (for focus) plus its inline runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableCell {
+    pub id: BlockId,
+    pub runs: Vec<InlineRun>,
+}
+
+/// One table row: an id plus its cells. `rows[0]` of a `TableData` is the header.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    pub id: BlockId,
+    pub cells: Vec<TableCell>,
+}
+
+/// A table body: per-column alignment plus the rows (row 0 = header).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableData {
+    pub align: Vec<Align>,
+    pub rows: Vec<TableRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -176,6 +229,33 @@ impl PluginMeta {
             native: None,
         }
     }
+
+    /// `PluginMeta` for the separator: a native `separator` claim, built-in
+    /// (chrome suppressed), edited via the `"separator"` divider widget. No attrs.
+    pub fn separator() -> Self {
+        Self {
+            block_type_name: Rc::from("separator"),
+            attrs: serde_json::Map::new(),
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("separator")),
+            native: Some(Rc::from("separator")),
+        }
+    }
+
+    /// `PluginMeta` for a table: native `table` claim, built-in (chrome
+    /// suppressed), edited via the `"table"` widget. No attr-form attrs (the
+    /// align array lives in the table body, not the attr form).
+    pub fn table() -> Self {
+        Self {
+            block_type_name: Rc::from("table"),
+            attrs: serde_json::Map::new(),
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("table")),
+            native: Some(Rc::from("table")),
+        }
+    }
 }
 
 impl EditorBlock {
@@ -238,6 +318,46 @@ impl EditorBlock {
             body: BlockBody::Inline(vec![]),
             plugin: Some(PluginMeta::read_more()),
         }
+    }
+
+    /// The separator block: an empty-bodied plugin block carrying
+    /// `PluginMeta::separator`. Renders via its divider widget and serializes
+    /// to a bare `---`.
+    pub fn separator() -> Self {
+        Self {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph,
+            body: BlockBody::Inline(vec![]),
+            plugin: Some(PluginMeta::separator()),
+        }
+    }
+
+    /// A table block from explicit data.
+    pub fn table(data: TableData) -> Self {
+        Self {
+            id: BlockId::new(),
+            kind: BlockKind::Table,
+            body: BlockBody::Table(data),
+            plugin: Some(PluginMeta::table()),
+        }
+    }
+
+    /// The default inserted table: 2 columns × 2 rows (1 header + 1 body),
+    /// empty cells, alignment `none`. Used by both the slash menu and the
+    /// toolbar button.
+    pub fn table_default() -> Self {
+        let empty_cell = || TableCell {
+            id: BlockId::new(),
+            runs: vec![],
+        };
+        let row = || TableRow {
+            id: BlockId::new(),
+            cells: vec![empty_cell(), empty_cell()],
+        };
+        Self::table(TableData {
+            align: vec![Align::None, Align::None],
+            rows: vec![row(), row()],
+        })
     }
 
     /// An image block. State (src/alt/caption) lives in `PluginMeta.attrs`;

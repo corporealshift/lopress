@@ -668,6 +668,10 @@ mod inverse_symmetry {
                         "list",
                     ),
                     BlockBody::Opaque(_) => (String::new(), "opaque"),
+                    BlockBody::Table(data) => (
+                        lopress_editor::actions::body_to_flat_text(&BlockBody::Table(data.clone())),
+                        "table",
+                    ),
                 };
                 (b.id, text, tag)
             })

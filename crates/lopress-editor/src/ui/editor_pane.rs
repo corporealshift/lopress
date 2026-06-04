@@ -28,55 +28,55 @@ use std::rc::Rc;
 /// selection emits `BlockAction::ChangeType` against that block.
 #[allow(clippy::too_many_arguments)]
 pub fn editor_pane(
-    doc: &EditorDoc,
+    current_doc: RwSignal<Option<EditorDoc>>,
     on_action: ActionSink,
     focus_target: RwSignal<Option<BlockId>>,
     slash_menu_open: RwSignal<Option<BlockId>>,
     dnd: DndState,
-    current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
     on_insert_image: Rc<dyn Fn(BlockId)>,
     inserter_items: Rc<[crate::model::inserter::PluginInserterItem]>,
 ) -> impl IntoView {
-    let focus_pub = FocusPublisher {
-        block: RwSignal::new(None),
-        editor_and_spans: RwSignal::new(None),
-    };
-    // Interleave gap drop-zones with block views: gap(0), block(0), gap(1),
-    // block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
-    // target. An empty document has no blocks to click into, so it shows a
-    // single "add block" button instead.
-    let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
-    if doc.blocks.is_empty() {
-        rows.push(add_block_button(on_action.clone()));
-    } else {
-        for (i, b) in doc.blocks.iter().enumerate() {
-            rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
-            rows.push(block_view(
-                b,
-                on_action.clone(),
+    // The block column is rebuilt on every document mutation: Floem's
+    // `create_updater` (behind `dyn_container`) fires on every
+    // `current_doc.update()` with no value diffing, so `pane_key` does not
+    // actually gate rebuilds — every edit reconstructs the column. The
+    // important property here is *structural*: this `dyn_container` is the
+    // CHILD of the `scroll` created below, so only the column is destroyed and
+    // recreated — the `scroll` node persists and keeps its offset. Previously
+    // the whole pane (including `scroll`) was the dyn_container child, so every
+    // edit (Enter, ChangeType, table row/col, …) built a fresh scroll node and
+    // snapped the viewport back to the top.
+    let pane_key = crate::ui::editing::pane_key::build_pane_key(current_doc);
+    let on_action_for_col = on_action.clone();
+    let column = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
+        None => label(|| "No document open. Pick one from the sidebar.".to_string())
+            .style(|s| {
+                s.width_full()
+                    .padding(24.)
+                    .color(floem::peniko::Color::rgb8(140, 140, 140))
+            })
+            .into_any(),
+        Some(_) => match current_doc.with_untracked(|d| d.clone()) {
+            Some(doc) => block_column(
+                &doc,
+                on_action_for_col.clone(),
                 focus_target,
-                focus_pub,
                 dnd,
                 current_doc,
                 Rc::clone(&on_undo),
                 Rc::clone(&on_redo),
-            ));
-        }
-        rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
-    }
-    let column = v_stack_from_iter(rows).style(|s| {
-        s.max_width(720.)
-            .width_full()
-            .margin_horiz(floem::unit::PxPctAuto::Auto)
-            .padding(24.)
+            ),
+            None => empty().into_any(),
+        },
     });
+
     // `min_height(0)` is load-bearing: a flex item's default `min-height:auto`
     // floors it at its content size, so without this the scroll grows to the
     // full document height and never has a viewport smaller than its content
     // — i.e. it can never scroll. See the matching calls up the layout chain
-    // in `ui::mod::editing_view`.
+    // in `ui::mod::editing_view`. Created ONCE and stable across rebuilds.
     let scroll_view = scroll(column).style(|s| s.width_full().height_full().min_height(0.));
 
     // Slash menu overlay. Mounts when `slash_menu_open` is `Some(_)`.
@@ -130,6 +130,18 @@ pub fn editor_pane(
                     SlashChoice::Image => {
                         on_insert_image_for_select(block_id);
                     }
+                    SlashChoice::Separator => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::separator()),
+                        });
+                    }
+                    SlashChoice::Table => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::table_default()),
+                        });
+                    }
                     SlashChoice::Plugin { type_name } => {
                         if let Some(item) = inserter_items_for_select
                             .iter()
@@ -160,6 +172,63 @@ pub fn editor_pane(
     });
 
     stack((scroll_view, menu_overlay)).style(|s| s.width_full().height_full().min_height(0.))
+}
+
+/// Build the centered column of block views for `doc`. Rebuilt by the pane's
+/// inner `dyn_container` on every document mutation; the surrounding `scroll`
+/// node is stable, so the scroll offset is preserved across rebuilds.
+///
+/// Interleaves gap drop-zones with block views: gap(0), block(0), gap(1),
+/// block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
+/// target. An empty document has no blocks to click into, so it shows a single
+/// "add block" button instead.
+#[allow(clippy::too_many_arguments)]
+fn block_column(
+    doc: &EditorDoc,
+    on_action: ActionSink,
+    focus_target: RwSignal<Option<BlockId>>,
+    dnd: DndState,
+    current_doc: RwSignal<Option<EditorDoc>>,
+    on_undo: Rc<dyn Fn()>,
+    on_redo: Rc<dyn Fn()>,
+) -> AnyView {
+    // `focus_pub` is created per rebuild and shared by this column's block
+    // editors (which publish their editor signals into it on focus) and the
+    // per-block toolbar (which reads it). It must NOT outlive the column: the
+    // editor signals it references live in this same (rebuilt) scope, so a
+    // `focus_pub` hoisted to a stable parent would dangle after a rebuild and
+    // panic when the toolbar reads the disposed signal.
+    let focus_pub = FocusPublisher {
+        block: RwSignal::new(None),
+        editor_and_spans: RwSignal::new(None),
+    };
+    let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
+    if doc.blocks.is_empty() {
+        rows.push(add_block_button(on_action.clone()));
+    } else {
+        for (i, b) in doc.blocks.iter().enumerate() {
+            rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
+            rows.push(block_view(
+                b,
+                on_action.clone(),
+                focus_target,
+                focus_pub,
+                dnd,
+                current_doc,
+                Rc::clone(&on_undo),
+                Rc::clone(&on_redo),
+            ));
+        }
+        rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
+    }
+    v_stack_from_iter(rows)
+        .style(|s| {
+            s.max_width(720.)
+                .width_full()
+                .margin_horiz(floem::unit::PxPctAuto::Auto)
+                .padding(24.)
+        })
+        .into_any()
 }
 
 /// The affordance shown for an empty document: a button that inserts the

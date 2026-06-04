@@ -1,3 +1,13 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+    )
+)]
+
 pub mod actions;
 #[cfg(debug_assertions)]
 pub(crate) mod ctrl;

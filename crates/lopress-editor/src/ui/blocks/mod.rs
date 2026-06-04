@@ -16,7 +16,9 @@ pub mod opaque;
 pub mod paragraph;
 pub mod plugin;
 pub mod read_more;
+pub mod separator;
 pub mod style_span;
+pub mod table;
 
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};

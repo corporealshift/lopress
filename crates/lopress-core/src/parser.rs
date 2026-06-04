@@ -2,7 +2,9 @@ use crate::delimiter;
 use crate::error::ParseError;
 use crate::frontmatter;
 use crate::types::{Block, Document};
-use pulldown_cmark::{html, CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    html, Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
+};
 use serde_json::{json, Value};
 
 /// Parse a markdown source (with optional front-matter) into a Document.
@@ -17,7 +19,7 @@ pub fn parse(src: &str) -> Result<Document, ParseError> {
 
 /// Render a markdown string to HTML using pulldown-cmark.
 pub fn render_markdown(markdown: &str) -> String {
-    let parser = Parser::new(markdown);
+    let parser = Parser::new_ext(markdown, Options::ENABLE_TABLES);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     html_output
@@ -152,7 +154,7 @@ fn line_of(src: &str, byte_offset: usize) -> usize {
 }
 
 fn parse_plain_markdown(body: &str) -> Result<Vec<Block>, ParseError> {
-    let mut parser = Parser::new(body);
+    let mut parser = Parser::new_ext(body, Options::ENABLE_TABLES);
     parse_blocks(&mut parser, None)
 }
 
@@ -236,6 +238,7 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
                 text: Some(body),
             }
         }
+        Event::Start(Tag::Table(alignments)) => parse_table(alignments, parser)?,
         Event::Start(Tag::List(first)) => {
             let ordered = first.is_some();
             let children = parse_blocks(parser, Some(TagEnd::List(ordered)))?;
@@ -247,13 +250,18 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
             }
         }
         Event::Start(Tag::Item) => parse_item(parser)?,
+        Event::Rule => Block {
+            r#type: "separator".into(),
+            attrs: json!({}),
+            children: vec![],
+            text: None,
+        },
         Event::Html(_)
         | Event::InlineHtml(_)
         | Event::Text(_)
         | Event::Code(_)
         | Event::SoftBreak
         | Event::HardBreak
-        | Event::Rule
         | Event::TaskListMarker(_)
         | Event::FootnoteReference(_)
         | Event::Start(_)
@@ -338,6 +346,91 @@ fn parse_item(parser: &mut Parser<'_>) -> Result<Block, ParseError> {
         children,
         text: None,
     })
+}
+
+/// Map a pulldown alignment to the lopress `attrs.align` string.
+fn align_str(a: Alignment) -> &'static str {
+    match a {
+        Alignment::None => "none",
+        Alignment::Left => "left",
+        Alignment::Center => "center",
+        Alignment::Right => "right",
+    }
+}
+
+/// Build a `table` block from a `Tag::Table` start event. The first emitted
+/// row (inside `TableHead`) and each subsequent `TableRow` become `table_row`
+/// children; the first child is the header. Cells are `table_cell` blocks whose
+/// `text` holds inline-markdown source (mirroring `consume_inline`).
+fn parse_table(alignments: Vec<Alignment>, parser: &mut Parser<'_>) -> Result<Block, ParseError> {
+    let align: Vec<Value> = alignments
+        .into_iter()
+        .map(|a| Value::String(align_str(a).to_string()))
+        .collect();
+    let mut rows: Vec<Block> = Vec::new();
+    let mut current_cells: Vec<Block> = Vec::new();
+    while let Some(ev) = parser.next() {
+        match ev {
+            Event::Start(Tag::TableCell) => {
+                let text = consume_table_cell(parser);
+                current_cells.push(Block {
+                    r#type: "table_cell".into(),
+                    attrs: json!({}),
+                    children: vec![],
+                    text: Some(text),
+                });
+            }
+            // End of a head or body row: flush the accumulated cells as a row.
+            Event::End(TagEnd::TableHead) | Event::End(TagEnd::TableRow) => {
+                rows.push(Block {
+                    r#type: "table_row".into(),
+                    attrs: json!({}),
+                    children: std::mem::take(&mut current_cells),
+                    text: None,
+                });
+            }
+            Event::End(TagEnd::Table) => break,
+            // TableHead/TableRow starts carry no data; ignore everything else.
+            _ => {}
+        }
+    }
+    Ok(Block {
+        r#type: "table".into(),
+        attrs: json!({ "align": align }),
+        children: rows,
+        text: None,
+    })
+}
+
+/// Accumulate one table cell's inline content as markdown source, until the
+/// matching `TagEnd::TableCell`. Inline conversions mirror `consume_inline`
+/// (emphasis → `*`, strong → `**`, code → backticks, link → its text).
+fn consume_table_cell(parser: &mut Parser<'_>) -> String {
+    let mut text = String::new();
+    while let Some(ev) = parser.next() {
+        match ev {
+            Event::Text(t) => text.push_str(&t),
+            Event::Code(t) => {
+                text.push('`');
+                text.push_str(&t);
+                text.push('`');
+            }
+            Event::Start(Tag::Emphasis) | Event::End(TagEnd::Emphasis) => text.push('*'),
+            Event::Start(Tag::Strong) | Event::End(TagEnd::Strong) => text.push_str("**"),
+            Event::Start(Tag::Link { .. }) => {
+                for inner in parser.by_ref() {
+                    match inner {
+                        Event::Text(t) => text.push_str(&t),
+                        Event::End(TagEnd::Link) => break,
+                        _ => {}
+                    }
+                }
+            }
+            Event::End(TagEnd::TableCell) => break,
+            _ => {}
+        }
+    }
+    text
 }
 
 /// Drain `inline` into a synthesised `paragraph` child when it holds
@@ -591,6 +684,45 @@ after
     fn parses_image_without_title_has_no_caption() {
         let d = parse("![alt](foo.jpg)\n").unwrap();
         assert_eq!(d.blocks[0].attrs, json!({ "src": "foo.jpg", "alt": "alt" }));
+    }
+
+    #[test]
+    fn parses_gfm_table_with_alignment_and_inline() {
+        let src = "| H1 | H2 |\n| :--- | ---: |\n| a | **b** |\n";
+        let d = parse(src).unwrap();
+        assert_eq!(types(&d.blocks), vec!["table"]);
+        let t = &d.blocks[0];
+        assert_eq!(t.attrs, json!({ "align": ["left", "right"] }));
+        // children[0] is the header row; children[1] the body row.
+        assert_eq!(t.children.len(), 2);
+        assert_eq!(t.children[0].r#type, "table_row");
+        assert_eq!(t.children[0].children.len(), 2);
+        assert_eq!(t.children[0].children[0].r#type, "table_cell");
+        assert_eq!(t.children[0].children[0].text.as_deref(), Some("H1"));
+        // inline strong is preserved as markdown source in the cell text.
+        assert_eq!(t.children[1].children[1].text.as_deref(), Some("**b**"));
+    }
+
+    #[test]
+    fn parses_table_cell_escaped_pipe() {
+        let src = "| A |\n| --- |\n| x \\| y |\n";
+        let d = parse(src).unwrap();
+        let t = &d.blocks[0];
+        // pulldown unescapes `\|` to a literal pipe inside the cell text.
+        assert_eq!(t.children[1].children[0].text.as_deref(), Some("x | y"));
+    }
+
+    #[test]
+    fn parses_thematic_break_as_separator() {
+        let d = parse("before\n\n---\n\nafter\n").unwrap();
+        assert_eq!(
+            types(&d.blocks),
+            vec!["paragraph", "separator", "paragraph"]
+        );
+        let sep = &d.blocks[1];
+        assert!(sep.children.is_empty());
+        assert!(sep.text.is_none());
+        assert_eq!(sep.attrs, json!({}));
     }
 
     #[test]

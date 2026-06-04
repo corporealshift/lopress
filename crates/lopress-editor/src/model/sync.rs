@@ -77,6 +77,24 @@ pub fn canonicalize_body(body: &BlockBody) -> BlockBody {
                 })
                 .collect(),
         ),
+        BlockBody::Table(data) => BlockBody::Table(crate::model::types::TableData {
+            align: data.align.clone(),
+            rows: data
+                .rows
+                .iter()
+                .map(|row| crate::model::types::TableRow {
+                    id: row.id,
+                    cells: row
+                        .cells
+                        .iter()
+                        .map(|cell| crate::model::types::TableCell {
+                            id: cell.id,
+                            runs: canonicalize_runs(&cell.runs),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }),
         BlockBody::Code(text) => BlockBody::Code(text.clone()),
         BlockBody::Opaque(value) => BlockBody::Opaque(value.clone()),
     }

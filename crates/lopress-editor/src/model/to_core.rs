@@ -112,6 +112,38 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                 text: Some(text.clone()),
             }
         }
+        BlockBody::Table(data) => {
+            let align: Vec<Value> = data
+                .align
+                .iter()
+                .map(|a| Value::String(a.as_str().to_string()))
+                .collect();
+            let rows: Vec<Block> = data
+                .rows
+                .iter()
+                .map(|row| Block {
+                    r#type: "table_row".into(),
+                    attrs: empty_attrs(),
+                    children: row
+                        .cells
+                        .iter()
+                        .map(|cell| Block {
+                            r#type: "table_cell".into(),
+                            attrs: empty_attrs(),
+                            children: vec![],
+                            text: Some(serialize_inline(&cell.runs)),
+                        })
+                        .collect(),
+                    text: None,
+                })
+                .collect();
+            Block {
+                r#type: core_type.to_string(),
+                attrs: json!({ "align": align }),
+                children: rows,
+                text: None,
+            }
+        }
         // Other body shapes belong to native types not yet migrated; emit a
         // typed block carrying the attrs rather than panicking.
         _ => Block {

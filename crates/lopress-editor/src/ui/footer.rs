@@ -155,6 +155,13 @@ fn block_word_count(b: &EditorBlock) -> usize {
             .flat_map(|it| it.runs.iter())
             .map(|r| r.text.split_whitespace().count())
             .sum(),
+        BlockBody::Table(data) => data
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter())
+            .flat_map(|cell| cell.runs.iter())
+            .map(|r| r.text.split_whitespace().count())
+            .sum(),
         BlockBody::Opaque(_) => 0,
     }
 }

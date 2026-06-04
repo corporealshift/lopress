@@ -1,0 +1,11 @@
+# Built-in "base" plugin: the separator block (horizontal rule / thematic
+# break), claiming the native core `separator` type. Embedded at compile time
+# via include_str! — see load_base_plugins.
+name    = "lopress-separator"
+version = "0.1.0"
+
+[[blocks]]
+name    = "separator"
+editor  = "separator"
+native  = "separator"
+builtin = true

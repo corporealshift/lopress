@@ -22,7 +22,12 @@ pub fn focus_block_for(action: &BlockAction) -> Option<BlockId> {
         | BlockAction::MergeWithPrev { block_id }
         | BlockAction::ChangeType { block_id, .. }
         | BlockAction::EditAttrs { block_id, .. }
-        | BlockAction::Move { block_id, .. } => Some(*block_id),
+        | BlockAction::Move { block_id, .. }
+        | BlockAction::TableInsertRow { block_id, .. }
+        | BlockAction::TableDeleteRow { block_id, .. }
+        | BlockAction::TableInsertColumn { block_id, .. }
+        | BlockAction::TableDeleteColumn { block_id, .. }
+        | BlockAction::TableSetAlign { block_id, .. } => Some(*block_id),
         BlockAction::InsertAfter { new_block, .. } => Some(new_block.id),
         BlockAction::Delete { .. }
         | BlockAction::OpenSlashMenu { .. }

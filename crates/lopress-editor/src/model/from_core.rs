@@ -156,6 +156,8 @@ fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         Some("list") => native_list_from_core(b, decl),
         Some("code") => native_code_from_core(b, decl),
         Some("image") => native_image_from_core(b, decl),
+        Some("separator") => EditorBlock::separator(),
+        Some("table") => native_table_from_core(b),
         _ => EditorBlock::opaque(
             b.r#type.clone(),
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
@@ -262,5 +264,60 @@ fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
             editor: decl.editor.as_deref().map(Rc::from),
             native: decl.native.as_deref().map(Rc::from),
         }),
+    }
+}
+
+/// Build a table `EditorBlock` from a core `table` block. A well-formed table
+/// has only `table_row` children, each with only `table_cell` children whose
+/// content is inline text. A malformed table degrades to `Opaque` so it
+/// round-trips verbatim (mirrors `native_list_from_core`).
+fn native_table_from_core(b: &Block) -> EditorBlock {
+    use crate::model::types::{Align, TableCell, TableData, TableRow};
+
+    let align: Vec<Align> = b
+        .attrs
+        .get("align")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|v| Align::from_str_lenient(v.as_str().unwrap_or("none")))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let rows: Option<Vec<TableRow>> = b
+        .children
+        .iter()
+        .map(|row| {
+            if row.r#type != "table_row" {
+                return None;
+            }
+            let cells: Option<Vec<TableCell>> = row
+                .children
+                .iter()
+                .map(|cell| {
+                    if cell.r#type != "table_cell" || !cell.children.is_empty() {
+                        return None;
+                    }
+                    Some(TableCell {
+                        id: BlockId::new(),
+                        runs: parse_inline(cell.text.as_deref().unwrap_or("")),
+                    })
+                })
+                .collect();
+            cells.map(|cells| TableRow {
+                id: BlockId::new(),
+                cells,
+            })
+        })
+        .collect();
+
+    match rows {
+        // A table needs at least one row (the header).
+        Some(rows) if !rows.is_empty() => EditorBlock::table(TableData { align, rows }),
+        _ => EditorBlock::opaque(
+            b.r#type.clone(),
+            serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+        ),
     }
 }

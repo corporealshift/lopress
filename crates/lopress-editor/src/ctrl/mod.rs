@@ -13,7 +13,7 @@ use crossbeam_channel::Sender;
 use serde::Deserialize;
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorDoc, InlineRun};
+use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun};
 
 // ── Public handle ─────────────────────────────────────────────────────────────
 
@@ -48,6 +48,10 @@ pub(crate) enum CtrlAction {
         block_id: u64,
         new_kind: CtrlBlockKind,
     },
+    InsertAfter {
+        block_id: u64,
+        new_block: CtrlNewBlock,
+    },
     EditInline {
         block_id: u64,
         new_runs: Vec<InlineRun>,
@@ -60,6 +64,27 @@ pub(crate) enum CtrlAction {
         block_id: u64,
         new_attrs: serde_json::Map<String, serde_json::Value>,
     },
+    TableInsertRow {
+        block_id: u64,
+        at: usize,
+    },
+    TableDeleteRow {
+        block_id: u64,
+        row: usize,
+    },
+    TableInsertColumn {
+        block_id: u64,
+        at: usize,
+    },
+    TableDeleteColumn {
+        block_id: u64,
+        col: usize,
+    },
+    TableSetAlign {
+        block_id: u64,
+        col: usize,
+        align: CtrlAlign,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +94,26 @@ pub(crate) enum CtrlBlockKind {
     Heading { level: u8 },
     Code { lang: String },
     List { ordered: bool },
+    Table,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) enum CtrlAlign {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) enum CtrlNewBlock {
+    Separator,
+    Table {
+        #[serde(default)]
+        rows: usize,
+        #[serde(default)]
+        cols: usize,
+    },
 }
 
 impl CtrlAction {
@@ -104,8 +149,36 @@ impl CtrlAction {
                         lang: Rc::from(lang),
                     },
                     CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
+                    CtrlBlockKind::Table => BlockKind::Table,
                 },
             },
+            CtrlAction::InsertAfter {
+                block_id,
+                new_block,
+            } => {
+                let anchor = find(doc, block_id)?;
+                let new_editor_block = match new_block {
+                    CtrlNewBlock::Separator => EditorBlock::separator(),
+                    CtrlNewBlock::Table { rows, cols } => {
+                        let empty_cell = || crate::model::types::TableCell {
+                            id: BlockId::new(),
+                            runs: vec![],
+                        };
+                        let empty_row = || crate::model::types::TableRow {
+                            id: BlockId::new(),
+                            cells: (0..cols).map(|_| empty_cell()).collect(),
+                        };
+                        EditorBlock::table(crate::model::types::TableData {
+                            align: vec![crate::model::types::Align::None; cols],
+                            rows: (0..rows).map(|_| empty_row()).collect(),
+                        })
+                    }
+                };
+                BlockAction::InsertAfter {
+                    anchor,
+                    new_block: Box::new(new_editor_block),
+                }
+            }
             CtrlAction::EditInline { block_id, new_runs } => BlockAction::EditBlockBody {
                 block_id: find(doc, block_id)?,
                 new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
@@ -123,6 +196,39 @@ impl CtrlAction {
                 block_id: find(doc, block_id)?,
                 new_attrs: Box::new(new_attrs),
             },
+            CtrlAction::TableInsertRow { block_id, at } => BlockAction::TableInsertRow {
+                block_id: find(doc, block_id)?,
+                at,
+            },
+            CtrlAction::TableDeleteRow { block_id, row } => BlockAction::TableDeleteRow {
+                block_id: find(doc, block_id)?,
+                row,
+            },
+            CtrlAction::TableInsertColumn { block_id, at } => BlockAction::TableInsertColumn {
+                block_id: find(doc, block_id)?,
+                at,
+            },
+            CtrlAction::TableDeleteColumn { block_id, col } => BlockAction::TableDeleteColumn {
+                block_id: find(doc, block_id)?,
+                col,
+            },
+            CtrlAction::TableSetAlign {
+                block_id,
+                col,
+                align,
+            } => {
+                let ctrl_align = match align {
+                    CtrlAlign::None => crate::model::types::Align::None,
+                    CtrlAlign::Left => crate::model::types::Align::Left,
+                    CtrlAlign::Center => crate::model::types::Align::Center,
+                    CtrlAlign::Right => crate::model::types::Align::Right,
+                };
+                BlockAction::TableSetAlign {
+                    block_id: find(doc, block_id)?,
+                    col,
+                    align: ctrl_align,
+                }
+            }
         })
     }
 
@@ -135,9 +241,15 @@ impl CtrlAction {
             | CtrlAction::Delete { block_id }
             | CtrlAction::Move { block_id, .. }
             | CtrlAction::ChangeType { block_id, .. }
+            | CtrlAction::InsertAfter { block_id, .. }
             | CtrlAction::EditInline { block_id, .. }
             | CtrlAction::EditCode { block_id, .. }
-            | CtrlAction::EditAttrs { block_id, .. } => *block_id,
+            | CtrlAction::EditAttrs { block_id, .. }
+            | CtrlAction::TableInsertRow { block_id, .. }
+            | CtrlAction::TableDeleteRow { block_id, .. }
+            | CtrlAction::TableInsertColumn { block_id, .. }
+            | CtrlAction::TableDeleteColumn { block_id, .. }
+            | CtrlAction::TableSetAlign { block_id, .. } => *block_id,
         }
     }
 }
@@ -259,7 +371,16 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                         BlockKind::Code { .. } => "Code".to_string(),
                         BlockKind::List { .. } => "List".to_string(),
                         BlockKind::Image => "Image".to_string(),
+                        BlockKind::Table => "Table".to_string(),
                         BlockKind::Opaque { type_name } => format!("Opaque({type_name})"),
+                    };
+                    serde_json::json!({ "id": id, "kind": kind, "text": text })
+                }
+                BlockBody::Table(data) => {
+                    let text = crate::actions::body_to_flat_text(&BlockBody::Table(data.clone()));
+                    let kind = match &b.kind {
+                        BlockKind::Table => "Table".to_string(),
+                        _ => "Table".to_string(),
                     };
                     serde_json::json!({ "id": id, "kind": kind, "text": text })
                 }

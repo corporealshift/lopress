@@ -10,7 +10,7 @@
 
 use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use crate::ui::blocks::{code_editor, image, list, read_more};
+use crate::ui::blocks::{code_editor, image, list, read_more, separator, table};
 use floem::reactive::RwSignal;
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
@@ -37,7 +37,9 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
         "list" => Some(list_editor_widget),
         "code" => Some(code_editor_widget),
         "more" => Some(read_more::read_more_widget),
+        "separator" => Some(separator::separator_widget),
         "image" => Some(image::image_widget),
+        "table" => Some(table::table_editor_widget),
         _ => None,
     }
 }
@@ -124,5 +126,15 @@ mod tests {
     #[test]
     fn editor_for_resolves_image() {
         assert!(editor_for("image").is_some());
+    }
+
+    #[test]
+    fn editor_for_resolves_separator() {
+        assert!(editor_for("separator").is_some());
+    }
+
+    #[test]
+    fn editor_for_resolves_table() {
+        assert!(editor_for("table").is_some());
     }
 }
