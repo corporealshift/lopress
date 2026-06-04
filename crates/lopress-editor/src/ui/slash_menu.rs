@@ -31,6 +31,8 @@ pub enum SlashChoice {
     Kind(BlockKind),
     ReadMore,
     Image,
+    Separator,
+    Table,
     Plugin { type_name: Rc<str> },
 }
 
@@ -67,6 +69,8 @@ pub fn slash_menu_items() -> Vec<(String, SlashChoice)> {
         ),
         ("Image".to_string(), SlashChoice::Image),
         ("Read more".to_string(), SlashChoice::ReadMore),
+        ("Separator".to_string(), SlashChoice::Separator),
+        ("Table".to_string(), SlashChoice::Table),
     ]
 }
 

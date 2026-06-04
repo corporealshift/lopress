@@ -130,6 +130,18 @@ pub fn editor_pane(
                     SlashChoice::Image => {
                         on_insert_image_for_select(block_id);
                     }
+                    SlashChoice::Separator => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::separator()),
+                        });
+                    }
+                    SlashChoice::Table => {
+                        on_action_for_select(BlockAction::InsertAfter {
+                            anchor: block_id,
+                            new_block: Box::new(EditorBlock::table_default()),
+                        });
+                    }
                     SlashChoice::Plugin { type_name } => {
                         if let Some(item) = inserter_items_for_select
                             .iter()
