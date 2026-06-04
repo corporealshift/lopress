@@ -125,6 +125,12 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
                 }
             }
         }
+        "separator" => {
+            out.push_str("---\n");
+        }
+        "table" => {
+            write_table(out, b);
+        }
         "image" => {
             let src = b.attrs.get("src").and_then(|v| v.as_str()).unwrap_or("");
             let alt = b.attrs.get("alt").and_then(|v| v.as_str()).unwrap_or("");
@@ -165,6 +171,60 @@ fn write_block(out: &mut String, b: &Block, _depth: usize) {
             out.push_str(&b.r#type);
             out.push_str(" -->\n");
         }
+    }
+}
+
+/// Serialize a `table` block to GFM. `children[0]` is the header row; the
+/// alignment delimiter row is derived from `attrs.align`. Pipe characters in
+/// cell text are escaped as `\|`.
+fn write_table(out: &mut String, b: &Block) {
+    let aligns: Vec<&str> = b
+        .attrs
+        .get("align")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|v| v.as_str().unwrap_or("none"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let cell_text = |cell: &Block| -> String {
+        cell.text.as_deref().unwrap_or("").replace('|', "\\|")
+    };
+    let write_row = |out: &mut String, row: &Block| {
+        out.push('|');
+        for cell in &row.children {
+            out.push(' ');
+            out.push_str(&cell_text(cell));
+            out.push_str(" |");
+        }
+        out.push('\n');
+    };
+
+    let mut rows = b.children.iter();
+    // Header row.
+    let Some(header) = rows.next() else {
+        return;
+    };
+    write_row(out, header);
+    // Alignment delimiter row — one entry per header column.
+    out.push('|');
+    for i in 0..header.children.len() {
+        let token = match aligns.get(i).copied().unwrap_or("none") {
+            "left" => ":---",
+            "right" => "---:",
+            "center" => ":---:",
+            _ => "---",
+        };
+        out.push(' ');
+        out.push_str(token);
+        out.push_str(" |");
+    }
+    out.push('\n');
+    // Body rows.
+    for row in rows {
+        write_row(out, row);
     }
 }
 
@@ -226,6 +286,42 @@ mod tests {
         let s = serialize(&doc);
         assert!(s.contains(r#"<!-- lopress:video {"src":"a.mp4"} -->"#));
         assert!(s.contains("<!-- /lopress:video -->"));
+    }
+
+    #[test]
+    fn serializes_separator() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block {
+                r#type: "separator".into(),
+                attrs: serde_json::json!({}),
+                children: vec![],
+                text: None,
+            }],
+        };
+        assert_eq!(serialize(&doc), "---\n");
+    }
+
+    #[test]
+    fn separator_roundtrips() {
+        let src = "a\n\n---\n\nb\n";
+        let d = parse(src).unwrap();
+        let once = serialize(&d);
+        let twice = serialize(&parse(&once).unwrap());
+        assert_eq!(once, twice);
+        assert!(once.contains("---\n"));
+    }
+
+    #[test]
+    fn table_roundtrips_with_alignment_and_inline() {
+        let src = "| H1 | H2 |\n| :--- | ---: |\n| a | **b** |\n";
+        let d = parse(src).unwrap();
+        let once = serialize(&d);
+        let reparsed = parse(&once).unwrap();
+        assert_eq!(reparsed.blocks.len(), 1);
+        assert_eq!(reparsed.blocks[0].r#type, "table");
+        // Stable round-trip.
+        assert_eq!(serialize(&reparsed), once);
     }
 
     #[test]
