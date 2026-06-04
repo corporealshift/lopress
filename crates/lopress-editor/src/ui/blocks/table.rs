@@ -189,10 +189,9 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
             );
 
             let is_header = r == 0;
-            let view_for_focus = view.into_any();
-            let view_id = view_for_focus.id();
             let focused_cell_for_click = focused_cell;
-            let cell_view = view_for_focus
+            let cell_view = view
+                .into_any()
                 .style(move |s| {
                     let s = s
                         .border(1.)
@@ -208,9 +207,14 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
                         s
                     }
                 })
+                // Record the active cell for the control strip. Do NOT
+                // `request_focus` on this wrapper: the inner `editor_view`
+                // focuses itself on PointerDown (see `mount_block_editor`), and
+                // focusing the wrapper here would steal keyboard focus from the
+                // editor — making the cell impossible to type into. This mirrors
+                // the list widget, which relies on the same native focus.
                 .on_event(EventListener::PointerDown, move |_| {
                     focused_cell_for_click.set(Some((r, c)));
-                    view_id.request_focus();
                     EventPropagation::Continue
                 });
             cell_views.push(cell_view.into_any());

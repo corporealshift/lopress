@@ -13,9 +13,8 @@ pub mod toolbar;
 pub mod welcome;
 
 use floem::event::{Event, EventListener};
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, empty, h_stack, label, stack, Decorators};
+use floem::views::{dyn_container, h_stack, stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,7 +27,6 @@ use crate::ui::dnd::DndState;
 #[cfg(debug_assertions)]
 use crate::ui::editing::ctrl_wire;
 use crate::ui::editing::new_doc;
-use crate::ui::editing::pane_key;
 use crate::ui::editing::save_pipeline;
 use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
@@ -283,51 +281,26 @@ fn editing_view(
     #[cfg(debug_assertions)]
     let on_action_for_ctrl = on_action.clone();
 
-    // Key the editor-pane rebuild on the *shape* of the doc — block id
-    // sequence + per-block kind tag + plugin presence — not the full
-    // content. Within-block text edits (which fire EditInline →
-    // current_doc.update) must NOT tear down the per-block widgets,
-    // otherwise focus is lost every time the user commits runs (e.g.,
-    // arrow-key navigation between blocks calls commit_runs first;
-    // rebuilding the pane afterwards would orphan focus on the destination
-    // block). The per-block widgets own their own `runs_sig` reactive
-    // copies; structural changes (split, delete, insert, reorder) change
-    // the id list and trigger a rebuild. Block-kind changes (toolbar
-    // P/H1/H2/Code/UL/OL buttons) do too — discriminant comparison covers
-    // Heading(1) vs Heading(2), List{ordered:false} vs ordered:true, etc.
-    let pane_key = pane_key::build_pane_key(current_doc);
-    // Clone `on_insert_image` into the dyn_container closure (same pattern
-    // as on_undo / on_redo) so the editor_pane call site has it.
+    // The editor pane owns its own (stable) `scroll` node and an inner
+    // `dyn_container` that rebuilds the block column on every doc mutation, so
+    // it is mounted ONCE here rather than wrapped in a pane-rebuild
+    // `dyn_container` — that earlier wrapping recreated the `scroll` node on
+    // every edit and reset the scroll offset to the top. The "no document
+    // open" placeholder is handled inside the pane's inner container.
     let on_insert_image_for_pane = Rc::clone(&on_insert_image);
     let inserter_items_for_pane = Rc::clone(&initial_inserter_items);
     let on_action_for_editor = on_action.clone();
-    let editor = dyn_container(pane_key, move |maybe_ids| match maybe_ids {
-        Some(_ids) => match current_doc.with_untracked(|d| d.clone()) {
-            Some(doc) => editor_pane::editor_pane(
-                &doc,
-                on_action_for_editor.clone(),
-                focus_target,
-                slash_menu_open,
-                dnd,
-                current_doc,
-                on_undo.clone(),
-                on_redo.clone(),
-                on_insert_image_for_pane.clone(),
-                inserter_items_for_pane.clone(),
-            )
-            .into_any(),
-            None => empty().into_any(),
-        },
-        None => label(|| "No document open. Pick one from the sidebar.")
-            .style(|s| {
-                s.width_full()
-                    .height_full()
-                    .items_center()
-                    .justify_center()
-                    .color(Color::rgb8(140, 140, 140))
-            })
-            .into_any(),
-    })
+    let editor = editor_pane::editor_pane(
+        current_doc,
+        on_action_for_editor,
+        focus_target,
+        slash_menu_open,
+        dnd,
+        on_undo.clone(),
+        on_redo.clone(),
+        on_insert_image_for_pane,
+        inserter_items_for_pane,
+    )
     .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
     let inspector = inspector_view(current_doc, current_path, on_action.clone());
