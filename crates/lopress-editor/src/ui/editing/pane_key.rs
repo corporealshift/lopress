@@ -24,6 +24,7 @@ pub enum KindTag {
     Code,
     List { ordered: bool },
     Image,
+    Table,
     Opaque,
 }
 
@@ -34,6 +35,7 @@ pub fn kind_tag(k: &BlockKind) -> KindTag {
         BlockKind::Code { .. } => KindTag::Code,
         BlockKind::List { ordered } => KindTag::List { ordered: *ordered },
         BlockKind::Image => KindTag::Image,
+        BlockKind::Table => KindTag::Table,
         BlockKind::Opaque { .. } => KindTag::Opaque,
     }
 }

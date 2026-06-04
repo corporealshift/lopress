@@ -259,7 +259,16 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                         BlockKind::Code { .. } => "Code".to_string(),
                         BlockKind::List { .. } => "List".to_string(),
                         BlockKind::Image => "Image".to_string(),
+                        BlockKind::Table => "Table".to_string(),
                         BlockKind::Opaque { type_name } => format!("Opaque({type_name})"),
+                    };
+                    serde_json::json!({ "id": id, "kind": kind, "text": text })
+                }
+                BlockBody::Table(data) => {
+                    let text = crate::actions::body_to_flat_text(&BlockBody::Table(data.clone()));
+                    let kind = match &b.kind {
+                        BlockKind::Table => "Table".to_string(),
+                        _ => "Table".to_string(),
                     };
                     serde_json::json!({ "id": id, "kind": kind, "text": text })
                 }

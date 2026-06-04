@@ -299,6 +299,7 @@ fn apply_split(
             ))
         }
         BlockBody::Opaque(_) => None,
+        BlockBody::Table(_) => None,
     }
 }
 
@@ -473,6 +474,13 @@ fn apply_change_type(
     // a no-op. These blocks are recoverable via Delete only (the fallback's
     // warning says as much).
     if matches!(block.body, BlockBody::Opaque(_)) {
+        return None;
+    }
+    // A table body has no sensible conversion to another kind, and the kind-
+    // cycler toolbar buttons would otherwise leave a (Paragraph, Table)
+    // mismatch that renders as an empty gap. Treat ChangeType on a table as a
+    // no-op, exactly like the Opaque guard above.
+    if matches!(block.body, BlockBody::Table(_)) {
         return None;
     }
     let old_kind = block.kind.clone();
@@ -666,6 +674,7 @@ fn body_matches_kind(kind: &BlockKind, body: &BlockBody) -> bool {
             BlockBody::Inline(_)
         ) | (BlockKind::Code { .. }, BlockBody::Code(_))
             | (BlockKind::List { .. }, BlockBody::List(_))
+            | (BlockKind::Table, BlockBody::Table(_))
             | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
     )
 }
@@ -675,13 +684,25 @@ fn body_matches_kind(kind: &BlockKind, body: &BlockBody) -> bool {
 /// items are joined with `\n`, `Code` is already flat, and `Opaque` has no
 /// text. Shared between `apply_change_type` / `coerce_body_to_kind` and the
 /// render-layer fallback view so every code path presents the same text.
-pub(crate) fn body_to_flat_text(body: &BlockBody) -> String {
+pub fn body_to_flat_text(body: &BlockBody) -> String {
     match body {
         BlockBody::Inline(runs) => runs.iter().map(|r| r.text.as_str()).collect(),
         BlockBody::Code(text) => text.clone(),
         BlockBody::List(items) => items
             .iter()
             .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        BlockBody::Table(data) => data
+            .rows
+            .iter()
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|c| c.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         BlockBody::Opaque(_) => String::new(),
@@ -706,6 +727,7 @@ fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_))
         | (BlockKind::Code { .. }, BlockBody::Code(_))
         | (BlockKind::List { .. }, BlockBody::List(_))
+        | (BlockKind::Table, BlockBody::Table(_))
         | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
         | (BlockKind::Image, BlockBody::Opaque(_)) => body,
 
@@ -731,6 +753,10 @@ fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
         // Image: body is always Opaque(Null); any mismatch is a programming
         // error — return the body as-is rather than panic.
         (BlockKind::Image, _) => body,
+        // Table: body is always Table; any mismatch is a programming error —
+        // return the body as-is rather than panic. No widget commits a
+        // non-Table body into a Table block.
+        (BlockKind::Table, _) => body,
     }
 }
 
