@@ -128,6 +128,17 @@ pub fn block_toolbar_for(
 
     buttons.push(separator().into_any());
 
+    // Table insert button — distinct from the kind-cycler: it inserts a fresh
+    // table after the focused block rather than converting the block.
+    let on_action_for_table = on_action.clone();
+    let table_btn = button(label(|| "Table".to_string()))
+        .on_event_stop(EventListener::PointerDown, move |_| {
+            on_action_for_table(table_insert_action(block_id));
+        })
+        .style(|s| s.padding_horiz(6.).padding_vert(2.));
+    buttons.push(table_btn.into_any());
+    buttons.push(separator().into_any());
+
     // Delete.
     let on_action_for_del = on_action.clone();
     let del_btn = button(label(|| "x".to_string()))
@@ -323,6 +334,16 @@ fn same_kind(a: &BlockKind, b: &BlockKind) -> bool {
     }
 }
 
+/// The action the toolbar's Table button dispatches: insert a fresh default
+/// table immediately after `block_id`. Extracted so it can be unit-tested
+/// without driving the UI.
+fn table_insert_action(block_id: BlockId) -> BlockAction {
+    BlockAction::InsertAfter {
+        anchor: block_id,
+        new_block: Box::new(crate::model::types::EditorBlock::table_default()),
+    }
+}
+
 fn separator() -> impl IntoView {
     use floem::views::empty;
     empty().style(|s| {
@@ -391,5 +412,18 @@ mod tests {
         assert!(!is_inline_kind(&BlockKind::Opaque {
             type_name: Rc::from("video")
         }));
+    }
+
+    #[test]
+    fn table_button_inserts_a_table_after_block() {
+        let id = BlockId::new();
+        let action = table_insert_action(id);
+        match action {
+            BlockAction::InsertAfter { anchor, new_block } => {
+                assert_eq!(anchor, id);
+                assert!(matches!(new_block.kind, BlockKind::Table));
+            }
+            _ => panic!("expected InsertAfter"),
+        }
     }
 }
