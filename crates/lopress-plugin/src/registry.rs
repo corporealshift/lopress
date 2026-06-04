@@ -72,6 +72,8 @@ impl PluginRegistry {
             include_str!("../../../base_plugins/code/manifest.toml"),
             include_str!("../../../base_plugins/more/manifest.toml"),
             include_str!("../../../base_plugins/image/manifest.toml"),
+            include_str!("../../../base_plugins/separator/manifest.toml"),
+            include_str!("../../../base_plugins/table/manifest.toml"),
         ];
         for src in BASE_MANIFESTS {
             let manifest = parse_manifest_str(src)?;
@@ -156,6 +158,31 @@ native = "list"
         let (_, decl) = reg.native_block("list").expect("list core type claimed");
         assert_eq!(decl.name, "x:list");
         assert!(reg.native_block("heading").is_none());
+    }
+
+    #[test]
+    fn base_plugins_include_separator() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_p, decl) = reg
+            .native_block("separator")
+            .expect("separator native block");
+        assert_eq!(decl.editor.as_deref(), Some("separator"));
+        assert_eq!(decl.native.as_deref(), Some("separator"));
+        assert!(decl.builtin);
+        assert!(decl.attrs.is_empty());
+    }
+
+    #[test]
+    fn base_plugins_include_table() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_p, decl) = reg
+            .native_block("table")
+            .expect("table native block");
+        assert_eq!(decl.editor.as_deref(), Some("table"));
+        assert_eq!(decl.native.as_deref(), Some("table"));
+        assert!(decl.builtin);
     }
 
     #[test]
