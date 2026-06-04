@@ -1,5 +1,5 @@
 //! Editor model round-trip for separator and table blocks.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use lopress_core::parser::parse;
 use lopress_core::serializer::serialize;
