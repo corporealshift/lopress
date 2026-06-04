@@ -247,13 +247,18 @@ fn parse_one(event: Event<'_>, parser: &mut Parser<'_>) -> Result<Option<Block>,
             }
         }
         Event::Start(Tag::Item) => parse_item(parser)?,
+        Event::Rule => Block {
+            r#type: "separator".into(),
+            attrs: json!({}),
+            children: vec![],
+            text: None,
+        },
         Event::Html(_)
         | Event::InlineHtml(_)
         | Event::Text(_)
         | Event::Code(_)
         | Event::SoftBreak
         | Event::HardBreak
-        | Event::Rule
         | Event::TaskListMarker(_)
         | Event::FootnoteReference(_)
         | Event::Start(_)
@@ -591,6 +596,16 @@ after
     fn parses_image_without_title_has_no_caption() {
         let d = parse("![alt](foo.jpg)\n").unwrap();
         assert_eq!(d.blocks[0].attrs, json!({ "src": "foo.jpg", "alt": "alt" }));
+    }
+
+    #[test]
+    fn parses_thematic_break_as_separator() {
+        let d = parse("before\n\n---\n\nafter\n").unwrap();
+        assert_eq!(types(&d.blocks), vec!["paragraph", "separator", "paragraph"]);
+        let sep = &d.blocks[1];
+        assert!(sep.children.is_empty());
+        assert!(sep.text.is_none());
+        assert_eq!(sep.attrs, json!({}));
     }
 
     #[test]
