@@ -196,8 +196,16 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
                     let s = s
                         .border(1.)
                         .border_color(CELL_BORDER)
-                        .padding_horiz(6.)
-                        .padding_vert(4.)
+                        .padding_horiz(8.)
+                        .padding_vert(8.)
+                        // Give rows a comfortable height. The inner editor is a
+                        // fixed single-line height (~20px at the 15px body
+                        // font); without this floor a cell is only ~28px and
+                        // reads as cramped, and an empty cell can collapse
+                        // shorter still. `items_center` keeps the one-line text
+                        // vertically centered in the taller cell.
+                        .min_height(40.)
+                        .items_center()
                         .min_width(80.)
                         .flex_grow(1.0);
                     if is_header {
