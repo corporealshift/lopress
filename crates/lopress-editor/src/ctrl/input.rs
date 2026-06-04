@@ -1,7 +1,8 @@
-#![allow(unsafe_code)]
 // Debug-only input injection: the Win32 SendInput / scan-code / screen-
 // coordinate math inherently needs casts and integer division that the
 // workspace lints forbid in production code.
+#![allow(unsafe_code)]
+// Win32 input injection requires casts and integer division in platform code.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,

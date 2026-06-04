@@ -3,9 +3,7 @@
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing,
-    clippy::string_slice,
-    clippy::missing_panics_doc,
-    clippy::missing_errors_doc
+    clippy::string_slice
 )]
 
 use lopress_gui_host::{BuildStatus, ServeStatus, Session};

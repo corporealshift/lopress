@@ -1,9 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::field_reassign_with_default
-)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 
 //! Round-trip tests for the editor's `from_core` / `to_core` converters.
 //!
@@ -223,10 +218,12 @@ fn empty_document_round_trips() {
 
 #[test]
 fn front_matter_is_preserved() {
-    let mut fm = FrontMatter::default();
-    fm.title = Some("Round Trip".into());
-    fm.tags = vec!["a".into(), "b".into()];
-    fm.draft = true;
+    let fm = FrontMatter {
+        title: Some("Round Trip".into()),
+        tags: vec!["a".into(), "b".into()],
+        draft: true,
+        ..Default::default()
+    };
 
     let core = Document {
         front_matter: fm.clone(),
