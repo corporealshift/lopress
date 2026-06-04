@@ -13,6 +13,7 @@
 # Usage:  bash scripts/check.sh   (or ./scripts/check.sh)
 # Exit:   0 if all three pass, 1 if any fail.
 set -u
+export RUSTFLAGS="${RUSTFLAGS:--Dwarnings}"
 
 # Run from the repo root regardless of where this is invoked from.
 cd "$(dirname "$0")/.." || exit 1
