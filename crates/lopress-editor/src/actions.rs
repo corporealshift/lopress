@@ -7,7 +7,7 @@
 
 use crate::model::sync::canonicalize_body;
 use crate::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
+    Align, BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use serde_json::Value;
 use std::rc::Rc;
@@ -86,6 +86,24 @@ pub enum BlockAction {
     EditFrontMatter {
         new_front_matter: Box<lopress_core::FrontMatter>,
     },
+    /// Insert an empty row at index `at` (0..=rows.len()). New cells match the
+    /// current column count. `at == 0` would insert above the header — callers
+    /// pass `at >= 1`; the apply clamps into the body region defensively.
+    TableInsertRow { block_id: BlockId, at: usize },
+    /// Delete body row `row`. No-op (returns None) for the header row (0) or
+    /// when it is the last remaining body row.
+    TableDeleteRow { block_id: BlockId, row: usize },
+    /// Insert an empty column at index `at` (0..=col_count) across every row,
+    /// with `Align::None`.
+    TableInsertColumn { block_id: BlockId, at: usize },
+    /// Delete column `col` across every row. No-op when it is the last column.
+    TableDeleteColumn { block_id: BlockId, col: usize },
+    /// Set column `col`'s alignment.
+    TableSetAlign {
+        block_id: BlockId,
+        col: usize,
+        align: Align,
+    },
 }
 
 /// Apply one `BlockAction` to the document.
@@ -138,6 +156,23 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         BlockAction::EditFrontMatter { new_front_matter } => {
             apply_edit_front_matter(doc, *new_front_matter)
         }
+        BlockAction::TableInsertRow { block_id, at } => {
+            apply_table_insert_row(doc, block_id, at)
+        }
+        BlockAction::TableDeleteRow { block_id, row } => {
+            apply_table_delete_row(doc, block_id, row)
+        }
+        BlockAction::TableInsertColumn { block_id, at } => {
+            apply_table_insert_column(doc, block_id, at)
+        }
+        BlockAction::TableDeleteColumn { block_id, col } => {
+            apply_table_delete_column(doc, block_id, col)
+        }
+        BlockAction::TableSetAlign {
+            block_id,
+            col,
+            align,
+        } => apply_table_set_align(doc, block_id, col, align),
     }
 }
 
@@ -663,6 +698,156 @@ fn apply_edit_front_matter(
     ))
 }
 
+fn table_body_mut(
+    doc: &mut EditorDoc,
+    id: BlockId,
+) -> Option<&mut crate::model::types::TableData> {
+    let idx = find_idx(doc, id)?;
+    match &mut doc.blocks.get_mut(idx)?.body {
+        BlockBody::Table(data) => Some(data),
+        _ => None,
+    }
+}
+
+fn apply_table_insert_row(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    at: usize,
+) -> Option<(BlockAction, BlockAction)> {
+    use crate::model::types::{BlockId as Bid, TableCell, TableRow};
+    let data = table_body_mut(doc, id)?;
+    let cols = data.align.len();
+    // Never insert above the header row.
+    let at = at.clamp(1, data.rows.len());
+    let new_row = TableRow {
+        id: Bid::new(),
+        cells: (0..cols)
+            .map(|_| TableCell {
+                id: Bid::new(),
+                runs: vec![],
+            })
+            .collect(),
+    };
+    data.rows.insert(at, new_row);
+    Some((
+        BlockAction::TableInsertRow { block_id: id, at },
+        BlockAction::TableDeleteRow {
+            block_id: id,
+            row: at,
+        },
+    ))
+}
+
+fn apply_table_delete_row(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    row: usize,
+) -> Option<(BlockAction, BlockAction)> {
+    let before = {
+        let data = table_body_mut(doc, id)?;
+        if row == 0 || row >= data.rows.len() || data.rows.len() <= 2 {
+            return None;
+        }
+        BlockBody::Table(data.clone())
+    };
+    let data = table_body_mut(doc, id)?;
+    data.rows.remove(row);
+    Some((
+        BlockAction::TableDeleteRow { block_id: id, row },
+        // Inverse: reinsert the exact removed row at the same index. We model
+        // it as a generic body restore so the cells/ids come back intact.
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(before),
+            built_in: true,
+        },
+    ))
+}
+
+fn apply_table_insert_column(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    at: usize,
+) -> Option<(BlockAction, BlockAction)> {
+    use crate::model::types::{Align as A, BlockId as Bid, TableCell};
+    let data = table_body_mut(doc, id)?;
+    let at = at.min(data.align.len());
+    data.align.insert(at, A::None);
+    for row in &mut data.rows {
+        let col = at.min(row.cells.len());
+        row.cells.insert(
+            col,
+            TableCell {
+                id: Bid::new(),
+                runs: vec![],
+            },
+        );
+    }
+    Some((
+        BlockAction::TableInsertColumn { block_id: id, at },
+        BlockAction::TableDeleteColumn {
+            block_id: id,
+            col: at,
+        },
+    ))
+}
+
+fn apply_table_delete_column(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    col: usize,
+) -> Option<(BlockAction, BlockAction)> {
+    let before = {
+        let data = table_body_mut(doc, id)?;
+        if col >= data.align.len() || data.align.len() <= 1 {
+            return None;
+        }
+        BlockBody::Table(data.clone())
+    };
+    let data = table_body_mut(doc, id)?;
+    data.align.remove(col);
+    for row in &mut data.rows {
+        if col < row.cells.len() {
+            row.cells.remove(col);
+        }
+    }
+    Some((
+        BlockAction::TableDeleteColumn { block_id: id, col },
+        BlockAction::EditBlockBody {
+            block_id: id,
+            new_body: Box::new(before),
+            built_in: true,
+        },
+    ))
+}
+
+fn apply_table_set_align(
+    doc: &mut EditorDoc,
+    id: BlockId,
+    col: usize,
+    align: crate::model::types::Align,
+) -> Option<(BlockAction, BlockAction)> {
+    let data = table_body_mut(doc, id)?;
+    let old = *data.align.get(col)?;
+    if old == align {
+        return None;
+    }
+    let slot = data.align.get_mut(col)?;
+    *slot = align;
+    Some((
+        BlockAction::TableSetAlign {
+            block_id: id,
+            col,
+            align,
+        },
+        BlockAction::TableSetAlign {
+            block_id: id,
+            col,
+            align: old,
+        },
+    ))
+}
+
 /// True when `body` is the expected shape for `kind`. Used by the
 /// debug_assert in apply_edit_block_body to distinguish valid from
 /// mismatched commits.
@@ -963,5 +1148,111 @@ mod read_more_guard_tests {
         );
         assert!(second.is_none(), "second marker must be rejected");
         assert_eq!(doc.blocks.len(), 2, "no second marker inserted");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod table_action_tests {
+    use super::*;
+    use crate::model::types::{Align, EditorBlock, EditorDoc};
+
+    fn doc_with_table() -> EditorDoc {
+        EditorDoc {
+            blocks: vec![EditorBlock::table_default()], // 2x2
+            front_matter: lopress_core::FrontMatter::default(),
+        }
+    }
+
+    fn table_data(doc: &EditorDoc) -> crate::model::types::TableData {
+        match &doc.blocks[0].body {
+            BlockBody::Table(d) => d.clone(),
+            _ => panic!("expected table body"),
+        }
+    }
+
+    #[test]
+    fn insert_row_appends_and_undoes() {
+        let mut doc = doc_with_table();
+        let id = doc.blocks[0].id;
+        let (_c, inverse) =
+            apply(&mut doc, BlockAction::TableInsertRow { block_id: id, at: 2 }).unwrap();
+        assert_eq!(table_data(&doc).rows.len(), 3);
+        apply(&mut doc, inverse);
+        assert_eq!(table_data(&doc).rows.len(), 2);
+    }
+
+    #[test]
+    fn delete_row_refuses_header_and_last_body() {
+        let mut doc = doc_with_table(); // header + 1 body row
+        let id = doc.blocks[0].id;
+        // Deleting the header (row 0) is refused.
+        assert!(apply(
+            &mut doc,
+            BlockAction::TableDeleteRow { block_id: id, row: 0 }
+        )
+        .is_none());
+        // Deleting the only body row is refused (must keep >= 1 body row).
+        assert!(apply(
+            &mut doc,
+            BlockAction::TableDeleteRow { block_id: id, row: 1 }
+        )
+        .is_none());
+        assert_eq!(table_data(&doc).rows.len(), 2);
+    }
+
+    #[test]
+    fn insert_and_delete_column_roundtrip() {
+        let mut doc = doc_with_table(); // 2 columns
+        let id = doc.blocks[0].id;
+        let (_c, inv) =
+            apply(&mut doc, BlockAction::TableInsertColumn { block_id: id, at: 2 }).unwrap();
+        assert_eq!(table_data(&doc).align.len(), 3);
+        assert!(table_data(&doc)
+            .rows
+            .iter()
+            .all(|r| r.cells.len() == 3));
+        apply(&mut doc, inv);
+        assert_eq!(table_data(&doc).align.len(), 2);
+        assert!(table_data(&doc)
+            .rows
+            .iter()
+            .all(|r| r.cells.len() == 2));
+    }
+
+    #[test]
+    fn delete_column_refuses_last() {
+        let mut doc = doc_with_table();
+        let id = doc.blocks[0].id;
+        apply(
+            &mut doc,
+            BlockAction::TableDeleteColumn { block_id: id, col: 0 },
+        )
+        .unwrap();
+        assert_eq!(table_data(&doc).align.len(), 1);
+        // Refuse to delete the last remaining column.
+        assert!(apply(
+            &mut doc,
+            BlockAction::TableDeleteColumn { block_id: id, col: 0 }
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn set_align_and_undo() {
+        let mut doc = doc_with_table();
+        let id = doc.blocks[0].id;
+        let (_c, inv) = apply(
+            &mut doc,
+            BlockAction::TableSetAlign {
+                block_id: id,
+                col: 1,
+                align: Align::Center,
+            },
+        )
+        .unwrap();
+        assert_eq!(table_data(&doc).align[1], Align::Center);
+        apply(&mut doc, inv);
+        assert_eq!(table_data(&doc).align[1], Align::None);
     }
 }
