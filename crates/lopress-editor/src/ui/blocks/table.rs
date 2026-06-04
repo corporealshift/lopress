@@ -236,7 +236,13 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
 
     let grid = v_stack_from_iter(row_views).style(|s| s.width_full());
 
-    let strip = control_strip(block_id, on_action.clone(), focused_cell, focus_pub);
+    let strip = control_strip(
+        block_id,
+        on_action.clone(),
+        focused_cell,
+        focus_pub,
+        align.clone(),
+    );
 
     v_stack((strip, grid))
         .style(|s| s.width_full().padding_vert(4.))
@@ -247,15 +253,25 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
 /// cloned into the rebuild closure of `dyn_container`.
 type BtnView = Rc<dyn Fn() -> AnyView>;
 
+/// Highlight fill for the active alignment button (matches the block toolbar).
+const STRIP_ACTIVE_BG: Color = Color::rgb8(210, 220, 240);
+/// Muted text for the "Align:" group label.
+const STRIP_LABEL_FG: Color = Color::rgb8(120, 120, 132);
+
 /// The in-flow control strip: shown when a cell in this table is focused.
+/// `align` is a snapshot of the column alignments at build time; the strip is
+/// rebuilt whenever the table body changes, so it stays current.
 fn control_strip(
     block_id: BlockId,
     on_action: ActionSink,
     focused_cell: FocusedCell,
     focus_pub: FocusPublisher,
+    align: Vec<Align>,
 ) -> AnyView {
+    use floem::text::Weight;
     use floem::views::empty;
 
+    let on_action_align = on_action.clone();
     let mk = move |lbl: &'static str,
                    make_action: Rc<dyn Fn((usize, usize)) -> Option<BlockAction>>|
           -> BtnView {
@@ -278,6 +294,45 @@ fn control_strip(
                     }
                 })
                 .style(|s| s.padding_horiz(6.).padding_vert(1.).font_size(12.))
+                .into_any()
+        })
+    };
+
+    // Alignment button: sets the focused column's alignment, and highlights
+    // when that column already uses `target` (the focused cell's column drives
+    // the active state, so it updates as you move between columns). NB: the
+    // editor cannot visually re-align a cell's live text (Floem's embedded
+    // editor has no text-align), so this highlight is the in-editor signal that
+    // the alignment is set; it is applied to the saved markdown and the built
+    // HTML output.
+    let mk_align = move |lbl: &'static str, target: Align| -> BtnView {
+        let on_action = on_action_align.clone();
+        let align = align.clone();
+        let lbl_owned: Rc<String> = Rc::new(lbl.to_string());
+        Rc::new(move || {
+            let oa = on_action.clone();
+            let align = align.clone();
+            let lbl_str = Rc::clone(&lbl_owned);
+            button(label(move || (*lbl_str).clone()))
+                .action(move || {
+                    if let Some((_, c)) = focused_cell.get_untracked() {
+                        oa(BlockAction::TableSetAlign {
+                            block_id,
+                            col: c,
+                            align: target,
+                        });
+                    }
+                })
+                .style(move |s| {
+                    let s = s.padding_horiz(6.).padding_vert(1.).font_size(12.);
+                    let active =
+                        focused_cell.get().and_then(|(_, c)| align.get(c).copied()) == Some(target);
+                    if active {
+                        s.background(STRIP_ACTIVE_BG).font_weight(Weight::SEMIBOLD)
+                    } else {
+                        s
+                    }
+                })
                 .into_any()
         })
     };
@@ -308,47 +363,27 @@ fn control_strip(
         "− Col",
         Rc::new(move |(_r, c)| Some(BlockAction::TableDeleteColumn { block_id, col: c })),
     );
-    let al_l = mk(
-        "L",
-        Rc::new(move |(_r, c)| {
-            Some(BlockAction::TableSetAlign {
-                block_id,
-                col: c,
-                align: Align::Left,
-            })
-        }),
-    );
-    let al_c = mk(
-        "C",
-        Rc::new(move |(_r, c)| {
-            Some(BlockAction::TableSetAlign {
-                block_id,
-                col: c,
-                align: Align::Center,
-            })
-        }),
-    );
-    let al_r = mk(
-        "R",
-        Rc::new(move |(_r, c)| {
-            Some(BlockAction::TableSetAlign {
-                block_id,
-                col: c,
-                align: Align::Right,
-            })
-        }),
-    );
+    let al_l = mk_align("Left", Align::Left);
+    let al_c = mk_align("Center", Align::Center);
+    let al_r = mk_align("Right", Align::Right);
 
     // Gate the strip to only show when this table holds focus.
     floem::views::dyn_container(
         move || focus_pub.block.get() == Some(block_id),
         move |shown| {
             if shown {
+                let align_label = label(|| "Align:".to_string()).style(|s| {
+                    s.font_size(12.)
+                        .color(STRIP_LABEL_FG)
+                        .padding_horiz(4.)
+                        .items_center()
+                });
                 h_stack((
                     (add_row)(),
                     (del_row)(),
                     (add_col)(),
                     (del_col)(),
+                    align_label.into_any(),
                     (al_l)(),
                     (al_c)(),
                     (al_r)(),
@@ -362,6 +397,7 @@ fn control_strip(
                         .border(1.)
                         .border_color(CELL_BORDER)
                         .border_radius(4.)
+                        .items_center()
                 })
                 .into_any()
             } else {
