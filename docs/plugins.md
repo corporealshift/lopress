@@ -201,6 +201,187 @@ new_tab = { type = "bool",   ui = "checkbox", default = false, label = "Open in 
 <p class="button-wrap"><a class="btn btn-{{ attrs.variant }}" href="{{ attrs.url }}"{% if attrs.new_tab %} target="_blank" rel="noopener"{% endif %}>{{ attrs.text }}</a></p>
 ```
 
+### HTML-template block — Embed (`plugins/embed/`)
+
+A responsive YouTube or Vimeo video embed. For security the iframe host is
+fixed per provider and only the video ID is interpolated.
+
+`plugin.toml`:
+```toml
+# Embed block — a responsive video embed for an allowlisted provider.
+# HTML-template block. For security the iframe host is fixed per provider and
+# only the video ID is interpolated (no free-form iframe src).
+name    = "embed"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:embed"
+template    = "blocks/embed.html"
+title       = "Embed"
+category    = "Embeds"
+description = "Responsive YouTube or Vimeo video embed"
+
+[blocks.attrs]
+provider = { type = "string", ui = "select", options = ["youtube", "vimeo"], default = "youtube", label = "Provider" }
+id       = { type = "string", ui = "text", required = true, label = "Video ID", help = "YouTube: the part after watch?v= (e.g. dQw4w9WgXcQ). Vimeo: the numeric ID (e.g. 76979871)." }
+title    = { type = "string", ui = "text", label = "Title", help = "Accessible title for the embedded player" }
+```
+
+`blocks/embed.html`:
+```html
+<div class="embed embed-{{ attrs.provider }}" style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%">
+{% if attrs.provider == "vimeo" %}
+  <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="https://player.vimeo.com/video/{{ attrs.id }}" title="{{ attrs.title }}" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen></iframe>
+{% else %}
+  <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="https://www.youtube-nocookie.com/embed/{{ attrs.id }}" title="{{ attrs.title }}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+{% endif %}
+</div>
+```
+
+### Markdown-template-form block — Pullquote (`plugins/pullquote/`)
+
+An emphasized quotation with an optional citation. The quote field supports
+markdown and renders through the md→HTML pipeline.
+
+`plugin.toml`:
+```toml
+# Pullquote block — an emphasized quotation with an optional citation.
+# Markdown-template-form block: the quote field is markdown and renders as prose.
+name    = "pullquote"
+version = "0.1.0"
+
+[[blocks]]
+name             = "lopress:pullquote"
+markdown_template = "blocks/pullquote.md"
+title            = "Pullquote"
+category         = "Text"
+description      = "An emphasized quotation with an optional citation"
+
+[blocks.attrs]
+quote = { type = "string", ui = "textarea", required = true, label = "Quote", help = "Supports markdown" }
+cite  = { type = "string", ui = "text", label = "Citation" }
+```
+
+`blocks/pullquote.md`:
+```markdown
+<figure class="pullquote">
+
+{{ quote }}
+
+{% if cite %}<figcaption>— {{ cite }}</figcaption>{% endif %}
+</figure>
+```
+
+### HTML-template block — Spacer (`plugins/spacer/`)
+
+Vertical whitespace of a configurable height. Web-only; ignored in prose exports.
+
+`plugin.toml`:
+```toml
+# Spacer block — vertical whitespace of a configurable height.
+# HTML-template block. Web-only; ignored in prose exports.
+name    = "spacer"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:spacer"
+template    = "blocks/spacer.html"
+title       = "Spacer"
+category    = "Design"
+description = "Vertical whitespace of a configurable height"
+
+[blocks.attrs]
+height = { type = "number", ui = "number", default = 32, label = "Height (px)" }
+```
+
+`blocks/spacer.html`:
+```html
+<div class="spacer" style="height:{{ attrs.height }}px" aria-hidden="true"></div>
+```
+
+### HTML-template block — Audio (`plugins/audio/`)
+
+A self-hosted audio file with native player controls.
+
+`plugin.toml`:
+```toml
+# Audio block — a self-hosted audio file with native player controls.
+# HTML-template block.
+name    = "audio"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:audio"
+template    = "blocks/audio.html"
+title       = "Audio"
+category    = "Media"
+description = "A self-hosted audio file with player controls"
+
+[blocks.attrs]
+src = { type = "string", ui = "text", required = true, label = "Audio URL" }
+```
+
+`blocks/audio.html`:
+```html
+<audio class="audio-block" controls src="{{ attrs.src }}">Your browser does not support the audio element.</audio>
+```
+
+### HTML-template block — Video (`plugins/video/`)
+
+A self-hosted video file with native player controls and an optional poster image.
+
+`plugin.toml`:
+```toml
+# Video block — a self-hosted video file with native player controls.
+# HTML-template block.
+name    = "video"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:video"
+template    = "blocks/video.html"
+title       = "Video"
+category    = "Media"
+description = "A self-hosted video file with player controls"
+
+[blocks.attrs]
+src    = { type = "string", ui = "text", required = true, label = "Video URL" }
+poster = { type = "string", ui = "text", label = "Poster image URL" }
+```
+
+`blocks/video.html`:
+```html
+<video class="video-block" controls style="max-width:100%"{% if attrs.poster %} poster="{{ attrs.poster }}"{% endif %} src="{{ attrs.src }}">Your browser does not support the video element.</video>
+```
+
+### HTML-template block — File / Download (`plugins/file/`)
+
+A download link to an attached file.
+
+`plugin.toml`:
+```toml
+# File block — a download link to an attached file.
+# HTML-template block.
+name    = "file"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:file"
+template    = "blocks/file.html"
+title       = "File"
+category    = "Media"
+description = "A download link to an attached file"
+
+[blocks.attrs]
+url   = { type = "string", ui = "text", required = true, label = "File URL" }
+label = { type = "string", ui = "text", required = true, label = "Link text" }
+```
+
+`blocks/file.html`:
+```html
+<p class="file-download"><a href="{{ attrs.url }}" download>{{ attrs.label }}</a></p>
+```
+
 ---
 
 ## Enabling plugins

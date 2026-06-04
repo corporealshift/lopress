@@ -1,0 +1,14 @@
+# Audio block — a self-hosted audio file with native player controls.
+# HTML-template block.
+name    = "audio"
+version = "0.1.0"
+
+[[blocks]]
+name        = "lopress:audio"
+template    = "blocks/audio.html"
+title       = "Audio"
+category    = "Media"
+description = "A self-hosted audio file with player controls"
+
+[blocks.attrs]
+src = { type = "string", ui = "text", required = true, label = "Audio URL" }

@@ -1,0 +1,15 @@
+# Pullquote block — an emphasized quotation with an optional citation.
+# Markdown-template-form block: the quote field is markdown and renders as prose.
+name    = "pullquote"
+version = "0.1.0"
+
+[[blocks]]
+name             = "lopress:pullquote"
+markdown_template = "blocks/pullquote.md"
+title            = "Pullquote"
+category         = "Text"
+description      = "An emphasized quotation with an optional citation"
+
+[blocks.attrs]
+quote = { type = "string", ui = "textarea", required = true, label = "Quote", help = "Supports markdown" }
+cite  = { type = "string", ui = "text", label = "Citation" }
