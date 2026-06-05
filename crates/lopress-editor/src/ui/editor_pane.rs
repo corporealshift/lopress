@@ -216,11 +216,7 @@ fn block_column(
     } else {
         for (i, b) in doc.blocks.iter().enumerate() {
             rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
-            rows.push(block_view(
-                b,
-                dnd,
-                &env,
-            ));
+            rows.push(block_view(b, dnd, &env));
         }
         rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
     }

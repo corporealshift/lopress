@@ -8,11 +8,10 @@
 //! sized to the visual-line count.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, InlineRun};
+use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
-    build_block_editor, mount_block_editor, ActionSink, CommitClosure,
-    StructuralKey,
+    build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
 use crate::ui::blocks::paragraph::MONO_FAMILY;
 use crate::ui::editing::focus::defer_focus;
@@ -27,6 +26,7 @@ use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
 use floem::views::{empty, h_stack, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Code-specific font size (logical px) for the code body.
 const CODE_FONT_SIZE: usize = 13;
@@ -231,12 +231,7 @@ fn make_code_structural_key(
 /// `InlineRun`), mounts it via `mount_block_editor` with a code-specific
 /// commit closure and structural-key callback, and wraps everything in a
 /// styled frame with a corner lang label.
-pub fn editable_code_view(
-    body: &str,
-    lang: &str,
-    block_id: BlockId,
-    env: &BlockEnv,
-) -> AnyView {
+pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &BlockEnv) -> AnyView {
     let cx = Scope::current();
 
     // Build editor state from a single synthetic InlineRun carrying the body.

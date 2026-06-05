@@ -94,12 +94,8 @@ fn collect_table(
 pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let BlockBody::Table(data) = &block.body else {
         #[cfg(debug_assertions)]
-        eprintln!(
-            "[fallback] table widget: {:?} has non-table body",
-            block.id
-        );
-        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub)
-            .into_any();
+        eprintln!("[fallback] table widget: {:?} has non-table body", block.id);
+        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any();
     };
     let block_id = block.id;
     let on_action = env.on_action.clone();

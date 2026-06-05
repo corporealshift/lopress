@@ -52,44 +52,27 @@ const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246)
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
 /// other kinds remain read-only for now.
-pub fn block_view(
-    block: &EditorBlock,
-    dnd: DndState,
-    env: &BlockEnv,
-) -> AnyView {
+pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
 
     // Plugin blocks take precedence: header strip + attr form + body editor.
     // Built-in dispatch only runs when the block isn't plugin-flagged.
     if block.plugin.is_some() {
-        let plugin_view = plugin::plugin_block_view(
-            block,
-            env,
-        );
+        let plugin_view = plugin::plugin_block_view(block, env);
         return wrap_block(plugin_view, block_id, kind, dnd, env);
     }
 
     let body = match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
-            runs,
-            block.id,
-            env,
-        )
-        .into_any(),
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
-            *level,
-            runs,
-            block.id,
-            env,
-        )
-        .into_any(),
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
-            text,
-            lang,
-            block.id,
-            env,
-        ),
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
+            paragraph::render_paragraph_editable(runs, block.id, env).into_any()
+        }
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
+            heading::render_heading_editable(*level, runs, block.id, env).into_any()
+        }
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+            code_editor::editable_code_view(text, lang, block.id, env)
+        }
         (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => {
             // Opaque blocks load from disk with unknown/removed plugin types.
             // Route through the fallback so they're visible and recoverable,

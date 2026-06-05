@@ -40,8 +40,7 @@ fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
             "[fallback] editor_registry list: {:?} has body {:?}",
             block.id, block.body
         );
-        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub)
-            .into_any();
+        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any();
     };
     let ordered = block
         .plugin
@@ -49,12 +48,7 @@ fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         .and_then(|m| m.attrs.get("ordered"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    list::editable_list_view(
-        items,
-        block.id,
-        ordered,
-        env,
-    )
+    list::editable_list_view(items, block.id, ordered, env)
 }
 
 /// The `editor = "code"` widget. Extracts `body` from the block's
@@ -67,8 +61,7 @@ fn code_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
             "[fallback] editor_registry code: {:?} has body {:?}",
             block.id, block.body
         );
-        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub)
-            .into_any();
+        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any();
     };
     let lang = block
         .plugin
@@ -76,12 +69,7 @@ fn code_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         .and_then(|m| m.attrs.get("lang"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
-    code_editor::editable_code_view(
-        body,
-        lang,
-        block.id,
-        env,
-    )
+    code_editor::editable_code_view(body, lang, block.id, env)
 }
 
 #[cfg(test)]

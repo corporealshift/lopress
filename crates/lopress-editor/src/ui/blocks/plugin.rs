@@ -32,20 +32,14 @@ const FORM_BG: Color = Color::rgb8(250, 250, 252);
 const BORDER: Color = Color::rgb8(220, 215, 235);
 
 /// Build the full plugin block view.
-pub fn plugin_block_view(
-    block: &EditorBlock,
-    env: &BlockEnv,
-) -> AnyView {
+pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let Some(meta) = block.plugin.clone() else {
         // Shouldn't be called for non-plugin blocks; render a placeholder.
         return label(|| "(missing plugin meta)".to_string()).into_any();
     };
 
-    let body = render_body(
-        block,
-        env,
-    );
+    let body = render_body(block, env);
 
     // Builtin (base-plugin) blocks suppress plugin chrome: no header strip,
     // no attr form — they render as plain editable blocks.
@@ -344,10 +338,7 @@ fn attr_select(
     h_stack_from_iter(buttons).style(|s| s.gap(2.)).into_any()
 }
 
-fn render_body(
-    block: &EditorBlock,
-    env: &BlockEnv,
-) -> AnyView {
+fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     use crate::ui::blocks::editor_registry::editor_for;
 
     // Registry path: a manifest `editor` key with a registered widget wins.
@@ -361,32 +352,18 @@ fn render_body(
     // heading, code) still dispatch on the Rust `BlockKind` enum.
     let block_id = block.id;
     match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
-            runs,
-            block_id,
-            env,
-        )
-        .into_any(),
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
-            *level,
-            runs,
-            block_id,
-            env,
-        )
-        .into_any(),
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
-            text,
-            lang,
-            block_id,
-            env,
-        )
-        .into_any(),
-        (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
-            items,
-            block_id,
-            *ordered,
-            env,
-        ),
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
+            paragraph::render_paragraph_editable(runs, block_id, env).into_any()
+        }
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
+            heading::render_heading_editable(*level, runs, block_id, env).into_any()
+        }
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+            code_editor::editable_code_view(text, lang, block_id, env).into_any()
+        }
+        (BlockKind::List { ordered }, BlockBody::List(items)) => {
+            list::editable_list_view(items, block_id, *ordered, env)
+        }
         _ => {
             #[cfg(debug_assertions)]
             eprintln!(

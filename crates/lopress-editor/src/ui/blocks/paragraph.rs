@@ -4,9 +4,7 @@
 
 use crate::model::types::{BlockId, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
-use crate::ui::blocks::inline_editor::{
-    build_block_editor, editable_inline,
-};
+use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline};
 use floem::peniko::Color;
 use floem::reactive::Scope;
 use floem::style::FlexWrap;
@@ -27,10 +25,7 @@ pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
 // `BODY_FONT_SIZE` is a small positive integer-valued constant, so the
 // f32->usize conversion is exact.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn render_paragraph_editable(
     runs: &[InlineRun],
     block_id: BlockId,
@@ -41,13 +36,8 @@ pub fn render_paragraph_editable(
     // The inner editor carries a rigid `height`; the block's vertical padding
     // goes on an outer container so it cannot squeeze the editor's content
     // box (which would let the text overflow into the next block).
-    container(editable_inline(
-        state,
-        block_id,
-        env,
-        true,
-    ))
-    .style(|s| s.width_full().padding_vert(6.))
+    container(editable_inline(state, block_id, env, true))
+        .style(|s| s.width_full().padding_vert(6.))
 }
 
 /// Read-only render of a slice of inline runs as a wrapping flex row.
