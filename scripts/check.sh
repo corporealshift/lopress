@@ -29,6 +29,13 @@ cd "$(dirname "$0")/.." || exit 1
 failed=0
 echo '=== cargo fmt ==='
 cargo fmt --all || failed=1
+echo '=== taplo fmt ==='
+if command -v taplo >/dev/null 2>&1; then
+    taplo fmt --check || failed=1
+else
+    echo "ERROR: taplo not found. Install with: cargo install taplo-cli --locked"
+    failed=1
+fi
 echo '=== cargo clippy ==='
 cargo clippy --workspace --all-targets -- -D warnings || failed=1
 echo '=== suppression justifications ==='
