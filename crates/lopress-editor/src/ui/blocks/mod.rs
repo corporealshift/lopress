@@ -7,6 +7,7 @@
 
 pub mod code_editor;
 pub mod editor_registry;
+pub mod env;
 pub mod fallback;
 pub mod heading;
 pub mod image;
