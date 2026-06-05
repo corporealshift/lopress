@@ -13,9 +13,10 @@
 use crate::actions::{split_item_at_with_id, BlockAction};
 use crate::model::style_span::StyleSpan;
 use crate::model::sync::{canonicalize_body, rope_and_spans_to_runs};
-use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun, ListItem};
+use crate::model::types::{BlockBody, BlockId, InlineRun, ListItem};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
-    build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
+    build_block_editor, mount_block_editor, ActionSink, CommitClosure,
     StructuralKey,
 };
 use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
@@ -112,17 +113,12 @@ fn emit_list_commit(
 }
 
 /// Build the editable list view for a list block.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss)]
 pub fn editable_list_view(
     items: &[ListItem],
     block_id: BlockId,
     ordered: bool,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> AnyView {
     let item_ids: Rc<Vec<BlockId>> = Rc::new(items.iter().map(|it| it.id).collect());
     let count = items.len();
@@ -144,12 +140,7 @@ pub fn editable_list_view(
                 count,
                 Rc::clone(&item_ids),
                 Rc::clone(&handles),
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
+                env,
             );
             let editor_sig_for_overlay = editor_sig;
             let placeholder_overlay = dyn_container(
@@ -194,7 +185,6 @@ pub fn editable_list_view(
 /// batched-commit closure that constructs a complete `BlockBody::List`
 /// from every item's live buffer on demand.
 #[allow(
-    clippy::too_many_arguments,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
@@ -207,12 +197,7 @@ fn list_item_editor(
     item_count: usize,
     item_ids: Rc<Vec<BlockId>>,
     handles: ItemHandles,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> (AnyView, RwSignal<Editor>) {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
@@ -229,13 +214,13 @@ fn list_item_editor(
     // changed). Used by the shared default handler before Ctrl+Z/Y and
     // focus-changing shortcuts.
     let commit_handles = Rc::clone(&handles);
-    let commit_on_action = on_action.clone();
+    let commit_on_action = env.on_action.clone();
     let commit: CommitClosure = Rc::new(move || {
         emit_list_commit(
             &commit_handles,
             list_block_id,
             &commit_on_action,
-            current_doc,
+            env.current_doc,
         );
     });
 
@@ -247,21 +232,14 @@ fn list_item_editor(
         Rc::clone(&item_ids),
         Rc::clone(&handles),
         editor_sig,
-        on_action.clone(),
-        focus_target,
-        current_doc,
+        env,
     );
 
     let view = mount_block_editor(
         state,
         item_id,
         list_block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
+        env,
         commit,
         structural_key,
         /* slash_eligible */ false,
@@ -300,7 +278,6 @@ fn list_item_editor(
 /// isolation behavior table from the spec's section 2: Enter never closes
 /// the list; arrows at list boundaries do nothing; empty first-item
 /// Backspace removes the item (or the list block, when it's the only item).
-#[allow(clippy::too_many_arguments)]
 fn make_list_structural_key(
     list_block_id: BlockId,
     item_index: usize,
@@ -308,12 +285,11 @@ fn make_list_structural_key(
     item_ids: Rc<Vec<BlockId>>,
     handles: ItemHandles,
     editor_sig: RwSignal<Editor>,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    current_doc: RwSignal<Option<EditorDoc>>,
+    env: &BlockEnv,
 ) -> StructuralKey {
     use floem::keyboard::{Key, NamedKey};
 
+    let on_action = env.on_action.clone();
     Rc::new(move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
         let shift = ms.shift();
         let ctrl_or_cmd = ms.control() || ms.meta();
@@ -324,20 +300,20 @@ fn make_list_structural_key(
         if ctrl_or_cmd {
             match &kp.key {
                 KeyInput::Keyboard(Key::Named(NamedKey::Home), _) => {
-                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    emit_list_commit(&handles, list_block_id, &on_action, env.current_doc);
                     let first_id =
-                        current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
+                        env.current_doc.with_untracked(|d| d.as_ref()?.blocks.first().map(|b| b.id));
                     if let Some(id) = first_id {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
                 KeyInput::Keyboard(Key::Named(NamedKey::End), _) => {
-                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    emit_list_commit(&handles, list_block_id, &on_action, env.current_doc);
                     let last_id =
-                        current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
+                        env.current_doc.with_untracked(|d| d.as_ref()?.blocks.last().map(|b| b.id));
                     if let Some(id) = last_id {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
@@ -354,7 +330,7 @@ fn make_list_structural_key(
                 &kp.key,
                 KeyInput::Keyboard(Key::Named(NamedKey::PageDown), _)
             );
-            let target_id = current_doc.with_untracked(|maybe| {
+            let target_id = env.current_doc.with_untracked(|maybe| {
                 let d = maybe.as_ref()?;
                 let i = d.blocks.iter().position(|b| b.id == list_block_id)?;
                 let j = if forward {
@@ -365,8 +341,8 @@ fn make_list_structural_key(
                 d.blocks.get(j).map(|b| b.id)
             });
             if let Some(id) = target_id {
-                emit_list_commit(&handles, list_block_id, &on_action, current_doc);
-                defer_focus(focus_target, id);
+                emit_list_commit(&handles, list_block_id, &on_action, env.current_doc);
+                defer_focus(env.focus_target, id);
             }
             return Some(CommandExecuted::Yes);
         }
@@ -384,7 +360,7 @@ fn make_list_structural_key(
                 let byte_offset =
                     editor_sig.with_untracked(|ed| ed.cursor.with_untracked(|c| c.offset()));
                 let live = collect_items(&handles);
-                commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                commit_live_if_changed(&live, list_block_id, &on_action, env.current_doc);
                 let mut split = live;
                 let new_item_id = BlockId::new();
                 split_item_at_with_id(&mut split, item_index, byte_offset, Some(new_item_id));
@@ -393,7 +369,7 @@ fn make_list_structural_key(
                     new_body: Box::new(BlockBody::List(split)),
                     built_in: true, // Built-in list structural-key split.
                 });
-                defer_focus(focus_target, new_item_id);
+                defer_focus(env.focus_target, new_item_id);
                 Some(CommandExecuted::Yes)
             }
 
@@ -408,7 +384,7 @@ fn make_list_structural_key(
                 if item_index > 0 {
                     // Commit pending typing first (separate undo entry),
                     // then merge this item into the previous one.
-                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    commit_live_if_changed(&live, list_block_id, &on_action, env.current_doc);
                     let mut merged = live;
                     let cur = merged.remove(item_index);
                     if let Some(prev) = merged.get_mut(item_index - 1) {
@@ -421,7 +397,7 @@ fn make_list_structural_key(
                         built_in: true, // Built-in list structural-key Backspace.
                     });
                     if let Some(id) = prev_id {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                     return Some(CommandExecuted::Yes);
                 }
@@ -444,7 +420,7 @@ fn make_list_structural_key(
                 } else {
                     // Empty first item with siblings — commit pending
                     // typing in the other items, then drop the empty item.
-                    commit_live_if_changed(&live, list_block_id, &on_action, current_doc);
+                    commit_live_if_changed(&live, list_block_id, &on_action, env.current_doc);
                     let mut without_first = live;
                     without_first.remove(0);
                     let new_first_id = without_first.first().map(|it| it.id);
@@ -454,7 +430,7 @@ fn make_list_structural_key(
                         built_in: true, // Built-in list structural-key Backspace empty.
                     });
                     if let Some(id) = new_first_id {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                 }
                 Some(CommandExecuted::Yes)
@@ -470,9 +446,9 @@ fn make_list_structural_key(
                     return None; // within-item nav — default handler
                 }
                 if item_index > 0 {
-                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    emit_list_commit(&handles, list_block_id, &on_action, env.current_doc);
                     if let Some(id) = item_ids.get(item_index - 1).copied() {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                     Some(CommandExecuted::Yes)
                 } else {
@@ -492,9 +468,9 @@ fn make_list_structural_key(
                     return None;
                 }
                 if item_index + 1 < item_count {
-                    emit_list_commit(&handles, list_block_id, &on_action, current_doc);
+                    emit_list_commit(&handles, list_block_id, &on_action, env.current_doc);
                     if let Some(id) = item_ids.get(item_index + 1).copied() {
-                        defer_focus(focus_target, id);
+                        defer_focus(env.focus_target, id);
                     }
                     Some(CommandExecuted::Yes)
                 } else {
