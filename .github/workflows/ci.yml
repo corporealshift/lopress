@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded in-progress runs for the same branch/PR. MUST be at the
+# workflow level: a job-level `concurrency` on the matrix `test` job makes the
+# three OS legs share one group and cancel each other (only the last survives).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
@@ -12,9 +19,6 @@ env:
 jobs:
   test:
     timeout-minutes: 30
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-      cancel-in-progress: true
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
