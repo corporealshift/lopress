@@ -376,6 +376,7 @@ mod label_tests {
     #[test]
     fn label_prefers_decl_label_over_name() {
         let decl = AttrDecl {
+            name: "field_name".to_string(),
             kind: AttrType::String,
             required: false,
             default: None,
@@ -394,6 +395,7 @@ mod label_tests {
     #[test]
     fn label_falls_back_to_name_when_none() {
         let decl = AttrDecl {
+            name: "field_name".to_string(),
             kind: AttrType::String,
             required: false,
             default: None,
@@ -410,6 +412,7 @@ mod label_tests {
     #[test]
     fn help_is_presented_when_set() {
         let decl = AttrDecl {
+            name: "field_name".to_string(),
             kind: AttrType::String,
             required: false,
             default: None,
