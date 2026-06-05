@@ -1,11 +1,11 @@
 # Built-in "base" plugin: the GFM table block, claiming the native core
 # `table` type. Embedded at compile time via include_str! — see
 # load_base_plugins.
-name    = "lopress-table"
+name = "lopress-table"
 version = "0.1.0"
 
 [[blocks]]
-name    = "table"
-editor  = "table"
-native  = "table"
+name = "table"
+editor = "table"
+native = "table"
 builtin = true

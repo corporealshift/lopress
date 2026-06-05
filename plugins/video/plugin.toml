@@ -1,15 +1,15 @@
 # Video block — a self-hosted video file with native player controls.
 # HTML-template block.
-name    = "video"
+name = "video"
 version = "0.1.0"
 
 [[blocks]]
-name        = "lopress:video"
-template    = "blocks/video.html"
-title       = "Video"
-category    = "Media"
+name = "lopress:video"
+template = "blocks/video.html"
+title = "Video"
+category = "Media"
 description = "A self-hosted video file with player controls"
 
 [blocks.attrs]
-src    = { type = "string", ui = "text", required = true, label = "Video URL" }
+src = { type = "string", ui = "text", required = true, label = "Video URL" }
 poster = { type = "string", ui = "text", label = "Poster image URL" }

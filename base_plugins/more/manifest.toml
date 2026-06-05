@@ -1,9 +1,9 @@
 # Built-in "base" plugin: the read-more marker. Embedded at compile time via
 # include_str! — see PluginRegistry::load_base_plugins.
-name    = "lopress-more"
+name = "lopress-more"
 version = "0.1.0"
 
 [[blocks]]
-name    = "lopress:more"
-editor  = "more"
+name = "lopress:more"
+editor = "more"
 builtin = true

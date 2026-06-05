@@ -1,13 +1,13 @@
 # Spacer block — vertical whitespace of a configurable height.
 # HTML-template block. Web-only; ignored in prose exports.
-name    = "spacer"
+name = "spacer"
 version = "0.1.0"
 
 [[blocks]]
-name        = "lopress:spacer"
-template    = "blocks/spacer.html"
-title       = "Spacer"
-category    = "Design"
+name = "lopress:spacer"
+template = "blocks/spacer.html"
+title = "Spacer"
+category = "Design"
 description = "Vertical whitespace of a configurable height"
 
 [blocks.attrs]
