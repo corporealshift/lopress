@@ -30,7 +30,7 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
     }
 }
 
-/// The `editor = "list"` widget. Adapts `EditorContext` to the list view:
+/// The `editor = "list"` widget. Adapts the block and env to the list view:
 /// pulls items from the block body and reads `ordered` from the manifest-
 /// driven `PluginMeta.attrs`, not from the `BlockKind::List` enum.
 fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {

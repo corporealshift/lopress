@@ -2,7 +2,7 @@
 //! caption fields. State lives in `PluginMeta.attrs`; edits emit EditAttrs.
 //!
 //! Per the Floem image-view soft-spot resolution (the pinned Floem 0.2
-//! `img()` widget cannot receive raw bytes from `EditorContext` which lacks
+//! `img()` widget cannot receive raw bytes from a context which lacks
 //! a workspace / images_dir path), the preview renders as a bordered
 //! placeholder showing the filename and alt text — not a real image.
 
