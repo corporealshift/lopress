@@ -33,7 +33,11 @@ fn editor_block_constructors() {
     } else {
         panic!("expected Inline body");
     }
-    assert!(p.plugin.is_none());
+    let meta = p.plugin.as_ref().expect("paragraph must carry PluginMeta");
+    assert_eq!(meta.block_type_name.as_ref(), "paragraph");
+    assert_eq!(meta.native.as_deref(), Some("paragraph"));
+    assert!(meta.builtin);
+    assert!(meta.attrs.is_empty());
 }
 
 #[test]

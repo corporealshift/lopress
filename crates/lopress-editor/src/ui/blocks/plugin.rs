@@ -15,7 +15,7 @@ use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::ActionSink;
-use crate::ui::blocks::{code_editor, heading, list, paragraph};
+use crate::ui::blocks::{code_editor, list};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -348,16 +348,10 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         }
     }
 
-    // Fallback: editor keys not yet migrated to the registry (paragraph,
-    // heading, code) still dispatch on the Rust `BlockKind` enum.
+    // Fallback: editor keys not yet migrated to the registry (code) still
+    // dispatch on the Rust `BlockKind` enum.
     let block_id = block.id;
     match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            paragraph::render_paragraph_editable(runs, block_id, env).into_any()
-        }
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading_editable(*level, runs, block_id, env).into_any()
-        }
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
             code_editor::editable_code_view(text, lang, block_id, env).into_any()
         }

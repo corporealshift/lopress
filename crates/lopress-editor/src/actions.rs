@@ -530,13 +530,23 @@ fn apply_change_type(
     match (&new_kind, &block.body) {
         // ── To Inline (Paragraph / Heading) ──────────────────────────────
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_runs)) => {
-            // Body shape already matches — just update kind.
+            // Body shape already matches — just update kind and stamp the
+            // canonical PluginMeta so the block routes through the plugin path.
             block.kind = new_kind.clone();
+            block.plugin = Some(match &new_kind {
+                BlockKind::Paragraph => PluginMeta::paragraph(),
+                BlockKind::Heading(level) => PluginMeta::heading(*level),
+                _ => unreachable!(),
+            });
         }
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Code(text)) => {
             block.kind = new_kind.clone();
             block.body = BlockBody::Inline(vec![InlineRun::plain(text.clone())]);
-            block.plugin = None;
+            block.plugin = Some(match &new_kind {
+                BlockKind::Paragraph => PluginMeta::paragraph(),
+                BlockKind::Heading(level) => PluginMeta::heading(*level),
+                _ => unreachable!(),
+            });
         }
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::List(items)) => {
             block.kind = new_kind.clone();
@@ -549,7 +559,11 @@ fn apply_change_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             block.body = BlockBody::Inline(vec![InlineRun::plain(text)]);
-            block.plugin = None;
+            block.plugin = Some(match &new_kind {
+                BlockKind::Paragraph => PluginMeta::paragraph(),
+                BlockKind::Heading(level) => PluginMeta::heading(*level),
+                _ => unreachable!(),
+            });
         }
 
         // ── To Code ──────────────────────────────────────────────────────

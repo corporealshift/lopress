@@ -925,7 +925,9 @@ fn change_type_code_to_paragraph_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "fn main() {}"),
         "body must be Inline with the original code text"
     );
-    assert!(b.plugin.is_none(), "plugin must be cleared for Paragraph");
+    let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+    assert_eq!(meta.block_type_name.as_ref(), "paragraph");
+    assert_eq!(meta.native.as_deref(), Some("paragraph"));
 }
 
 #[test]
@@ -946,7 +948,10 @@ fn change_type_code_to_heading_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "print('hello')"),
         "body must be Inline with the original code text"
     );
-    assert!(b.plugin.is_none(), "plugin must be cleared for Heading");
+    let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+    assert_eq!(meta.block_type_name.as_ref(), "heading");
+    assert_eq!(meta.native.as_deref(), Some("heading"));
+    assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(2));
 }
 
 #[test]
@@ -1040,7 +1045,9 @@ fn change_type_list_to_paragraph_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first item"),
         "body must be Inline with flattened list item text"
     );
-    assert!(b.plugin.is_none(), "plugin must be cleared for Paragraph");
+    let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+    assert_eq!(meta.block_type_name.as_ref(), "paragraph");
+    assert_eq!(meta.native.as_deref(), Some("paragraph"));
 }
 
 #[test]
@@ -1070,7 +1077,10 @@ fn change_type_list_to_heading_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first\nsecond"),
         "body must be Inline with joined list item texts"
     );
-    assert!(b.plugin.is_none(), "plugin must be cleared for Heading");
+    let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+    assert_eq!(meta.block_type_name.as_ref(), "heading");
+    assert_eq!(meta.native.as_deref(), Some("heading"));
+    assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(3));
 }
 
 #[test]
