@@ -145,13 +145,14 @@ pub fn editable_inline(
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
     let on_action_for_commit = env.on_action.clone();
+    let current_doc = env.current_doc;
     let commit: CommitClosure = Rc::new(move || {
         // Suppress the commit when the block's kind is no longer inline-bodied.
         // A ChangeType swaps the kind from Paragraph/Heading to Code/List
         // while this editor is still mounted; the FocusLost that follows
         // would emit a stale EditBlockBody{Inline} that overwrites the
         // correct body shape for Code/List blocks.
-        let should_commit = env.current_doc.with_untracked(|maybe| {
+        let should_commit = current_doc.with_untracked(|maybe| {
             maybe.as_ref().and_then(|doc| {
                 doc.blocks
                     .iter()
@@ -200,15 +201,12 @@ pub fn mount_block_editor(
     let style_rev = state.style_rev;
     let link_url_sig = state.link_url_sig;
 
-    let on_action_for_key = env.on_action.clone();
     let commit_for_key = _commit;
     let commit_on_focus_lost = Rc::clone(&commit_for_key);
 
     // Capture env fields into owned/copy types so the closures outlive `env`.
     let focus_target = env.focus_target;
     let focus_pub = env.focus_pub;
-    let on_undo = env.on_undo.clone();
-    let on_redo = env.on_redo.clone();
     let handle_on_action = env.on_action.clone();
     let handle_current_doc = env.current_doc;
     let handle_focus_target = env.focus_target;
@@ -401,6 +399,10 @@ pub fn mount_block_editor(
 
 // ── Key handler ──────────────────────────────────────────────────────────────
 
+// Internal key dispatcher; many params are needed to drive key processing
+// (editor state, spans, style revision, block id, action sink, focus target,
+// doc signal, undo/redo, commit closure, slash eligibility, link URL sig).
+#[allow(clippy::too_many_arguments)]
 fn handle_key(
     kp: &KeyPress,
     ms: floem::keyboard::Modifiers,
