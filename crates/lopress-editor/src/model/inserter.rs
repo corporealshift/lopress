@@ -177,6 +177,7 @@ mod tests {
         attrs.insert(
             "foo".to_string(),
             AttrDecl {
+                name: "foo".to_string(),
                 kind: AttrType::String,
                 required: false,
                 default: Some(Value::String("bar".to_string())),
@@ -303,6 +304,7 @@ mod tests {
         attrs.insert(
             "foo".to_string(),
             AttrDecl {
+                name: "foo".to_string(),
                 kind: AttrType::String,
                 required: false,
                 default: Some(Value::String("bar".to_string())),
@@ -315,6 +317,7 @@ mod tests {
         attrs.insert(
             "baz".to_string(),
             AttrDecl {
+                name: "baz".to_string(),
                 kind: AttrType::Bool,
                 required: false,
                 default: None,

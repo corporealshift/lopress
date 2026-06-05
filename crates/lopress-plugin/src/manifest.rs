@@ -71,6 +71,14 @@ pub enum AttrType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AttrDecl {
+    /// The field name (the TOML key under `[blocks.attrs]`).
+    ///
+    /// Populated at parse time from the map key; it is NOT a TOML field
+    /// itself, so serde must not expect it. `#[serde(skip)]` gives it
+    /// `Default::default()` (= `""`) after deserialization, which the
+    /// parse functions overwrite for every attr.
+    #[serde(skip)]
+    pub name: String,
     #[serde(rename = "type")]
     pub kind: AttrType,
     #[serde(default)]
@@ -103,27 +111,43 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
     Ok(())
 }
 
+/// Populate `AttrDecl.name` for every attr in every block.
+///
+/// The name is the TOML key under `[blocks.attrs]` — it is not a value
+/// field and is never serialized. This must run after every deserialize
+/// path so that consumers (registry, editor, tests) always see populated
+/// names.
+fn populate_attr_names(manifest: &mut PluginManifest) {
+    for block in &mut manifest.blocks {
+        for (key, decl) in &mut block.attrs {
+            decl.name = key.clone();
+        }
+    }
+}
+
 pub fn parse_manifest(path: &Path) -> Result<PluginManifest, PluginError> {
     let src = std::fs::read_to_string(path).map_err(|source| PluginError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let manifest: PluginManifest = toml::from_str(&src).map_err(|e| PluginError::Manifest {
+    let mut manifest: PluginManifest = toml::from_str(&src).map_err(|e| PluginError::Manifest {
         path: path.to_path_buf(),
         message: e.to_string(),
     })?;
     validate_manifest(&manifest)?;
+    populate_attr_names(&mut manifest);
     Ok(manifest)
 }
 
 /// Parse a manifest from an in-memory TOML string. Used for base plugins
 /// embedded via `include_str!`, which have no path on disk.
 pub fn parse_manifest_str(src: &str) -> Result<PluginManifest, PluginError> {
-    let manifest: PluginManifest = toml::from_str(src).map_err(|e| PluginError::Manifest {
+    let mut manifest: PluginManifest = toml::from_str(src).map_err(|e| PluginError::Manifest {
         path: std::path::PathBuf::from("<embedded>"),
         message: e.to_string(),
     })?;
     validate_manifest(&manifest)?;
+    populate_attr_names(&mut manifest);
     Ok(manifest)
 }
 
@@ -403,5 +427,25 @@ template = "blocks/video.html"
         assert!(b.title.is_none());
         assert!(b.description.is_none());
         assert!(b.category.is_none());
+    }
+
+    #[test]
+    fn attr_decl_name_populated_from_toml_key() {
+        let src = r#"
+name = "video"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:video"
+template = "blocks/video.html"
+
+[blocks.attrs]
+src      = { type = "string", required = true,  ui = "text" }
+autoplay = { type = "bool",   default  = false, ui = "checkbox" }
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        let b = &m.blocks[0];
+        assert_eq!(b.attrs["src"].name, "src");
+        assert_eq!(b.attrs["autoplay"].name, "autoplay");
     }
 }
