@@ -10,7 +10,9 @@
 
 use crate::model::types::{BlockBody, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
-use crate::ui::blocks::{code_editor, heading, image, list, paragraph, read_more, separator, table};
+use crate::ui::blocks::{
+    code_editor, heading, image, list, paragraph, read_more, separator, table,
+};
 use floem::{AnyView, IntoView};
 
 /// A built-in editor widget constructor. A plain `fn` pointer so the registry

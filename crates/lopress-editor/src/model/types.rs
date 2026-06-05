@@ -183,7 +183,10 @@ impl PluginMeta {
     /// is suppressed.
     pub fn heading(level: u8) -> Self {
         let mut attrs = serde_json::Map::new();
-        attrs.insert("level".to_string(), Value::Number(serde_json::Number::from(level)));
+        attrs.insert(
+            "level".to_string(),
+            Value::Number(serde_json::Number::from(level)),
+        );
         Self {
             block_type_name: Rc::from("heading"),
             attrs,
@@ -466,10 +469,7 @@ mod paragraph_heading_meta_tests {
         assert_eq!(meta.editor.as_deref(), Some("heading"));
         assert_eq!(meta.native.as_deref(), Some("heading"));
         assert!(meta.builtin);
-        assert_eq!(
-            meta.attrs.get("level").and_then(Value::as_u64),
-            Some(3)
-        );
+        assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(3));
     }
 }
 

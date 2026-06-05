@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::expect_used
+)]
 
 use lopress_editor::model::types::*;
 use serde_json::json;

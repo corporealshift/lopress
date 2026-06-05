@@ -503,10 +503,7 @@ fn paragraph_round_trips_via_native_path() {
 
     // Sanity: the editor classifies it correctly.
     for b in &editor.blocks {
-        assert!(
-            b.plugin.is_some(),
-            "loaded paragraph must carry PluginMeta"
-        );
+        assert!(b.plugin.is_some(), "loaded paragraph must carry PluginMeta");
         let meta = b.plugin.as_ref().unwrap();
         assert_eq!(meta.block_type_name.as_ref(), "paragraph");
         assert_eq!(meta.native.as_deref(), Some("paragraph"));
@@ -527,10 +524,7 @@ fn heading_round_trips_via_native_path() {
     let editor = doc_from_core(&core, &registry);
 
     for b in &editor.blocks {
-        assert!(
-            b.plugin.is_some(),
-            "loaded heading must carry PluginMeta"
-        );
+        assert!(b.plugin.is_some(), "loaded heading must carry PluginMeta");
         let meta = b.plugin.as_ref().unwrap();
         assert_eq!(meta.block_type_name.as_ref(), "heading");
         assert_eq!(meta.native.as_deref(), Some("heading"));

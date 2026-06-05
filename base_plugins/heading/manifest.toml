@@ -1,13 +1,13 @@
 # Built-in "base" plugin: the heading block, claiming the native core
 # `heading` type. Embedded at compile time via include_str! — see
 # load_base_plugins.
-name    = "lopress-heading"
+name = "lopress-heading"
 version = "0.1.0"
 
 [[blocks]]
-name    = "heading"
-editor  = "heading"
-native  = "heading"
+name = "heading"
+editor = "heading"
+native = "heading"
 builtin = true
 
 [blocks.attrs]

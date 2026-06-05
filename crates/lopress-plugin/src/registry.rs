@@ -202,9 +202,7 @@ native = "list"
     fn base_plugins_include_heading() {
         let mut reg = PluginRegistry::default();
         reg.load_base_plugins().unwrap();
-        let (_p, decl) = reg
-            .native_block("heading")
-            .expect("heading native block");
+        let (_p, decl) = reg.native_block("heading").expect("heading native block");
         assert_eq!(decl.editor.as_deref(), Some("heading"));
         assert_eq!(decl.native.as_deref(), Some("heading"));
         assert!(decl.builtin);

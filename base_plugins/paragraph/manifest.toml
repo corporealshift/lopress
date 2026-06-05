@@ -1,11 +1,11 @@
 # Built-in "base" plugin: the paragraph block, claiming the native core
 # `paragraph` type. Embedded at compile time via include_str! — see
 # load_base_plugins.
-name    = "lopress-paragraph"
+name = "lopress-paragraph"
 version = "0.1.0"
 
 [[blocks]]
-name    = "paragraph"
-editor  = "paragraph"
-native  = "paragraph"
+name = "paragraph"
+editor = "paragraph"
+native = "paragraph"
 builtin = true
