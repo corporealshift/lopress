@@ -4,6 +4,7 @@ use crate::actions::BlockAction;
 use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
 use crate::model::types::{BlockId, BlockKind, EditorDoc, InlineRun};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::style_span::InlineRunStyling;
 use floem::event::{Event, EventListener};
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
@@ -135,21 +136,16 @@ pub type CommitClosure = Rc<dyn Fn()>;
 /// previous monolithic implementation; the extraction enables list items to
 /// share the same mount (stage 4 task 3) by providing their own
 /// `structural_key`.
-#[allow(clippy::too_many_arguments)]
 pub fn editable_inline(
     state: BlockEditorState,
     block_id: BlockId,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
+    env: &BlockEnv,
     slash_eligible: bool,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
 ) -> impl IntoView {
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
-    let on_action_for_commit = on_action.clone();
+    let on_action_for_commit = env.on_action.clone();
+    let current_doc = env.current_doc;
     let commit: CommitClosure = Rc::new(move || {
         // Suppress the commit when the block's kind is no longer inline-bodied.
         // A ChangeType swaps the kind from Paragraph/Heading to Code/List
@@ -173,12 +169,7 @@ pub fn editable_inline(
         state,
         block_id,
         block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
+        env,
         commit,
         structural_key,
         slash_eligible,
@@ -196,17 +187,11 @@ pub fn editable_inline(
 /// `focus_pub.block` reports when this editor becomes active — for list
 /// items it's the *list* block's id (the toolbar's "active block"), not
 /// the per-item id. Paragraphs pass the same id for both.
-#[allow(clippy::too_many_arguments)]
 pub fn mount_block_editor(
     state: BlockEditorState,
     block_id: BlockId,
     publish_block_id: BlockId,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
     _commit: CommitClosure,
     structural_key: StructuralKey,
     slash_eligible: bool,
@@ -216,9 +201,17 @@ pub fn mount_block_editor(
     let style_rev = state.style_rev;
     let link_url_sig = state.link_url_sig;
 
-    let on_action_for_key = on_action;
     let commit_for_key = _commit;
     let commit_on_focus_lost = Rc::clone(&commit_for_key);
+
+    // Capture env fields into owned/copy types so the closures outlive `env`.
+    let focus_target = env.focus_target;
+    let focus_pub = env.focus_pub;
+    let handle_on_action = env.on_action.clone();
+    let handle_current_doc = env.current_doc;
+    let handle_focus_target = env.focus_target;
+    let handle_on_undo = env.on_undo.clone();
+    let handle_on_redo = env.on_redo.clone();
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
@@ -238,11 +231,11 @@ pub fn mount_block_editor(
             spans_sig,
             style_rev,
             block_id,
-            &on_action_for_key,
-            focus_target,
-            current_doc,
-            &on_undo,
-            &on_redo,
+            &handle_on_action,
+            handle_focus_target,
+            handle_current_doc,
+            &handle_on_undo,
+            &handle_on_redo,
             &commit_for_key,
             slash_eligible,
             link_url_sig,
@@ -406,7 +399,9 @@ pub fn mount_block_editor(
 
 // ── Key handler ──────────────────────────────────────────────────────────────
 
-// Five reactive signals + two inputs are needed to drive key processing.
+// Internal key dispatcher; many params are needed to drive key processing
+// (editor state, spans, style revision, block id, action sink, focus target,
+// doc signal, undo/redo, commit closure, slash eligibility, link URL sig).
 #[allow(clippy::too_many_arguments)]
 fn handle_key(
     kp: &KeyPress,

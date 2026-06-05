@@ -2,17 +2,15 @@
 //! the inline-runs editor widget. The read-only path (used for list items)
 //! lays out one styled `text` element per inline run in a wrapping flex row.
 
-use crate::model::types::{BlockId, EditorDoc, InlineRun};
-use crate::ui::blocks::inline_editor::{
-    build_block_editor, editable_inline, ActionSink, FocusPublisher,
-};
+use crate::model::types::{BlockId, InlineRun};
+use crate::ui::blocks::env::BlockEnv;
+use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline};
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, Scope};
+use floem::reactive::Scope;
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{container, h_stack_from_iter, text, Decorators};
 use floem::IntoView;
-use std::rc::Rc;
 
 /// Body font size (logical px) for paragraphs and list items.
 pub const BODY_FONT_SIZE: f32 = 15.0;
@@ -26,39 +24,20 @@ pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
 /// Editable paragraph: backed by the inline-runs editor widget so the user
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
 // `BODY_FONT_SIZE` is a small positive integer-valued constant, so the
-// f32->usize conversion is exact. The argument count mirrors the plumbing.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+// f32->usize conversion is exact.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn render_paragraph_editable(
     runs: &[InlineRun],
     block_id: BlockId,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> impl IntoView {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
     // The inner editor carries a rigid `height`; the block's vertical padding
     // goes on an outer container so it cannot squeeze the editor's content
     // box (which would let the text overflow into the next block).
-    container(editable_inline(
-        state,
-        block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        current_doc,
-        true,
-        on_undo,
-        on_redo,
-    ))
-    .style(|s| s.width_full().padding_vert(6.))
+    container(editable_inline(state, block_id, env, true))
+        .style(|s| s.width_full().padding_vert(6.))
 }
 
 /// Read-only render of a slice of inline runs as a wrapping flex row.

@@ -9,9 +9,9 @@
 
 use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
-    build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
-    StructuralKey,
+    build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
 use crate::ui::blocks::paragraph::MONO_FAMILY;
 use crate::ui::editing::focus::defer_focus;
@@ -231,18 +231,7 @@ fn make_code_structural_key(
 /// `InlineRun`), mounts it via `mount_block_editor` with a code-specific
 /// commit closure and structural-key callback, and wraps everything in a
 /// styled frame with a corner lang label.
-#[allow(clippy::too_many_arguments)]
-pub fn editable_code_view(
-    body: &str,
-    lang: &str,
-    block_id: BlockId,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
-) -> AnyView {
+pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &BlockEnv) -> AnyView {
     let cx = Scope::current();
 
     // Build editor state from a single synthetic InlineRun carrying the body.
@@ -255,21 +244,21 @@ pub fn editable_code_view(
 
     // Code-specific commit closure: read buffer, compare with model, emit
     // EditBlockBody { Code } on diff.
-    let commit_on_action = on_action.clone();
-    let commit = make_code_commit(block_id, editor_sig, commit_on_action, current_doc);
+    let commit_on_action = env.on_action.clone();
+    let commit = make_code_commit(block_id, editor_sig, commit_on_action, env.current_doc);
 
     // Code-specific structural-key callback.
     let structural_key = make_code_structural_key(
         block_id,
         editor_sig,
-        on_action.clone(),
-        focus_target,
-        current_doc,
+        env.on_action.clone(),
+        env.focus_target,
+        env.current_doc,
         commit.clone(),
     );
 
     // Clone for the lang widget before mount_block_editor consumes on_action.
-    let lang_on_action = on_action.clone();
+    let lang_on_action = env.on_action.clone();
 
     // Mount the editor. slash_eligible: false — "/" does not open the slash
     // menu inside a code body.
@@ -277,12 +266,7 @@ pub fn editable_code_view(
         state,
         block_id,
         block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
+        env,
         commit,
         structural_key,
         /* slash_eligible */ false,

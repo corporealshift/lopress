@@ -14,9 +14,9 @@ use crate::actions::{split_item_at_with_id, BlockAction};
 use crate::model::style_span::StyleSpan;
 use crate::model::sync::{canonicalize_body, rope_and_spans_to_runs};
 use crate::model::types::{BlockBody, BlockId, EditorDoc, InlineRun, ListItem};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
-    build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
-    StructuralKey,
+    build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
 use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
 use crate::ui::editing::focus::defer_focus;
@@ -112,17 +112,12 @@ fn emit_list_commit(
 }
 
 /// Build the editable list view for a list block.
-#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss)]
 pub fn editable_list_view(
     items: &[ListItem],
     block_id: BlockId,
     ordered: bool,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> AnyView {
     let item_ids: Rc<Vec<BlockId>> = Rc::new(items.iter().map(|it| it.id).collect());
     let count = items.len();
@@ -144,12 +139,7 @@ pub fn editable_list_view(
                 count,
                 Rc::clone(&item_ids),
                 Rc::clone(&handles),
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
+                env,
             );
             let editor_sig_for_overlay = editor_sig;
             let placeholder_overlay = dyn_container(
@@ -207,12 +197,7 @@ fn list_item_editor(
     item_count: usize,
     item_ids: Rc<Vec<BlockId>>,
     handles: ItemHandles,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> (AnyView, RwSignal<Editor>) {
     let cx = Scope::current();
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
@@ -229,13 +214,14 @@ fn list_item_editor(
     // changed). Used by the shared default handler before Ctrl+Z/Y and
     // focus-changing shortcuts.
     let commit_handles = Rc::clone(&handles);
-    let commit_on_action = on_action.clone();
+    let commit_on_action = env.on_action.clone();
+    let commit_current_doc = env.current_doc;
     let commit: CommitClosure = Rc::new(move || {
         emit_list_commit(
             &commit_handles,
             list_block_id,
             &commit_on_action,
-            current_doc,
+            commit_current_doc,
         );
     });
 
@@ -247,21 +233,14 @@ fn list_item_editor(
         Rc::clone(&item_ids),
         Rc::clone(&handles),
         editor_sig,
-        on_action.clone(),
-        focus_target,
-        current_doc,
+        env,
     );
 
     let view = mount_block_editor(
         state,
         item_id,
         list_block_id,
-        on_action,
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
+        env,
         commit,
         structural_key,
         /* slash_eligible */ false,
@@ -270,6 +249,7 @@ fn list_item_editor(
     // Item 0 also answers to the list *block* id, so navigation that lands
     // on the list as a whole (cross-block ↑/↓ from above, Ctrl+Home if the
     // list is the first block) puts the cursor in the first item.
+    let focus_target = env.focus_target;
     if item_index == 0 {
         create_effect(move |_| {
             if focus_target.get() == Some(list_block_id) {
@@ -300,7 +280,6 @@ fn list_item_editor(
 /// isolation behavior table from the spec's section 2: Enter never closes
 /// the list; arrows at list boundaries do nothing; empty first-item
 /// Backspace removes the item (or the list block, when it's the only item).
-#[allow(clippy::too_many_arguments)]
 fn make_list_structural_key(
     list_block_id: BlockId,
     item_index: usize,
@@ -308,12 +287,13 @@ fn make_list_structural_key(
     item_ids: Rc<Vec<BlockId>>,
     handles: ItemHandles,
     editor_sig: RwSignal<Editor>,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    current_doc: RwSignal<Option<EditorDoc>>,
+    env: &BlockEnv,
 ) -> StructuralKey {
     use floem::keyboard::{Key, NamedKey};
 
+    let on_action = env.on_action.clone();
+    let current_doc = env.current_doc;
+    let focus_target = env.focus_target;
     Rc::new(move |kp: &KeyPress, ms: floem::keyboard::Modifiers| {
         let shift = ms.shift();
         let ctrl_or_cmd = ms.control() || ms.meta();

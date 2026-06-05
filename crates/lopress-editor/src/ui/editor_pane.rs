@@ -3,6 +3,7 @@
 use crate::actions::BlockAction;
 use crate::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use crate::ui::blocks::block_view;
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use crate::ui::dnd::{gap_drop_zone, DndState};
 use crate::ui::slash_menu::{slash_menu, SlashChoice};
@@ -182,7 +183,6 @@ pub fn editor_pane(
 /// block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
 /// target. An empty document has no blocks to click into, so it shows a single
 /// "add block" button instead.
-#[allow(clippy::too_many_arguments)]
 fn block_column(
     doc: &EditorDoc,
     on_action: ActionSink,
@@ -202,22 +202,21 @@ fn block_column(
         block: RwSignal::new(None),
         editor_and_spans: RwSignal::new(None),
     };
+    let env = BlockEnv {
+        on_action: on_action.clone(),
+        focus_target,
+        focus_pub,
+        current_doc,
+        on_undo,
+        on_redo,
+    };
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
     if doc.blocks.is_empty() {
         rows.push(add_block_button(on_action.clone()));
     } else {
         for (i, b) in doc.blocks.iter().enumerate() {
             rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
-            rows.push(block_view(
-                b,
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                dnd,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
-            ));
+            rows.push(block_view(b, dnd, &env));
         }
         rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
     }

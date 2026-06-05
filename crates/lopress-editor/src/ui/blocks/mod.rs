@@ -7,6 +7,7 @@
 
 pub mod code_editor;
 pub mod editor_registry;
+pub mod env;
 pub mod fallback;
 pub mod heading;
 pub mod image;
@@ -20,15 +21,14 @@ pub mod separator;
 pub mod style_span;
 pub mod table;
 
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
-use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
+use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
-use std::rc::Rc;
 
 /// Border color for the block that currently holds focus.
 const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
@@ -52,75 +52,32 @@ const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246)
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
 /// other kinds remain read-only for now.
-#[allow(clippy::too_many_arguments)]
-pub fn block_view(
-    block: &EditorBlock,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    dnd: DndState,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
-) -> AnyView {
+pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
 
     // Plugin blocks take precedence: header strip + attr form + body editor.
     // Built-in dispatch only runs when the block isn't plugin-flagged.
     if block.plugin.is_some() {
-        let plugin_view = plugin::plugin_block_view(
-            block,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
-        );
-        return wrap_block(plugin_view, block_id, kind, dnd, focus_pub, on_action);
+        let plugin_view = plugin::plugin_block_view(block, env);
+        return wrap_block(plugin_view, block_id, kind, dnd, env);
     }
 
     let body = match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
-            runs,
-            block.id,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
-        )
-        .into_any(),
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
-            *level,
-            runs,
-            block.id,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
-        )
-        .into_any(),
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
-            text,
-            lang,
-            block.id,
-            on_action.clone(),
-            focus_target,
-            focus_pub,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
-        ),
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
+            paragraph::render_paragraph_editable(runs, block.id, env).into_any()
+        }
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
+            heading::render_heading_editable(*level, runs, block.id, env).into_any()
+        }
+        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+            code_editor::editable_code_view(text, lang, block.id, env)
+        }
         (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => {
             // Opaque blocks load from disk with unknown/removed plugin types.
             // Route through the fallback so they're visible and recoverable,
             // not a silent drop or a read-only card with no toolbar.
-            fallback::fallback_block_view(block, focus_pub).into_any()
+            fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
         // Body/kind mismatch — render fallback so content is visible and recoverable.
         _ => {
@@ -129,11 +86,11 @@ pub fn block_view(
                 "[fallback] block {:?}: kind/body mismatch ({:?} + {:?})",
                 block_id, block.kind, block.body
             );
-            fallback::fallback_block_view(block, focus_pub).into_any()
+            fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
     };
 
-    wrap_block(body, block_id, kind, dnd, focus_pub, on_action)
+    wrap_block(body, block_id, kind, dnd, env)
 }
 
 /// Wrap a block's body in the shared chrome: a drag-handle gutter, hover/focus
@@ -149,9 +106,13 @@ fn wrap_block(
     block_id: BlockId,
     kind: BlockKind,
     dnd: DndState,
-    focus_pub: FocusPublisher,
-    on_action: ActionSink,
+    env: &BlockEnv,
 ) -> AnyView {
+    // Capture env fields into owned/copy types so the closures outlive `env`.
+    let focus_block = env.focus_pub.block;
+    let focus_pub = env.focus_pub;
+    let on_action = env.on_action.clone();
+
     // Hover gutter with the drag handle, left of the body.
     let hover: RwSignal<bool> = RwSignal::new(false);
     let handle = drag_handle(block_id, dnd, hover)
@@ -176,7 +137,7 @@ fn wrap_block(
         });
 
     let row_with_border = row.style(move |s| {
-        let focused = focus_pub.block.get() == Some(block_id);
+        let focused = focus_block.get() == Some(block_id);
         let s = s.width_full().border(1.0).border_radius(4.0);
         if focused {
             s.border_color(FOCUS_BORDER)
@@ -198,7 +159,7 @@ fn wrap_block(
     let toolbar_slot = {
         let on_action = on_action.clone();
         dyn_container(
-            move || focus_pub.block.get() == Some(block_id),
+            move || focus_block.get() == Some(block_id),
             move |is_focused| {
                 if is_focused {
                     block_toolbar_for(block_id, kind.clone(), focus_pub, on_action.clone())
@@ -209,7 +170,7 @@ fn wrap_block(
             },
         )
         .style(move |s| {
-            if focus_pub.block.get() == Some(block_id) {
+            if focus_block.get() == Some(block_id) {
                 s.width_full().height(TOOLBAR_HEIGHT_PX)
             } else {
                 s.height(0.)
@@ -224,7 +185,7 @@ fn wrap_block(
             // cancel that by pulling the whole block up by exactly that height,
             // so the toolbar floats over the block above and the document never
             // shifts as focus moves between blocks.
-            let focused = focus_pub.block.get() == Some(block_id);
+            let focused = focus_block.get() == Some(block_id);
             let margin_top = if focused {
                 BLOCK_GAP_PX - f64::from(TOOLBAR_HEIGHT_PX)
             } else {
