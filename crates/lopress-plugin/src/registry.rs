@@ -74,6 +74,8 @@ impl PluginRegistry {
             include_str!("../../../base_plugins/image/manifest.toml"),
             include_str!("../../../base_plugins/separator/manifest.toml"),
             include_str!("../../../base_plugins/table/manifest.toml"),
+            include_str!("../../../base_plugins/paragraph/manifest.toml"),
+            include_str!("../../../base_plugins/heading/manifest.toml"),
         ];
         for src in BASE_MANIFESTS {
             let manifest = parse_manifest_str(src)?;
@@ -181,6 +183,30 @@ native = "list"
         assert_eq!(decl.editor.as_deref(), Some("table"));
         assert_eq!(decl.native.as_deref(), Some("table"));
         assert!(decl.builtin);
+    }
+
+    #[test]
+    fn base_plugins_include_paragraph() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_p, decl) = reg
+            .native_block("paragraph")
+            .expect("paragraph native block");
+        assert_eq!(decl.editor.as_deref(), Some("paragraph"));
+        assert_eq!(decl.native.as_deref(), Some("paragraph"));
+        assert!(decl.builtin);
+        assert!(decl.attrs.is_empty());
+    }
+
+    #[test]
+    fn base_plugins_include_heading() {
+        let mut reg = PluginRegistry::default();
+        reg.load_base_plugins().unwrap();
+        let (_p, decl) = reg.native_block("heading").expect("heading native block");
+        assert_eq!(decl.editor.as_deref(), Some("heading"));
+        assert_eq!(decl.native.as_deref(), Some("heading"));
+        assert!(decl.builtin);
+        assert!(decl.attrs.contains_key("level"));
     }
 
     #[test]

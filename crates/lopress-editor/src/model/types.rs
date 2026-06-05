@@ -153,6 +153,50 @@ pub struct PluginMeta {
 }
 
 impl PluginMeta {
+    /// The canonical `PluginMeta` for a built-in paragraph block.
+    ///
+    /// Mirrors what `from_core` stamps for a `paragraph` core block, so a
+    /// paragraph created inside the editor (e.g. via `ChangeType` from the
+    /// toolbar or slash menu) carries the same plugin identity as one loaded
+    /// from disk — taking the plugin render path and native serialization.
+    /// `attr_decls` is empty: the paragraph is `builtin`, so the attr form
+    /// is suppressed.
+    pub fn paragraph() -> Self {
+        Self {
+            block_type_name: Rc::from("paragraph"),
+            attrs: serde_json::Map::new(),
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("paragraph")),
+            native: Some(Rc::from("paragraph")),
+        }
+    }
+
+    /// The canonical `PluginMeta` for a built-in heading block.
+    ///
+    /// Mirrors what `from_core` stamps for a `heading` core block, so a
+    /// heading created inside the editor (e.g. via `ChangeType` from the
+    /// toolbar or slash menu) carries the same plugin identity as one loaded
+    /// from disk. `attrs["level"]` mirrors `BlockKind::Heading(level)` so
+    /// the heading widget can read the level from attrs (not from the enum).
+    /// `attr_decls` is empty: the heading is `builtin`, so the attr form
+    /// is suppressed.
+    pub fn heading(level: u8) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert(
+            "level".to_string(),
+            Value::Number(serde_json::Number::from(level)),
+        );
+        Self {
+            block_type_name: Rc::from("heading"),
+            attrs,
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("heading")),
+            native: Some(Rc::from("heading")),
+        }
+    }
+
     /// The canonical `PluginMeta` for a built-in list block.
     ///
     /// Mirrors what `from_core` stamps for a `list` core block, so a list
@@ -264,16 +308,17 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(runs),
-            plugin: None,
+            plugin: Some(PluginMeta::paragraph()),
         }
     }
 
     pub fn heading(level: u8, runs: Vec<InlineRun>) -> Self {
+        let level = level.clamp(1, 6);
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Heading(level.clamp(1, 6)),
+            kind: BlockKind::Heading(level),
             body: BlockBody::Inline(runs),
-            plugin: None,
+            plugin: Some(PluginMeta::heading(level)),
         }
     }
 
@@ -397,6 +442,34 @@ impl EditorBlock {
                 native: None,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
+mod paragraph_heading_meta_tests {
+    use super::*;
+
+    #[test]
+    fn paragraph_block_carries_plugin_meta() {
+        let b = EditorBlock::paragraph(vec![InlineRun::plain("hello")]);
+        let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+        assert_eq!(&*meta.block_type_name, "paragraph");
+        assert_eq!(meta.editor.as_deref(), Some("paragraph"));
+        assert_eq!(meta.native.as_deref(), Some("paragraph"));
+        assert!(meta.builtin);
+        assert!(meta.attrs.is_empty());
+    }
+
+    #[test]
+    fn heading_block_carries_plugin_meta_with_level() {
+        let b = EditorBlock::heading(3, vec![InlineRun::plain("title")]);
+        let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+        assert_eq!(&*meta.block_type_name, "heading");
+        assert_eq!(meta.editor.as_deref(), Some("heading"));
+        assert_eq!(meta.native.as_deref(), Some("heading"));
+        assert!(meta.builtin);
+        assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(3));
     }
 }
 

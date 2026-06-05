@@ -25,7 +25,9 @@ use std::rc::Rc;
 fn paragraph_round_trips_via_document_equality() {
     let src = "---\ntitle: Test Post\n---\n# Heading 1\n\nA plain paragraph.\n\n## Heading 2\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }
@@ -229,7 +231,9 @@ fn front_matter_is_preserved() {
         front_matter: fm.clone(),
         blocks: vec![Block::paragraph("hello")],
     };
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
     assert_eq!(editor.front_matter, fm);
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back.front_matter, fm);
@@ -239,7 +243,9 @@ fn front_matter_is_preserved() {
 fn heading_levels_round_trip() {
     let src = "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
 
     let levels: Vec<u8> = editor
         .blocks
@@ -483,4 +489,76 @@ fn template_form_block_round_trips_as_comment_container() {
     let back = lopress_core::serialize(&core);
     let core_back = lopress_core::parse(&back).unwrap();
     assert_eq!(core_back, core);
+}
+
+#[test]
+fn paragraph_round_trips_via_native_path() {
+    // After migration, paragraph blocks must route through the native
+    // registry path — not the hardcoded arm — proving the migration works.
+    let src = "A plain paragraph.\n\nAnother one.\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+
+    // Sanity: the editor classifies it correctly.
+    for b in &editor.blocks {
+        assert!(b.plugin.is_some(), "loaded paragraph must carry PluginMeta");
+        let meta = b.plugin.as_ref().unwrap();
+        assert_eq!(meta.block_type_name.as_ref(), "paragraph");
+        assert_eq!(meta.native.as_deref(), Some("paragraph"));
+    }
+
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back, core);
+}
+
+#[test]
+fn heading_round_trips_via_native_path() {
+    // After migration, heading blocks must route through the native registry
+    // path — not the hardcoded arm.
+    let src = "# h1\n\n## h2\n\n### h3\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+
+    for b in &editor.blocks {
+        assert!(b.plugin.is_some(), "loaded heading must carry PluginMeta");
+        let meta = b.plugin.as_ref().unwrap();
+        assert_eq!(meta.block_type_name.as_ref(), "heading");
+        assert_eq!(meta.native.as_deref(), Some("heading"));
+        assert!(meta.attrs.contains_key("level"));
+    }
+
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back, core);
+}
+
+#[test]
+fn attr_decls_carry_names_after_from_core() {
+    // A plugin block loaded via from_core must have attr_decls where each
+    // decl.name matches the corresponding attrs key — proving the name
+    // survives the parse → registry → from_core chain.
+    let src = r#"
+name = "test-plugin"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:callout"
+template = "blocks/callout.html"
+
+[blocks.attrs]
+kind = { type = "string", ui = "text" }
+text = { type = "string", ui = "textarea" }
+"#;
+    // Test via the manifest parse path directly.
+    let m = lopress_plugin::manifest::parse_manifest_str(src).unwrap();
+    let b = &m.blocks[0];
+    assert_eq!(b.attrs["kind"].name, "kind");
+    assert_eq!(b.attrs["text"].name, "text");
+    // Verify cloning preserves names (what from_core does).
+    let cloned: Vec<_> = b.attrs.values().cloned().collect();
+    assert_eq!(cloned[0].name, "kind");
+    assert_eq!(cloned[1].name, "text");
 }

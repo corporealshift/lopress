@@ -64,14 +64,8 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
     }
 
     let body = match (&block.kind, &block.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            paragraph::render_paragraph_editable(runs, block.id, env).into_any()
-        }
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading_editable(*level, runs, block.id, env).into_any()
-        }
         (BlockKind::Code { lang }, BlockBody::Code(text)) => {
-            code_editor::editable_code_view(text, lang, block.id, env)
+            code_editor::editable_code_view(text, lang, block_id, env)
         }
         (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => {
             // Opaque blocks load from disk with unknown/removed plugin types.

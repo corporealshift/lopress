@@ -502,6 +502,22 @@ fn apply_move(
     ))
 }
 
+/// Build the canonical `PluginMeta` for a paragraph or heading block.
+/// Called from `apply_change_type` where `new_kind` is already known to be
+/// `Paragraph` or `Heading(_)`, so this match is exhaustive.
+fn inline_plugin_meta(kind: &BlockKind) -> PluginMeta {
+    match kind {
+        BlockKind::Paragraph => PluginMeta::paragraph(),
+        BlockKind::Heading(level) => PluginMeta::heading(*level),
+        // The other variants (Code, List, Image, Table, Opaque) are never
+        // passed here — the call site in apply_change_type restricts to
+        // Paragraph | Heading. Clippy's exhaustive-match lint doesn't
+        // understand this constraint, so we suppress it.
+        #[allow(clippy::unreachable)]
+        _ => unreachable!(),
+    }
+}
+
 fn apply_change_type(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -530,13 +546,15 @@ fn apply_change_type(
     match (&new_kind, &block.body) {
         // ── To Inline (Paragraph / Heading) ──────────────────────────────
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_runs)) => {
-            // Body shape already matches — just update kind.
+            // Body shape already matches — just update kind and stamp the
+            // canonical PluginMeta so the block routes through the plugin path.
             block.kind = new_kind.clone();
+            block.plugin = Some(inline_plugin_meta(&new_kind));
         }
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Code(text)) => {
             block.kind = new_kind.clone();
             block.body = BlockBody::Inline(vec![InlineRun::plain(text.clone())]);
-            block.plugin = None;
+            block.plugin = Some(inline_plugin_meta(&new_kind));
         }
         (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::List(items)) => {
             block.kind = new_kind.clone();
@@ -549,7 +567,7 @@ fn apply_change_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             block.body = BlockBody::Inline(vec![InlineRun::plain(text)]);
-            block.plugin = None;
+            block.plugin = Some(inline_plugin_meta(&new_kind));
         }
 
         // ── To Code ──────────────────────────────────────────────────────
