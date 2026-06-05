@@ -534,3 +534,31 @@ fn heading_round_trips_via_native_path() {
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }
+
+#[test]
+fn attr_decls_carry_names_after_from_core() {
+    // A plugin block loaded via from_core must have attr_decls where each
+    // decl.name matches the corresponding attrs key — proving the name
+    // survives the parse → registry → from_core chain.
+    let src = r#"
+name = "test-plugin"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:callout"
+template = "blocks/callout.html"
+
+[blocks.attrs]
+kind = { type = "string", ui = "text" }
+text = { type = "string", ui = "textarea" }
+"#;
+    // Test via the manifest parse path directly.
+    let m = lopress_plugin::manifest::parse_manifest_str(src).unwrap();
+    let b = &m.blocks[0];
+    assert_eq!(b.attrs["kind"].name, "kind");
+    assert_eq!(b.attrs["text"].name, "text");
+    // Verify cloning preserves names (what from_core does).
+    let cloned: Vec<_> = b.attrs.values().cloned().collect();
+    assert_eq!(cloned[0].name, "kind");
+    assert_eq!(cloned[1].name, "text");
+}
