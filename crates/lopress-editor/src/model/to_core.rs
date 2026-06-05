@@ -36,18 +36,6 @@ fn block_to_core(b: &EditorBlock) -> Block {
         };
     }
     match (&b.kind, &b.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => Block {
-            r#type: "paragraph".into(),
-            attrs: empty_attrs(),
-            children: vec![],
-            text: Some(serialize_inline(runs)),
-        },
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => Block {
-            r#type: "heading".into(),
-            attrs: json!({ "level": level }),
-            children: vec![],
-            text: Some(serialize_inline(runs)),
-        },
         (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
             r#type: "code".into(),
             attrs: json!({ "lang": &**lang }),
@@ -142,6 +130,26 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                 attrs: json!({ "align": align }),
                 children: rows,
                 text: None,
+            }
+        }
+        BlockBody::Inline(runs) if core_type == "paragraph" => Block {
+            r#type: core_type.to_string(),
+            attrs: empty_attrs(),
+            children: vec![],
+            text: Some(serialize_inline(runs)),
+        },
+        BlockBody::Inline(runs) if core_type == "heading" => {
+            let level = meta
+                .attrs
+                .get("level")
+                .and_then(Value::as_u64)
+                .and_then(|n| u8::try_from(n).ok())
+                .unwrap_or(1);
+            Block {
+                r#type: core_type.to_string(),
+                attrs: json!({ "level": level }),
+                children: vec![],
+                text: Some(serialize_inline(runs)),
             }
         }
         // Other body shapes belong to native types not yet migrated; emit a
