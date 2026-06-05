@@ -63,6 +63,7 @@ fn form(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_action: crate::ui::blocks::inline_editor::ActionSink,
 ) -> AnyView {
+    // Nested Fn trait bounds are inherent to the front-matter mutation API.
     #[allow(clippy::type_complexity)]
     let dispatch_fm_edit: Rc<dyn Fn(&dyn Fn(&mut lopress_core::FrontMatter))> = Rc::new({
         let on_action = on_action.clone();

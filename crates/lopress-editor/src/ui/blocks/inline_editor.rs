@@ -406,6 +406,7 @@ pub fn mount_block_editor(
 
 // ── Key handler ──────────────────────────────────────────────────────────────
 
+// Five reactive signals + two inputs are needed to drive key processing.
 #[allow(clippy::too_many_arguments)]
 fn handle_key(
     kp: &KeyPress,

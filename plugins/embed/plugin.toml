@@ -1,17 +1,20 @@
 # Embed block — a responsive video embed for an allowlisted provider.
 # HTML-template block. For security the iframe host is fixed per provider and
 # only the video ID is interpolated (no free-form iframe src).
-name    = "embed"
+name = "embed"
 version = "0.1.0"
 
 [[blocks]]
-name        = "lopress:embed"
-template    = "blocks/embed.html"
-title       = "Embed"
-category    = "Embeds"
+name = "lopress:embed"
+template = "blocks/embed.html"
+title = "Embed"
+category = "Embeds"
 description = "Responsive YouTube or Vimeo video embed"
 
 [blocks.attrs]
-provider = { type = "string", ui = "select", options = ["youtube", "vimeo"], default = "youtube", label = "Provider" }
-id       = { type = "string", ui = "text", required = true, label = "Video ID", help = "YouTube: the part after watch?v= (e.g. dQw4w9WgXcQ). Vimeo: the numeric ID (e.g. 76979871)." }
-title    = { type = "string", ui = "text", label = "Title", help = "Accessible title for the embedded player" }
+provider = { type = "string", ui = "select", options = [
+  "youtube",
+  "vimeo",
+], default = "youtube", label = "Provider" }
+id = { type = "string", ui = "text", required = true, label = "Video ID", help = "YouTube: the part after watch?v= (e.g. dQw4w9WgXcQ). Vimeo: the numeric ID (e.g. 76979871)." }
+title = { type = "string", ui = "text", label = "Title", help = "Accessible title for the embedded player" }

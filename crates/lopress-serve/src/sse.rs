@@ -55,6 +55,7 @@ impl Subscribers {
         })
     }
 
+    // SSE subscribers only expose count; `is_empty` is not needed here.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         lock_subscribers(&self.inner).len()

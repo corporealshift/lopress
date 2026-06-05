@@ -1,7 +1,8 @@
-#![allow(unsafe_code)]
-#![cfg(debug_assertions)]
 // Debug-only control server: the Win32 screenshot path and static header
 // parsing inherently need casts / `expect` that the workspace lints forbid.
+#![allow(unsafe_code)]
+#![cfg(debug_assertions)]
+// Cast truncation is inherent in Win32 screenshot header parsing.
 #![allow(clippy::cast_possible_truncation, clippy::expect_used)]
 
 pub(crate) mod input;
@@ -19,8 +20,10 @@ use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc,
 
 pub(crate) struct CtrlHandle {
     pub snapshot: Arc<Mutex<String>>,
+    // Used by integration tests to verify open/close lifecycle.
     #[allow(dead_code)]
     pub open_tx: crossbeam_channel::Sender<CtrlOpenEnvelope>,
+    // Used by integration tests to verify open/close lifecycle.
     #[allow(dead_code)]
     pub close_tx: crossbeam_channel::Sender<CtrlCloseEnvelope>,
 }

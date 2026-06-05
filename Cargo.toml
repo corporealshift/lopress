@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/lopress-core",
-    "crates/lopress-plugin",
-    "crates/lopress-theme",
-    "crates/lopress-assets",
-    "crates/lopress-build",
-    "crates/lopress-watch",
-    "crates/lopress-serve",
-    "crates/lopress-gui-host",
-    "crates/lopress-editor",
+  "crates/lopress-core",
+  "crates/lopress-plugin",
+  "crates/lopress-theme",
+  "crates/lopress-assets",
+  "crates/lopress-build",
+  "crates/lopress-watch",
+  "crates/lopress-serve",
+  "crates/lopress-gui-host",
+  "crates/lopress-editor",
 ]
 
 [workspace.package]

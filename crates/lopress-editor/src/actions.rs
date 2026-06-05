@@ -1021,6 +1021,8 @@ mod size_tests {
 }
 
 #[cfg(test)]
+// Test module exercises edit-in-place paths that leave trailing unreachable
+// branches when the front-matter block is consumed early.
 #[allow(unreachable_code)]
 #[allow(clippy::unreachable)]
 mod front_matter_tests {

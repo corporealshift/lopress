@@ -4,6 +4,7 @@ use std::net::TcpStream;
 pub struct Request {
     pub method: String,
     pub path: String,
+    // Parsed for completeness; not yet consumed by the router.
     #[allow(dead_code)]
     pub headers: Vec<(String, String)>,
 }
