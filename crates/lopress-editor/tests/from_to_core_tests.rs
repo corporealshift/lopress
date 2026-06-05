@@ -25,7 +25,9 @@ use std::rc::Rc;
 fn paragraph_round_trips_via_document_equality() {
     let src = "---\ntitle: Test Post\n---\n# Heading 1\n\nA plain paragraph.\n\n## Heading 2\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }
@@ -229,7 +231,9 @@ fn front_matter_is_preserved() {
         front_matter: fm.clone(),
         blocks: vec![Block::paragraph("hello")],
     };
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
     assert_eq!(editor.front_matter, fm);
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back.front_matter, fm);
@@ -239,7 +243,9 @@ fn front_matter_is_preserved() {
 fn heading_levels_round_trip() {
     let src = "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n";
     let core = parse(src).unwrap();
-    let editor = doc_from_core(&core, &PluginRegistry::default());
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
 
     let levels: Vec<u8> = editor
         .blocks
@@ -482,5 +488,55 @@ fn template_form_block_round_trips_as_comment_container() {
     // may differ because serde_json::Map is a BTreeMap).
     let back = lopress_core::serialize(&core);
     let core_back = lopress_core::parse(&back).unwrap();
+    assert_eq!(core_back, core);
+}
+
+#[test]
+fn paragraph_round_trips_via_native_path() {
+    // After migration, paragraph blocks must route through the native
+    // registry path — not the hardcoded arm — proving the migration works.
+    let src = "A plain paragraph.\n\nAnother one.\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+
+    // Sanity: the editor classifies it correctly.
+    for b in &editor.blocks {
+        assert!(
+            b.plugin.is_some(),
+            "loaded paragraph must carry PluginMeta"
+        );
+        let meta = b.plugin.as_ref().unwrap();
+        assert_eq!(meta.block_type_name.as_ref(), "paragraph");
+        assert_eq!(meta.native.as_deref(), Some("paragraph"));
+    }
+
+    let core_back = doc_to_core(&editor);
+    assert_eq!(core_back, core);
+}
+
+#[test]
+fn heading_round_trips_via_native_path() {
+    // After migration, heading blocks must route through the native registry
+    // path — not the hardcoded arm.
+    let src = "# h1\n\n## h2\n\n### h3\n";
+    let core = parse(src).unwrap();
+    let mut registry = PluginRegistry::default();
+    registry.load_base_plugins().unwrap();
+    let editor = doc_from_core(&core, &registry);
+
+    for b in &editor.blocks {
+        assert!(
+            b.plugin.is_some(),
+            "loaded heading must carry PluginMeta"
+        );
+        let meta = b.plugin.as_ref().unwrap();
+        assert_eq!(meta.block_type_name.as_ref(), "heading");
+        assert_eq!(meta.native.as_deref(), Some("heading"));
+        assert!(meta.attrs.contains_key("level"));
+    }
+
+    let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
 }

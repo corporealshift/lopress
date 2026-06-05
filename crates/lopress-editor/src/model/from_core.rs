@@ -29,33 +29,15 @@ pub fn doc_from_core(doc: &Document, registry: &PluginRegistry) -> EditorDoc {
 }
 
 fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
-    match b.r#type.as_str() {
-        "paragraph" => {
-            let text = b.text.as_deref().unwrap_or("");
-            EditorBlock::paragraph(parse_inline(text))
-        }
-        "heading" => {
-            let level = b
-                .attrs
-                .get("level")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|n| u8::try_from(n).ok())
-                .unwrap_or(1);
-            let text = b.text.as_deref().unwrap_or("");
-            EditorBlock::heading(level, parse_inline(text))
-        }
-        other => {
-            if let Some((_plugin, decl)) = registry.native_block(other) {
-                native_block_from_core(b, decl)
-            } else if let Some((_plugin, decl)) = registry.block(other) {
-                plugin_block_from_core(b, decl)
-            } else {
-                EditorBlock::opaque(
-                    other.to_string(),
-                    serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
-                )
-            }
-        }
+    match registry.native_block(b.r#type.as_str()) {
+        Some((_plugin, decl)) => native_block_from_core(b, decl),
+        None => match registry.block(b.r#type.as_str()) {
+            Some((_plugin, decl)) => plugin_block_from_core(b, decl),
+            None => EditorBlock::opaque(
+                b.r#type.clone(),
+                serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+            ),
+        },
     }
 }
 
@@ -155,6 +137,8 @@ fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     match decl.editor.as_deref() {
         Some("list") => native_list_from_core(b, decl),
         Some("code") => native_code_from_core(b, decl),
+        Some("paragraph") => native_paragraph_from_core(b, decl),
+        Some("heading") => native_heading_from_core(b, decl),
         Some("image") => native_image_from_core(b, decl),
         Some("separator") => EditorBlock::separator(),
         Some("table") => native_table_from_core(b),
@@ -219,6 +203,55 @@ fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
             serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
         ),
     }
+}
+
+/// Native-paragraph body parser. Reads inline text from `b.text`, parses
+/// it into `InlineRun`s, and stamps `PluginMeta` so the block routes
+/// through the plugin view and serializes back via `to_core`'s native
+/// branch.
+fn native_paragraph_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    let text = b.text.as_deref().unwrap_or("");
+    let mut block = EditorBlock::paragraph(parse_inline(text));
+    block.plugin = Some(PluginMeta {
+        block_type_name: Rc::from(decl.name.as_str()),
+        attrs: serde_json::Map::new(),
+        attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
+        builtin: decl.builtin,
+        editor: decl.editor.as_deref().map(Rc::from),
+        native: decl.native.as_deref().map(Rc::from),
+    });
+    block
+}
+
+/// Native-heading body parser. Reads `level` from `b.attrs["level"]`,
+/// parses inline text from `b.text`, stamps `PluginMeta` with `attrs["level"]`
+/// mirrored (so the heading widget reads level from attrs), and stamps
+/// `PluginMeta` so the block routes through the plugin view.
+fn native_heading_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    let level = b
+        .attrs
+        .get("level")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u8::try_from(n).ok())
+        .unwrap_or(1)
+        .clamp(1, 6);
+    let text = b.text.as_deref().unwrap_or("");
+
+    let mut block = EditorBlock::heading(level, parse_inline(text));
+    let mut attrs = serde_json::Map::new();
+    attrs.insert(
+        "level".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(level)),
+    );
+    block.plugin = Some(PluginMeta {
+        block_type_name: Rc::from(decl.name.as_str()),
+        attrs,
+        attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
+        builtin: decl.builtin,
+        editor: decl.editor.as_deref().map(Rc::from),
+        native: decl.native.as_deref().map(Rc::from),
+    });
+    block
 }
 
 /// Native-code body parser. Parses `lang` from the block's attrs and `text`
