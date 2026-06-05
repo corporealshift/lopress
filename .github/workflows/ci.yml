@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded in-progress runs for the same branch/PR. MUST be at the
+# workflow level: a job-level `concurrency` on the matrix `test` job makes the
+# three OS legs share one group and cancel each other (only the last survives).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
@@ -12,9 +19,6 @@ env:
 jobs:
   test:
     timeout-minutes: 30
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-      cancel-in-progress: true
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -33,15 +37,24 @@ jobs:
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libgtk-3-dev
       - run: cargo fmt --check
-      - name: Install taplo
+      # TOML format is OS-independent — check once on Linux (taplo compiles from
+      # source, so running it on all three OSes triples that cost for no gain).
+      - name: Install taplo (Linux only)
+        if: runner.os == 'Linux'
         run: cargo install taplo-cli --locked
-      - run: taplo fmt --check
+      - name: taplo fmt --check (Linux only)
+        if: runner.os == 'Linux'
+        run: taplo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Suppression justification gate
         if: runner.os == 'Linux'
         run: bash scripts/check-suppressions.sh
       - run: cargo test --workspace
-      - name: Release-profile tests (debug_assert / cfg(debug_assertions) divergence)
+      # debug_assert / cfg(debug_assertions) divergence is OS-independent — run
+      # the release-profile suite once on Linux. Building the whole workspace in
+      # release on every OS (esp. Windows + floem/wgpu) was the 30-min timeout.
+      - name: Release-profile tests (Linux only)
+        if: runner.os == 'Linux'
         run: cargo test --workspace --release
 
   build:
