@@ -31,6 +31,8 @@ echo '=== cargo fmt ==='
 cargo fmt --all || failed=1
 echo '=== cargo clippy ==='
 cargo clippy --workspace --all-targets -- -D warnings || failed=1
+echo '=== suppression justifications ==='
+bash scripts/check-suppressions.sh || failed=1
 echo '=== cargo test ==='
 cargo test --workspace || failed=1
 
