@@ -2,7 +2,8 @@
 //! It ignores the (empty) body and is focusable on PointerDown so the block
 //! can be selected and deleted via the toolbar — mirroring `read_more.rs`.
 
-use crate::ui::blocks::editor_registry::EditorContext;
+use crate::model::types::EditorBlock;
+use crate::ui::blocks::env::BlockEnv;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::SignalUpdate;
@@ -11,9 +12,9 @@ use floem::{AnyView, IntoView};
 
 const RULE: Color = Color::rgb8(180, 180, 188);
 
-pub fn separator_widget(ctx: &EditorContext) -> AnyView {
-    let block_id = ctx.block.id;
-    let focus_pub = ctx.focus_pub;
+pub fn separator_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
+    let block_id = block.id;
+    let focus_pub = env.focus_pub;
     empty()
         .style(move |s| s.width_full().height(1.).margin_vert(10.).background(RULE))
         .on_event(EventListener::PointerDown, move |_| {

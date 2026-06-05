@@ -3,7 +3,8 @@
 //! the block can be selected and deleted via the toolbar — mirroring the focus
 //! handoff in `fallback.rs`.
 
-use crate::ui::blocks::editor_registry::EditorContext;
+use crate::model::types::EditorBlock;
+use crate::ui::blocks::env::BlockEnv;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::SignalUpdate;
@@ -13,9 +14,9 @@ use floem::{AnyView, IntoView};
 const RULE: Color = Color::rgb8(180, 160, 210);
 const FG: Color = Color::rgb8(120, 100, 150);
 
-pub fn read_more_widget(ctx: &EditorContext) -> AnyView {
-    let block_id = ctx.block.id;
-    let focus_pub = ctx.focus_pub;
+pub fn read_more_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
+    let block_id = block.id;
+    let focus_pub = env.focus_pub;
     label(|| "— Read more —".to_string())
         .style(move |s| {
             s.width_full()

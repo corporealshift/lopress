@@ -7,7 +7,8 @@
 //! placeholder showing the filename and alt text — not a real image.
 
 use crate::actions::BlockAction;
-use crate::ui::blocks::editor_registry::EditorContext;
+use crate::model::types::EditorBlock;
+use crate::ui::blocks::env::BlockEnv;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet};
 use floem::views::{h_stack, label, text_input, v_stack, Decorators};
@@ -17,9 +18,9 @@ use serde_json::Value;
 /// Build the image block's editor widget. Renders a bordered placeholder
 /// (filename + alt) plus editable alt and caption fields that commit on
 /// `FocusLost` via `BlockAction::EditAttrs`.
-pub fn image_widget(ctx: &EditorContext) -> AnyView {
-    let block_id = ctx.block.id;
-    let meta = match ctx.block.plugin.as_ref() {
+pub fn image_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
+    let block_id = block.id;
+    let meta = match block.plugin.as_ref() {
         Some(m) => m,
         None => {
             return label(|| "(image: missing meta)".to_string())
@@ -56,14 +57,14 @@ pub fn image_widget(ctx: &EditorContext) -> AnyView {
         alt.clone(),
         attrs.clone(),
         block_id,
-        ctx.on_action.clone(),
+        env.on_action.clone(),
     );
     let caption_field = attr_field(
         "caption".to_string(),
         caption,
         attrs,
         block_id,
-        ctx.on_action.clone(),
+        env.on_action.clone(),
     );
 
     v_stack((

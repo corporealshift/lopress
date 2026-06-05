@@ -12,8 +12,8 @@
 use crate::actions::BlockAction;
 use crate::model::style_span::StyleSpan;
 use crate::model::sync::{canonicalize_body, rope_and_spans_to_runs};
-use crate::model::types::{Align, BlockBody, BlockId, TableCell, TableData, TableRow};
-use crate::ui::blocks::editor_registry::EditorContext;
+use crate::model::types::{Align, BlockBody, BlockId, EditorBlock, TableCell, TableData, TableRow};
+use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
     StructuralKey,
@@ -90,24 +90,21 @@ fn collect_table(
 }
 
 /// Build the editable table view.
-#[allow(clippy::too_many_arguments, clippy::cast_possible_truncation)]
-pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
-    let BlockBody::Table(data) = &ctx.block.body else {
+#[allow(clippy::cast_possible_truncation)]
+pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
+    let BlockBody::Table(data) = &block.body else {
         #[cfg(debug_assertions)]
         eprintln!(
             "[fallback] table widget: {:?} has non-table body",
-            ctx.block.id
+            block.id
         );
-        return crate::ui::blocks::fallback::fallback_block_view(ctx.block, ctx.focus_pub)
+        return crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub)
             .into_any();
     };
-    let block_id = ctx.block.id;
-    let on_action = ctx.on_action.clone();
-    let focus_target = ctx.focus_target;
-    let focus_pub = ctx.focus_pub;
-    let current_doc = ctx.current_doc;
-    let on_undo = Rc::clone(&ctx.on_undo);
-    let on_redo = Rc::clone(&ctx.on_redo);
+    let block_id = block.id;
+    let on_action = env.on_action.clone();
+    let focus_pub = env.focus_pub;
+    let current_doc = env.current_doc;
 
     let align = data.align.clone();
     let row_ids: Vec<BlockId> = data.rows.iter().map(|r| r.id).collect();
@@ -177,12 +174,7 @@ pub fn table_editor_widget(ctx: &EditorContext) -> AnyView {
                 state,
                 cell.id,
                 block_id,
-                on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                Rc::clone(&on_undo),
-                Rc::clone(&on_redo),
+                env,
                 commit,
                 structural_key,
                 /* slash_eligible */ false,
