@@ -417,7 +417,7 @@ mod label_tests {
         // Construct decls whose order differs from the attrs map keys.
         // Before the fix, decls[0] ("b") would be matched with names[0] ("a"),
         // writing the wrong key. After the fix, each row uses decl.name.
-        let decls = vec![
+        let decls = [
             AttrDecl {
                 name: "b".to_string(),
                 kind: AttrType::String,
