@@ -12,8 +12,9 @@
 //!      editable widget the rest of the editor uses.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc};
-use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
+use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::ui::blocks::env::BlockEnv;
+use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -24,7 +25,6 @@ use floem::views::{
 use floem::{AnyView, IntoView};
 use lopress_plugin::{AttrDecl, AttrType};
 use serde_json::Value;
-use std::rc::Rc;
 
 const HEADER_BG: Color = Color::rgb8(238, 234, 250);
 const HEADER_FG: Color = Color::rgb8(80, 60, 130);
@@ -32,15 +32,9 @@ const FORM_BG: Color = Color::rgb8(250, 250, 252);
 const BORDER: Color = Color::rgb8(220, 215, 235);
 
 /// Build the full plugin block view.
-#[allow(clippy::too_many_arguments)]
 pub fn plugin_block_view(
     block: &EditorBlock,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> AnyView {
     let block_id = block.id;
     let Some(meta) = block.plugin.clone() else {
@@ -50,12 +44,7 @@ pub fn plugin_block_view(
 
     let body = render_body(
         block,
-        on_action.clone(),
-        focus_target,
-        focus_pub,
-        current_doc,
-        on_undo,
-        on_redo,
+        env,
     );
 
     // Builtin (base-plugin) blocks suppress plugin chrome: no header strip,
@@ -79,7 +68,7 @@ pub fn plugin_block_view(
     });
 
     let attrs_sig: RwSignal<serde_json::Map<String, Value>> = RwSignal::new(meta.attrs.clone());
-    let on_action_for_attrs = on_action.clone();
+    let on_action_for_attrs = env.on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
     v_stack((header, form, body))
@@ -357,28 +346,14 @@ fn attr_select(
 
 fn render_body(
     block: &EditorBlock,
-    on_action: ActionSink,
-    focus_target: RwSignal<Option<BlockId>>,
-    focus_pub: FocusPublisher,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    on_undo: Rc<dyn Fn()>,
-    on_redo: Rc<dyn Fn()>,
+    env: &BlockEnv,
 ) -> AnyView {
-    use crate::ui::blocks::editor_registry::{editor_for, EditorContext};
+    use crate::ui::blocks::editor_registry::editor_for;
 
     // Registry path: a manifest `editor` key with a registered widget wins.
     if let Some(key) = block.plugin.as_ref().and_then(|m| m.editor.as_deref()) {
         if let Some(widget) = editor_for(key) {
-            let ctx = EditorContext {
-                block,
-                on_action: on_action.clone(),
-                focus_target,
-                focus_pub,
-                current_doc,
-                on_undo: Rc::clone(&on_undo),
-                on_redo: Rc::clone(&on_redo),
-            };
-            return widget(&ctx);
+            return widget(block, env);
         }
     }
 
@@ -389,48 +364,28 @@ fn render_body(
         (BlockKind::Paragraph, BlockBody::Inline(runs)) => paragraph::render_paragraph_editable(
             runs,
             block_id,
-            on_action,
-            focus_target,
-            focus_pub,
-            current_doc,
-            on_undo,
-            on_redo,
+            env,
         )
         .into_any(),
         (BlockKind::Heading(level), BlockBody::Inline(runs)) => heading::render_heading_editable(
             *level,
             runs,
             block_id,
-            on_action,
-            focus_target,
-            focus_pub,
-            current_doc,
-            on_undo,
-            on_redo,
+            env,
         )
         .into_any(),
         (BlockKind::Code { lang }, BlockBody::Code(text)) => code_editor::editable_code_view(
             text,
             lang,
             block_id,
-            on_action,
-            focus_target,
-            focus_pub,
-            current_doc,
-            Rc::clone(&on_undo),
-            Rc::clone(&on_redo),
+            env,
         )
         .into_any(),
         (BlockKind::List { ordered }, BlockBody::List(items)) => list::editable_list_view(
             items,
             block_id,
             *ordered,
-            on_action,
-            focus_target,
-            focus_pub,
-            current_doc,
-            on_undo,
-            on_redo,
+            env,
         ),
         _ => {
             #[cfg(debug_assertions)]
@@ -438,7 +393,7 @@ fn render_body(
                 "[fallback] plugin block {:?}: kind/body mismatch ({:?} + {:?})",
                 block.id, block.kind, block.body
             );
-            crate::ui::blocks::fallback::fallback_block_view(block, focus_pub).into_any()
+            crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
     }
 }
