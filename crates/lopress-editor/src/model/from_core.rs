@@ -1,3 +1,4 @@
+use crate::model::descriptor::{self, BodyShape};
 use crate::model::inline::parse_inline;
 use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, ListItem, PluginMeta,
@@ -134,18 +135,30 @@ fn list_items_from_block(b: &Block) -> Vec<ListItem> {
 /// `code` are the native types migrated so far; any other native editor key
 /// is unreachable today and degrades to `Opaque` for a verbatim round-trip.
 fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
-    match decl.editor.as_deref() {
-        Some("list") => native_list_from_core(b, decl),
-        Some("code") => native_code_from_core(b, decl),
-        Some("paragraph") => native_paragraph_from_core(b, decl),
-        Some("heading") => native_heading_from_core(b, decl),
-        Some("image") => native_image_from_core(b, decl),
-        Some("separator") => EditorBlock::separator(),
-        Some("table") => native_table_from_core(b),
-        _ => EditorBlock::opaque(
-            b.r#type.clone(),
-            serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
-        ),
+    let core_type = b.r#type.as_str();
+    let desc = descriptor::descriptor_for_native(core_type);
+
+    match desc.map(|d| d.body_shape) {
+        Some(BodyShape::Code) => native_code_from_core(b, decl),
+        Some(BodyShape::List) => native_list_from_core(b, decl),
+        Some(BodyShape::Table) => native_table_from_core(b),
+        Some(BodyShape::Inline) => {
+            // Inline: paragraph or heading — dispatch by editor key.
+            match desc.map(|d| d.editor) {
+                Some(descriptor::EDITOR_HEADING) => native_heading_from_core(b, decl),
+                _ => native_paragraph_from_core(b, decl),
+            }
+        }
+        Some(BodyShape::Opaque) | None => {
+            // Fallback: separator or unknown.
+            match decl.editor.as_deref() {
+                Some(descriptor::EDITOR_SEPARATOR) => EditorBlock::separator(),
+                _ => EditorBlock::opaque(
+                    core_type.to_string(),
+                    serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+                ),
+            }
+        }
     }
 }
 
