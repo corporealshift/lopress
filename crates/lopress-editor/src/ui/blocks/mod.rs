@@ -21,6 +21,7 @@ pub mod separator;
 pub mod style_span;
 pub mod table;
 
+use crate::model::descriptor;
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
@@ -29,6 +30,7 @@ use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
+use std::rc::Rc;
 
 /// Border color for the block that currently holds focus.
 const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
@@ -55,12 +57,30 @@ const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246)
 pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let kind = block.kind.clone();
+    let block_editor = block
+        .plugin
+        .as_ref()
+        .and_then(|m| m.editor.clone())
+        .unwrap_or_else(|| Rc::from(descriptor::EDITOR_PARAGRAPH));
+    let block_attrs = block
+        .plugin
+        .as_ref()
+        .map(|m| m.attrs.clone())
+        .unwrap_or_default();
 
     // Plugin blocks take precedence: header strip + attr form + body editor.
     // Built-in dispatch only runs when the block isn't plugin-flagged.
     if block.plugin.is_some() {
         let plugin_view = plugin::plugin_block_view(block, env);
-        return wrap_block(plugin_view, block_id, kind, dnd, env);
+        return wrap_block(
+            plugin_view,
+            block_id,
+            kind,
+            dnd,
+            env,
+            block_editor,
+            block_attrs,
+        );
     }
 
     let body = match (&block.kind, &block.body) {
@@ -84,7 +104,7 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
         }
     };
 
-    wrap_block(body, block_id, kind, dnd, env)
+    wrap_block(body, block_id, kind, dnd, env, block_editor, block_attrs)
 }
 
 /// Wrap a block's body in the shared chrome: a drag-handle gutter, hover/focus
@@ -98,9 +118,11 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
 fn wrap_block(
     body: AnyView,
     block_id: BlockId,
-    kind: BlockKind,
+    _kind: BlockKind,
     dnd: DndState,
     env: &BlockEnv,
+    block_editor: Rc<str>,
+    block_attrs: serde_json::Map<String, serde_json::Value>,
 ) -> AnyView {
     // Capture env fields into owned/copy types so the closures outlive `env`.
     let focus_block = env.focus_pub.block;
@@ -156,8 +178,14 @@ fn wrap_block(
             move || focus_block.get() == Some(block_id),
             move |is_focused| {
                 if is_focused {
-                    block_toolbar_for(block_id, kind.clone(), focus_pub, on_action.clone())
-                        .into_any()
+                    block_toolbar_for(
+                        block_id,
+                        block_editor.clone(),
+                        block_attrs.clone(),
+                        focus_pub,
+                        on_action.clone(),
+                    )
+                    .into_any()
                 } else {
                     empty().into_any()
                 }

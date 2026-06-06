@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
 use lopress_editor::actions::{apply, BlockAction};
-use lopress_editor::model::types::{BlockKind, EditorBlock, EditorDoc, InlineRun};
+use lopress_editor::model::types::{EditorBlock, EditorDoc, InlineRun};
 
 fn doc_with(blocks: Vec<EditorBlock>) -> EditorDoc {
     EditorDoc {
@@ -49,7 +49,7 @@ fn inverse_of_merge_with_prev_is_split_at_join_point() {
 }
 
 #[test]
-fn inverse_of_change_type_is_change_type_with_old_kind() {
+fn inverse_of_change_type_is_change_type_with_old_editor() {
     let b = para("text");
     let id = b.id;
     let doc = doc_with(vec![b]);
@@ -57,13 +57,23 @@ fn inverse_of_change_type_is_change_type_with_old_kind() {
         &doc,
         BlockAction::ChangeType {
             block_id: id,
-            new_kind: BlockKind::Heading(2),
+            new_editor: std::rc::Rc::from("heading"),
+            new_attrs: Box::new({
+                let mut m = serde_json::Map::new();
+                m.insert("level".into(), 2u64.into());
+                m
+            }),
         },
     );
     match inv {
-        BlockAction::ChangeType { block_id, new_kind } => {
+        BlockAction::ChangeType {
+            block_id,
+            new_editor,
+            new_attrs,
+        } => {
             assert_eq!(block_id, id);
-            assert_eq!(new_kind, BlockKind::Paragraph);
+            assert_eq!(&*new_editor, "paragraph");
+            assert!(new_attrs.is_empty());
         }
         _ => panic!("wrong variant"),
     }

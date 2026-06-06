@@ -119,8 +119,12 @@ pub fn editor_pane(
                 let inserter_items_for_select = Rc::clone(&inserter_items);
                 let on_insert_image_for_select = on_insert_image.clone();
                 let on_select = move |choice: SlashChoice| match choice {
-                    SlashChoice::Kind(new_kind) => {
-                        on_action_for_select(BlockAction::ChangeType { block_id, new_kind });
+                    SlashChoice::ChangeType { new_editor, attrs } => {
+                        on_action_for_select(BlockAction::ChangeType {
+                            block_id,
+                            new_editor,
+                            new_attrs: Box::new(attrs),
+                        });
                     }
                     SlashChoice::ReadMore => {
                         on_action_for_select(BlockAction::InsertAfter {

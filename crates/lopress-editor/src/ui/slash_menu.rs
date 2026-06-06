@@ -10,7 +10,7 @@
 //! (dismiss). Confirmation calls `on_select(choice)`; any close path calls
 //! `on_close()` so the editor pane can clear its `slash_menu_open` flag.
 
-use crate::model::types::BlockKind;
+use crate::model::descriptor;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
@@ -24,54 +24,107 @@ const POPUP_BG: Color = Color::rgb8(252, 252, 254);
 const BORDER: Color = Color::rgb8(210, 210, 215);
 const MUTED: Color = Color::rgb8(140, 140, 150);
 
-/// A slash-menu selection: either convert the current block to a built-in
-/// kind, or insert a plugin block.
-#[derive(Debug, Clone, PartialEq)]
+/// A slash-menu selection.
+#[derive(Debug, Clone)]
 pub enum SlashChoice {
-    Kind(BlockKind),
+    /// Change the current block to the given editor key with the given attrs.
+    ChangeType {
+        new_editor: Rc<str>,
+        attrs: serde_json::Map<String, serde_json::Value>,
+    },
+    /// Insert the read-more marker.
     ReadMore,
+    /// Insert an image block.
     Image,
+    /// Insert a separator block.
     Separator,
+    /// Insert a table block.
     Table,
+    /// Insert a plugin block.
     Plugin { type_name: Rc<str> },
 }
 
 /// The choices offered by the slash menu, in display order.
+///
+/// # Panics
+///
+/// Panics if any built-in descriptor's `default_block` produces a block
+/// without `PluginMeta` or without `editor: Some` — this is a programming
+/// error since all built-in constructors stamp plugin meta.
+#[allow(clippy::unwrap_used)] // safe: built-in PluginMeta always has editor: Some
 pub fn slash_menu_items() -> Vec<(String, SlashChoice)> {
-    vec![
-        (
-            "Paragraph".to_string(),
-            SlashChoice::Kind(BlockKind::Paragraph),
-        ),
-        (
-            "Heading 1".to_string(),
-            SlashChoice::Kind(BlockKind::Heading(1)),
-        ),
-        (
-            "Heading 2".to_string(),
-            SlashChoice::Kind(BlockKind::Heading(2)),
-        ),
-        (
-            "Heading 3".to_string(),
-            SlashChoice::Kind(BlockKind::Heading(3)),
-        ),
-        (
-            "Code block".to_string(),
-            SlashChoice::Kind(BlockKind::Code { lang: Rc::from("") }),
-        ),
-        (
-            "Unordered list".to_string(),
-            SlashChoice::Kind(BlockKind::List { ordered: false }),
-        ),
-        (
-            "Ordered list".to_string(),
-            SlashChoice::Kind(BlockKind::List { ordered: true }),
-        ),
-        ("Image".to_string(), SlashChoice::Image),
-        ("Read more".to_string(), SlashChoice::ReadMore),
-        ("Separator".to_string(), SlashChoice::Separator),
-        ("Table".to_string(), SlashChoice::Table),
-    ]
+    let mut items: Vec<(String, SlashChoice)> = descriptor::slash_menu_entries()
+        .iter()
+        .map(|(label, _default_block_fn)| {
+            // Build SlashChoice directly from known descriptor info.
+            // Image/Separator/Table insert new blocks rather than changing
+            // the current block, so they use dedicated variants.
+            let choice = match *label {
+                "Paragraph" => {
+                    let meta = crate::model::types::PluginMeta::paragraph();
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Heading 1" => {
+                    let meta = crate::model::types::PluginMeta::heading(1);
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Heading 2" => {
+                    let meta = crate::model::types::PluginMeta::heading(2);
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Heading 3" => {
+                    let meta = crate::model::types::PluginMeta::heading(3);
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Code block" => {
+                    let meta = crate::model::types::PluginMeta::code("");
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Unordered list" => {
+                    let meta = crate::model::types::PluginMeta::list(false);
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Ordered list" => {
+                    let meta = crate::model::types::PluginMeta::list(true);
+                    SlashChoice::ChangeType {
+                        new_editor: meta.editor.unwrap(),
+                        attrs: meta.attrs,
+                    }
+                }
+                "Image" => SlashChoice::Image,
+                "Separator" => SlashChoice::Separator,
+                "Table" => SlashChoice::Table,
+                _ => SlashChoice::ChangeType {
+                    new_editor: Rc::from(descriptor::EDITOR_PARAGRAPH),
+                    attrs: serde_json::Map::new(),
+                },
+            };
+            (label.to_string(), choice)
+        })
+        .collect();
+    // "Read more" is not in the descriptor menu (it's inserted by a dedicated
+    // affordance), but it's still part of the slash menu. Insert it after
+    // Image (index 7) and before Separator (index 8).
+    items.insert(8, ("Read more".to_string(), SlashChoice::ReadMore));
+    items
 }
 
 /// Fuzzy-match `query` against `label`, returning a relevance score (higher is
@@ -300,19 +353,43 @@ mod tests {
         vec![
             (
                 "Paragraph".to_string(),
-                SlashChoice::Kind(BlockKind::Paragraph),
+                SlashChoice::ChangeType {
+                    new_editor: Rc::from("paragraph"),
+                    attrs: serde_json::Map::new(),
+                },
             ),
             (
                 "Heading 1".to_string(),
-                SlashChoice::Kind(BlockKind::Heading(1)),
+                SlashChoice::ChangeType {
+                    new_editor: Rc::from("heading"),
+                    attrs: {
+                        let mut m = serde_json::Map::new();
+                        m.insert("level".into(), 1u64.into());
+                        m
+                    },
+                },
             ),
             (
                 "Unordered list".to_string(),
-                SlashChoice::Kind(BlockKind::List { ordered: false }),
+                SlashChoice::ChangeType {
+                    new_editor: Rc::from("list"),
+                    attrs: {
+                        let mut m = serde_json::Map::new();
+                        m.insert("ordered".into(), false.into());
+                        m
+                    },
+                },
             ),
             (
                 "Ordered list".to_string(),
-                SlashChoice::Kind(BlockKind::List { ordered: true }),
+                SlashChoice::ChangeType {
+                    new_editor: Rc::from("list"),
+                    attrs: {
+                        let mut m = serde_json::Map::new();
+                        m.insert("ordered".into(), true.into());
+                        m
+                    },
+                },
             ),
             (
                 "Callout".to_string(),
@@ -325,6 +402,31 @@ mod tests {
 
     fn labels(v: &[(String, SlashChoice)]) -> Vec<&str> {
         v.iter().map(|(l, _)| l.as_str()).collect()
+    }
+
+    #[test]
+    fn slash_menu_labels_match_hardcoded_order() {
+        // The descriptor-projected slash menu must reproduce today's hardcoded
+        // label sequence exactly. This pins the menu order so future changes
+        // are visible.
+        let items = slash_menu_items();
+        let labels: Vec<&str> = items.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Paragraph",
+                "Heading 1",
+                "Heading 2",
+                "Heading 3",
+                "Code block",
+                "Unordered list",
+                "Ordered list",
+                "Image",
+                "Read more",
+                "Separator",
+                "Table",
+            ]
+        );
     }
 
     #[test]

@@ -45,13 +45,19 @@ pub enum BodyShape {
     Opaque,
 }
 
-/// Human-readable presentation entry for the slash menu or toolbar.
+/// One entry in the slash menu or toolbar for a block type.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(unpredictable_function_pointer_comparisons)] // default_block is a fn pointer
 pub struct MenuEntry {
-    /// Display title shown in the slash menu (e.g. "Paragraph", "Heading 2").
-    pub title: &'static str,
-    /// Category bucket for grouping in the menu (e.g. "Text", "Blocks").
+    /// Display label in the slash menu. `None` → not in slash menu.
+    pub slash_label: Option<&'static str>,
+    /// Display label in the toolbar. `None` → not in toolbar.
+    pub toolbar_label: Option<&'static str>,
+    /// Category bucket for grouping.
     pub category: &'static str,
+    /// Construct the default block for this entry. Used by the slash menu to
+    /// insert a fresh block and by the toolbar to derive the ChangeType action.
+    pub default_block: fn() -> EditorBlock,
 }
 
 /// Everything the editor needs to know about one built-in block type, in one place.
@@ -80,9 +86,10 @@ pub struct BlockDescriptor {
     pub body_shape: BodyShape,
     /// Whether this block is a built-in (base plugin) — suppresses plugin chrome.
     pub builtin: bool,
-    /// Slash-menu / toolbar presentation. `None` → not directly insertable
-    /// (e.g. "more" marker is inserted by a dedicated affordance, not the menu).
-    pub menu: Option<MenuEntry>,
+    /// Slash-menu / toolbar presentation. A list of entries — each entry
+    /// may or may not appear in each menu (controlled by `slash_label` /
+    /// `toolbar_label`). `&[]` → not in any menu.
+    pub menu: &'static [MenuEntry],
     /// Construct the canonical empty/default block for this type (used by the
     /// slash menu, toolbar ChangeType, and split's tail-block creation).
     ///
@@ -115,10 +122,12 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_PARAGRAPH),
             body_shape: BodyShape::Inline,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Paragraph",
+            menu: &[MenuEntry {
+                slash_label: Some("Paragraph"),
+                toolbar_label: Some("P"),
                 category: "Text",
-            }),
+                default_block: || EditorBlock::paragraph(vec![]),
+            }],
             default_block: || EditorBlock::paragraph(vec![]),
         },
         BlockDescriptor {
@@ -126,10 +135,44 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_HEADING),
             body_shape: BodyShape::Inline,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Heading",
-                category: "Text",
-            }),
+            menu: &[
+                MenuEntry {
+                    slash_label: Some("Heading 1"),
+                    toolbar_label: Some("H1"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(1, vec![]),
+                },
+                MenuEntry {
+                    slash_label: Some("Heading 2"),
+                    toolbar_label: Some("H2"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(2, vec![]),
+                },
+                MenuEntry {
+                    slash_label: Some("Heading 3"),
+                    toolbar_label: Some("H3"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(3, vec![]),
+                },
+                MenuEntry {
+                    slash_label: None,
+                    toolbar_label: Some("H4"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(4, vec![]),
+                },
+                MenuEntry {
+                    slash_label: None,
+                    toolbar_label: Some("H5"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(5, vec![]),
+                },
+                MenuEntry {
+                    slash_label: None,
+                    toolbar_label: Some("H6"),
+                    category: "Text",
+                    default_block: || EditorBlock::heading(6, vec![]),
+                },
+            ],
             default_block: || EditorBlock::heading(1, vec![]),
         },
         BlockDescriptor {
@@ -137,10 +180,12 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_CODE),
             body_shape: BodyShape::Code,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Code block",
+            menu: &[MenuEntry {
+                slash_label: Some("Code block"),
+                toolbar_label: Some("Code"),
                 category: "Blocks",
-            }),
+                default_block: || EditorBlock::code(String::new(), String::new()),
+            }],
             default_block: || EditorBlock::code(String::new(), String::new()),
         },
         BlockDescriptor {
@@ -148,10 +193,20 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_LIST),
             body_shape: BodyShape::List,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Unordered list",
-                category: "Blocks",
-            }),
+            menu: &[
+                MenuEntry {
+                    slash_label: Some("Unordered list"),
+                    toolbar_label: Some("UL"),
+                    category: "Blocks",
+                    default_block: || EditorBlock::list(false, vec![]),
+                },
+                MenuEntry {
+                    slash_label: Some("Ordered list"),
+                    toolbar_label: Some("OL"),
+                    category: "Blocks",
+                    default_block: || EditorBlock::list(true, vec![]),
+                },
+            ],
             default_block: || EditorBlock::list(false, vec![]),
         },
         BlockDescriptor {
@@ -159,10 +214,12 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_IMAGE),
             body_shape: BodyShape::Opaque,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Image",
+            menu: &[MenuEntry {
+                slash_label: Some("Image"),
+                toolbar_label: None,
                 category: "Blocks",
-            }),
+                default_block: || EditorBlock::image("", "", ""),
+            }],
             default_block: || EditorBlock::image("", "", ""),
         },
         BlockDescriptor {
@@ -170,7 +227,7 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: None,
             body_shape: BodyShape::Inline,
             builtin: true,
-            menu: None, // "more" is inserted by a dedicated affordance, not the slash menu
+            menu: &[], // "more" is inserted by a dedicated affordance, not the slash menu
             default_block: || EditorBlock::read_more(),
         },
         BlockDescriptor {
@@ -178,10 +235,12 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_SEPARATOR),
             body_shape: BodyShape::Inline,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Separator",
+            menu: &[MenuEntry {
+                slash_label: Some("Separator"),
+                toolbar_label: None,
                 category: "Blocks",
-            }),
+                default_block: || EditorBlock::separator(),
+            }],
             default_block: || EditorBlock::separator(),
         },
         BlockDescriptor {
@@ -189,10 +248,12 @@ fn descriptor_table() -> &'static [BlockDescriptor] {
             native: Some(EDITOR_TABLE),
             body_shape: BodyShape::Table,
             builtin: true,
-            menu: Some(MenuEntry {
-                title: "Table",
+            menu: &[MenuEntry {
+                slash_label: Some("Table"),
+                toolbar_label: None,
                 category: "Blocks",
-            }),
+                default_block: || EditorBlock::table_default(),
+            }],
             default_block: || EditorBlock::table_default(),
         },
     ]
@@ -213,6 +274,52 @@ pub fn descriptor_for_native(core_type: &str) -> Option<&'static BlockDescriptor
     descriptor_table()
         .iter()
         .find(|d| d.native == Some(core_type))
+}
+
+/// Slash-menu items: descriptors filtered to entries with `slash_label`.
+/// Returns `(label, default_block_fn)` tuples in display order.
+///
+/// # Panics
+///
+/// Panics if a descriptor's `slash_menu_entries` filter passes an entry
+/// whose `slash_label` is `None` — this is a programming error since the
+/// filter guarantees only `Some` entries are mapped.
+#[allow(clippy::unwrap_used)] // safe: filter guarantees slash_label.is_some()
+#[allow(clippy::type_complexity)]
+pub fn slash_menu_entries() -> &'static [(&'static str, fn() -> EditorBlock)] {
+    static CACHED: std::sync::OnceLock<Vec<(&'static str, fn() -> EditorBlock)>> =
+        std::sync::OnceLock::new();
+    CACHED.get_or_init(|| {
+        descriptors()
+            .iter()
+            .flat_map(|d| d.menu.iter())
+            .filter(|e| e.slash_label.is_some())
+            .map(|e| (e.slash_label.unwrap(), e.default_block))
+            .collect()
+    })
+}
+
+/// Toolbar items: descriptors filtered to entries with `toolbar_label`.
+/// Returns `(label, default_block_fn)` tuples in display order.
+///
+/// # Panics
+///
+/// Panics if a descriptor's `toolbar_menu_entries` filter passes an entry
+/// whose `toolbar_label` is `None` — this is a programming error since the
+/// filter guarantees only `Some` entries are mapped.
+#[allow(clippy::unwrap_used)] // safe: filter guarantees toolbar_label.is_some()
+#[allow(clippy::type_complexity)]
+pub fn toolbar_menu_entries() -> &'static [(&'static str, fn() -> EditorBlock)] {
+    static CACHED: std::sync::OnceLock<Vec<(&'static str, fn() -> EditorBlock)>> =
+        std::sync::OnceLock::new();
+    CACHED.get_or_init(|| {
+        descriptors()
+            .iter()
+            .flat_map(|d| d.menu.iter())
+            .filter(|e| e.toolbar_label.is_some())
+            .map(|e| (e.toolbar_label.unwrap(), e.default_block))
+            .collect()
+    })
 }
 
 #[cfg(test)]
@@ -262,11 +369,10 @@ mod exclusivity_tests {
     }
 
     #[test]
-    fn blockkind_variants_align_with_descriptor_bodies() {
-        // BlockKind variants and descriptor body_shapes agree on the mapping:
-        // Paragraph → Inline, Heading(n) → Inline, Code → Code, List → List,
-        // Table → Table, Opaque → Opaque.
-        // This test asserts the alignment; Stage B deletes BlockKind.
+    fn descriptors_align_with_descriptor_bodies() {
+        // Descriptor body_shapes agree on the mapping:
+        // paragraph → Inline, heading → Inline, code → Code, list → List,
+        // table → Table, image → Opaque.
 
         let paragraph_desc = descriptor_for(EDITOR_PARAGRAPH).unwrap();
         assert!(matches!(paragraph_desc.body_shape, BodyShape::Inline));

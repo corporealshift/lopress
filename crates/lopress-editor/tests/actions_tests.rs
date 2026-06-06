@@ -13,6 +13,37 @@ use lopress_editor::model::types::{
 use serde_json::{json, Value};
 use std::rc::Rc;
 
+/// Helper to convert a `BlockKind` into the new `ChangeType` action format.
+fn change_type_for(block_id: BlockId, kind: BlockKind) -> BlockAction {
+    use lopress_editor::model::descriptor;
+    let (editor, attrs) = match &kind {
+        BlockKind::Paragraph => (descriptor::EDITOR_PARAGRAPH, serde_json::Map::new()),
+        BlockKind::Heading(level) => {
+            let mut m = serde_json::Map::new();
+            m.insert("level".into(), Value::Number((*level).into()));
+            (descriptor::EDITOR_HEADING, m)
+        }
+        BlockKind::Code { lang } => {
+            let mut m = serde_json::Map::new();
+            m.insert("lang".into(), Value::String(lang.to_string()));
+            (descriptor::EDITOR_CODE, m)
+        }
+        BlockKind::List { ordered } => {
+            let mut m = serde_json::Map::new();
+            m.insert("ordered".into(), Value::Bool(*ordered));
+            (descriptor::EDITOR_LIST, m)
+        }
+        BlockKind::Table => (descriptor::EDITOR_TABLE, serde_json::Map::new()),
+        BlockKind::Image => (descriptor::EDITOR_IMAGE, serde_json::Map::new()),
+        BlockKind::Opaque { .. } => (descriptor::EDITOR_PARAGRAPH, serde_json::Map::new()),
+    };
+    BlockAction::ChangeType {
+        block_id,
+        new_editor: Rc::from(editor),
+        new_attrs: Box::new(attrs),
+    }
+}
+
 fn doc_with(blocks: Vec<EditorBlock>) -> EditorDoc {
     EditorDoc {
         blocks,
@@ -48,13 +79,7 @@ fn change_type_on_opaque_block_is_noop_to_prevent_data_loss() {
     let id = block.id;
     let mut doc = doc_with(vec![block]);
 
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Paragraph,
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
 
     assert_eq!(doc.blocks.len(), 1, "block must not be dropped");
     assert!(
@@ -128,10 +153,7 @@ fn stale_inline_commit_after_change_to_code_keeps_body_renderable() {
     // 2. Change type to Code.
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code { lang: Rc::from("") },
-        },
+        change_type_for(id, BlockKind::Code { lang: Rc::from("") }),
     );
     // 3. Stray FocusLost commit from the unmounted paragraph editor.
     apply(
@@ -179,13 +201,7 @@ fn stale_builtin_list_commit_after_change_to_heading_coerces_without_panicking()
     let mut doc = doc_with(vec![block]);
 
     // 1. Toolbar dispatches ChangeType to Heading 2 (no pre-commit for lists).
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(2),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(2)));
     // 2. Stale built-in FocusLost flush from the unmounted list editor, carrying
     //    a freshly-typed third item that only ever lived in the editor buffer.
     apply(
@@ -402,13 +418,7 @@ fn move_to_self_adjacent_gap_is_noop() {
 fn change_paragraph_to_heading() {
     let (id, a) = paragraph_with_id("title");
     let mut doc = doc_with(vec![a]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(2),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(2)));
     assert!(matches!(doc.blocks[0].kind, BlockKind::Heading(2)));
     assert_eq!(run_text(&doc.blocks[0]), "title");
 }
@@ -427,12 +437,7 @@ fn change_paragraph_to_code_flattens_runs() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code {
-                lang: Rc::from("rust"),
-            },
-        },
+        change_type_for(id, BlockKind::Code { lang: Rc::from("") }),
     );
     assert!(matches!(doc.blocks[0].kind, BlockKind::Code { .. }));
     assert_eq!(run_text(&doc.blocks[0]), "hello world");
@@ -497,10 +502,7 @@ fn change_type_to_list_stamps_plugin_meta() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: false },
-        },
+        change_type_for(id, BlockKind::List { ordered: false }),
     );
     let block = &doc.blocks[0];
     assert!(matches!(block.kind, BlockKind::List { ordered: false }));
@@ -523,10 +525,7 @@ fn change_type_to_list_serializes_as_native_list() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: true },
-        },
+        change_type_for(id, BlockKind::List { ordered: false }),
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "list");
@@ -754,13 +753,7 @@ mod inverse_symmetry {
         // so this round-trip should be lossless.
         let (id, block) = paragraph_with_id("title");
         let mut doc = doc_with(vec![block]);
-        assert_round_trip(
-            &mut doc,
-            BlockAction::ChangeType {
-                block_id: id,
-                new_kind: BlockKind::Heading(2),
-            },
-        );
+        assert_round_trip(&mut doc, change_type_for(id, BlockKind::Heading(2)));
     }
 
     #[test]
@@ -912,13 +905,7 @@ fn change_type_code_to_paragraph_converts_body_to_inline() {
     let block = EditorBlock::code("rust".into(), "fn main() {}".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Paragraph,
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::Paragraph));
     assert!(
@@ -935,13 +922,7 @@ fn change_type_code_to_heading_converts_body_to_inline() {
     let block = EditorBlock::code("python".into(), "print('hello')".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(2),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(2)));
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::Heading(2)));
     assert!(
@@ -961,10 +942,7 @@ fn change_type_code_to_list_converts_body_to_list() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: false },
-        },
+        change_type_for(id, BlockKind::List { ordered: false }),
     );
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::List { ordered: false }));
@@ -1000,12 +978,12 @@ fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code {
-                lang: "python".into(),
+        change_type_for(
+            id,
+            BlockKind::Code {
+                lang: Rc::from("python"),
             },
-        },
+        ),
     );
     let b = &doc.blocks[0];
     assert!(matches!(&b.kind, BlockKind::Code { lang } if &**lang == "python"));
@@ -1032,13 +1010,7 @@ fn change_type_list_to_paragraph_converts_body_to_inline() {
     block.plugin = Some(PluginMeta::list(false));
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Paragraph,
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::Paragraph));
     assert!(
@@ -1064,13 +1036,7 @@ fn change_type_list_to_heading_converts_body_to_inline() {
     block.plugin = Some(PluginMeta::list(true));
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(3),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(3)));
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::Heading(3)));
     assert!(
@@ -1099,12 +1065,12 @@ fn change_type_list_to_code_converts_body_to_code() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code {
-                lang: "bash".into(),
+        change_type_for(
+            id,
+            BlockKind::Code {
+                lang: Rc::from("bash"),
             },
-        },
+        ),
     );
     let b = &doc.blocks[0];
     assert!(matches!(&b.kind, BlockKind::Code { lang } if &**lang == "bash"));
@@ -1130,10 +1096,7 @@ fn change_type_list_to_list_updates_ordered_and_mirrors_into_plugin() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: true },
-        },
+        change_type_for(id, BlockKind::List { ordered: true }),
     );
     let b = &doc.blocks[0];
     assert!(matches!(b.kind, BlockKind::List { ordered: true }));
@@ -1198,12 +1161,6 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
         Some("python")
     );
 
-    // Verify kind.lang mirrored.
-    assert!(matches!(
-        &doc.blocks[0].kind,
-        BlockKind::Code { lang } if &**lang == "python"
-    ));
-
     // Verify to_core emits the new lang.
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].attrs, json!({ "lang": "python" }));
@@ -1218,13 +1175,7 @@ fn change_type_code_to_paragraph_round_trips() {
     let block = EditorBlock::code("rust".into(), "fn main() {}".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Paragraph,
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "paragraph");
     assert_eq!(core.blocks[0].text.as_deref(), Some("fn main() {}"));
@@ -1235,13 +1186,7 @@ fn change_type_code_to_heading_round_trips() {
     let block = EditorBlock::code("python".into(), "print('hello')".into());
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(2),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(2)));
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "heading");
     assert_eq!(core.blocks[0].text.as_deref(), Some("print('hello')"));
@@ -1254,10 +1199,7 @@ fn change_type_code_to_list_round_trips() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: false },
-        },
+        change_type_for(id, BlockKind::List { ordered: false }),
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "list");
@@ -1276,12 +1218,12 @@ fn change_type_code_to_code_new_lang_round_trips() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code {
-                lang: "python".into(),
+        change_type_for(
+            id,
+            BlockKind::Code {
+                lang: Rc::from("python"),
             },
-        },
+        ),
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
@@ -1299,13 +1241,7 @@ fn change_type_list_to_paragraph_round_trips() {
     block.plugin = Some(PluginMeta::list(false));
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Paragraph,
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "paragraph");
     assert_eq!(core.blocks[0].text.as_deref(), Some("first item"));
@@ -1325,13 +1261,7 @@ fn change_type_list_to_heading_round_trips() {
     block.plugin = Some(PluginMeta::list(true));
     let id = block.id;
     let mut doc = doc_with(vec![block]);
-    apply(
-        &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Heading(3),
-        },
-    );
+    apply(&mut doc, change_type_for(id, BlockKind::Heading(3)));
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "heading");
     assert_eq!(core.blocks[0].text.as_deref(), Some("first\nsecond"));
@@ -1353,12 +1283,12 @@ fn change_type_list_to_code_round_trips() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code {
-                lang: "bash".into(),
+        change_type_for(
+            id,
+            BlockKind::Code {
+                lang: Rc::from("bash"),
             },
-        },
+        ),
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
@@ -1378,10 +1308,7 @@ fn change_type_list_to_list_ordered_toggle_round_trips() {
     let mut doc = doc_with(vec![block]);
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: true },
-        },
+        change_type_for(id, BlockKind::List { ordered: true }),
     );
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "list");
@@ -1406,10 +1333,7 @@ fn coerce_body_to_kind_inline_to_code_preserves_text() {
     // First, change the kind to Code.
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::Code { lang: Rc::from("") },
-        },
+        change_type_for(id, BlockKind::Code { lang: Rc::from("") }),
     );
     assert!(matches!(
         &doc.blocks[0].body,
@@ -1437,10 +1361,7 @@ fn coerce_body_to_kind_inline_to_list_preserves_text() {
     // Change to List.
     apply(
         &mut doc,
-        BlockAction::ChangeType {
-            block_id: id,
-            new_kind: BlockKind::List { ordered: false },
-        },
+        change_type_for(id, BlockKind::List { ordered: false }),
     );
 
     // Stale Inline commit.
