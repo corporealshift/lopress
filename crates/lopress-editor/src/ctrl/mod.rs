@@ -360,8 +360,8 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                     let text: String = runs.iter().map(|r| r.text.as_str()).collect();
                     let kind = b
                         .plugin
-                        .as_ref()
-                        .and_then(|m| m.editor.as_deref())
+                        .editor
+                        .as_deref()
                         .map(|e| {
                             descriptor::descriptor_for(e)
                                 .map(|d| d.editor.to_string())
@@ -374,8 +374,8 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                     let text = crate::actions::body_to_flat_text(&BlockBody::Table(data.clone()));
                     let kind = b
                         .plugin
-                        .as_ref()
-                        .and_then(|m| m.editor.as_deref())
+                        .editor
+                        .as_deref()
                         .map(|e| {
                             descriptor::descriptor_for(e)
                                 .map(|d| d.editor.to_string())
@@ -387,8 +387,8 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                 BlockBody::Code(text) => {
                     let lang = b
                         .plugin
-                        .as_ref()
-                        .and_then(|m| m.attrs.get("lang"))
+                        .attrs
+                        .get("lang")
                         .and_then(|v| v.as_str())
                         .map(|s: &str| -> Rc<str> { Rc::from(s) })
                         .unwrap_or_else(|| Rc::from(""));
@@ -408,11 +408,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                     serde_json::json!({ "id": id, "kind": "List", "text": text })
                 }
                 BlockBody::Opaque(_) => {
-                    let type_name = b
-                        .plugin
-                        .as_ref()
-                        .map(|m| m.block_type_name.clone())
-                        .unwrap_or_else(|| Rc::from(""));
+                    let type_name = &b.plugin.block_type_name;
                     serde_json::json!({
                         "id": id,
                         "kind": format!("Opaque({type_name})"),

@@ -22,7 +22,7 @@ pub mod style_span;
 pub mod table;
 
 use crate::model::descriptor;
-use crate::model::types::{BlockBody, BlockId, EditorBlock};
+use crate::model::types::{BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
@@ -58,57 +58,14 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
     let block_id = block.id;
     let block_editor = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.editor.clone())
+        .editor
+        .clone()
         .unwrap_or_else(|| Rc::from(descriptor::EDITOR_PARAGRAPH));
-    let block_attrs = block
-        .plugin
-        .as_ref()
-        .map(|m| m.attrs.clone())
-        .unwrap_or_default();
+    let block_attrs = block.plugin.attrs.clone();
 
-    // Plugin blocks take precedence: header strip + attr form + body editor.
-    // Built-in dispatch only runs when the block isn't plugin-flagged.
-    if block.plugin.is_some() {
-        let plugin_view = plugin::plugin_block_view(block, env);
-        return wrap_block(
-            plugin_view,
-            block_id,
-            dnd,
-            env,
-            block_editor,
-            block_attrs,
-        );
-    }
-
-    let body = match &block.body {
-        BlockBody::Code(text) => {
-            let lang = block
-                .plugin
-                .as_ref()
-                .and_then(|m| m.attrs.get("lang"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            code_editor::editable_code_view(text, lang, block_id, env)
-        }
-        BlockBody::Opaque(_) => {
-            // Opaque blocks load from disk with unknown/removed plugin types.
-            // Route through the fallback so they're visible and recoverable,
-            // not a silent drop or a read-only card with no toolbar.
-            fallback::fallback_block_view(block, env.focus_pub).into_any()
-        }
-        // Body mismatch — render fallback so content is visible and recoverable.
-        _ => {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "[fallback] block {:?}: body {:?} has no non-plugin renderer",
-                block_id, block.body
-            );
-            fallback::fallback_block_view(block, env.focus_pub).into_any()
-        }
-    };
-
-    wrap_block(body, block_id, dnd, env, block_editor, block_attrs)
+    // Every block carries PluginMeta; render via the plugin path.
+    let plugin_view = plugin::plugin_block_view(block, env);
+    wrap_block(plugin_view, block_id, dnd, env, block_editor, block_attrs)
 }
 
 /// Wrap a block's body in the shared chrome: a drag-handle gutter, hover/focus

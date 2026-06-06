@@ -34,10 +34,7 @@ const BORDER: Color = Color::rgb8(220, 215, 235);
 /// Build the full plugin block view.
 pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
-    let Some(meta) = block.plugin.clone() else {
-        // Shouldn't be called for non-plugin blocks; render a placeholder.
-        return label(|| "(missing plugin meta)".to_string()).into_any();
-    };
+    let meta = block.plugin.clone();
 
     let body = render_body(block, env);
 
@@ -348,7 +345,7 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     use crate::ui::blocks::editor_registry::editor_for;
 
     // Registry path: a manifest `editor` key with a registered widget wins.
-    if let Some(key) = block.plugin.as_ref().and_then(|m| m.editor.as_deref()) {
+    if let Some(key) = block.plugin.editor.as_deref() {
         if let Some(widget) = editor_for(key) {
             return widget(block, env);
         }

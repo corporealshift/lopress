@@ -20,14 +20,7 @@ use serde_json::Value;
 /// `FocusLost` via `BlockAction::EditAttrs`.
 pub fn image_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
-    let meta = match block.plugin.as_ref() {
-        Some(m) => m,
-        None => {
-            return label(|| "(image: missing meta)".to_string())
-                .style(|s| s.color(Color::rgb8(180, 60, 60)))
-                .into_any()
-        }
-    };
+    let meta = &block.plugin;
     let attrs = meta.attrs.clone();
     let src = attrs
         .get("src")

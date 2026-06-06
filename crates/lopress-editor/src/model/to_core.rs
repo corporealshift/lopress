@@ -17,49 +17,38 @@ pub fn doc_to_core(doc: &EditorDoc) -> Document {
 }
 
 fn block_to_core(b: &EditorBlock) -> Block {
-    // Plugin-flagged blocks: a `native` claim serializes as bare native
+    // Every block carries PluginMeta. A `native` claim serializes as bare native
     // markdown of that core type; otherwise the comment container is used.
-    if let Some(meta) = &b.plugin {
-        // The read-more marker is an empty container: emit no children so it
-        // round-trips as a clean `<!-- lopress:more -->`/`<!-- /lopress:more -->`
-        // pair (plugin_block_to_core would otherwise emit one inner child).
-        if &*meta.block_type_name == "lopress:more" {
-            return Block {
-                r#type: "lopress:more".into(),
-                attrs: empty_attrs(),
-                children: vec![],
-                text: None,
-            };
-        }
-        return match &meta.native {
-            Some(core_type) => native_block_to_core(b, meta, core_type),
-            None => plugin_block_to_core(b, meta),
-        };
-    }
-    match (&b.kind, &b.body) {
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
-            r#type: "code".into(),
-            attrs: json!({ "lang": &**lang }),
-            children: vec![],
-            text: Some(text.clone()),
-        },
-        (BlockKind::Opaque { type_name }, BlockBody::Opaque(value)) => {
-            serde_json::from_value::<Block>(value.clone()).unwrap_or_else(|_| Block {
-                r#type: type_name.to_string(),
-                attrs: empty_attrs(),
-                children: vec![],
-                text: None,
-            })
-        }
-        // kind / body mismatch shouldn't arise from the constructors, but if
-        // it does, fall back to an empty paragraph rather than panic.
-        _ => Block {
-            r#type: "paragraph".into(),
+    let meta = &b.plugin;
+    // The read-more marker is an empty container: emit no children so it
+    // round-trips as a clean `<!-- lopress:more -->`/`<!-- /lopress:more -->`
+    // pair (plugin_block_to_core would otherwise emit one inner child).
+    if &*meta.block_type_name == "lopress:more" {
+        return Block {
+            r#type: "lopress:more".into(),
             attrs: empty_attrs(),
             children: vec![],
-            text: Some(String::new()),
-        },
+            text: None,
+        };
     }
+    // Opaque bodies from unknown/removed plugin types or unconvertible native
+    // types carry the original serialized `Block` in their body value.
+    // Deserialize it directly so attrs and children round-trip verbatim.
+    // Skip `Value::Null` which is used by built-in image blocks (no body).
+    if let BlockBody::Opaque(ref value) = b.body {
+        if !value.is_null() {
+            return serde_json::from_value::<Block>(value.clone()).unwrap_or_else(|_| Block {
+                r#type: meta.block_type_name.to_string(),
+                attrs: empty_attrs(),
+                children: vec![],
+                text: None,
+            });
+        }
+    }
+    return match &meta.native {
+        Some(core_type) => native_block_to_core(b, meta, core_type),
+        None => plugin_block_to_core(b, meta),
+    };
 }
 
 /// Serialize a `native`-claiming plugin block to its core markdown form.
@@ -250,14 +239,14 @@ mod more_marker_tests {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
-            plugin: Some(PluginMeta {
+            plugin: PluginMeta {
                 block_type_name: Rc::from("lopress:more"),
                 attrs: serde_json::Map::new(),
                 attr_decls: Rc::from([]),
                 builtin: true,
                 editor: Some(Rc::from("more")),
                 native: None,
-            }),
+            },
         }
     }
 

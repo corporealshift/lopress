@@ -119,14 +119,14 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     );
     let mut list_attrs = serde_json::Map::new();
     list_attrs.insert("ordered".to_string(), serde_json::Value::Bool(false));
-    list_block.plugin = Some(PluginMeta {
+    list_block.plugin = PluginMeta {
         block_type_name: Rc::from("list"),
         attrs: list_attrs,
         attr_decls: Rc::from([]),
         builtin: true,
         editor: Some(Rc::from("list")),
         native: Some(Rc::from("list")),
-    });
+    };
     let editor_doc = EditorDoc {
         front_matter: FrontMatter::default(),
         blocks: vec![list_block],
@@ -272,11 +272,8 @@ fn code_block_carries_plugin_meta_after_from_core() {
     let editor = doc_from_core(&core, &registry);
 
     let block = &editor.blocks[0];
-    assert!(
-        block.plugin.is_some(),
-        "loaded code block must carry PluginMeta"
-    );
-    let meta = block.plugin.as_ref().unwrap();
+    // All blocks now carry PluginMeta.
+    let meta = &block.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "code");
     assert_eq!(meta.attrs.get("lang").and_then(Value::as_str), Some("rust"));
     assert!(meta.builtin);
@@ -312,10 +309,10 @@ fn code_attrs_lang_mutation_serializes_correctly() {
     let mut editor = doc_from_core(&core, &registry);
 
     // Mutate the lang in attrs.
-    if let Some(meta) = editor.blocks[0].plugin.as_mut() {
-        meta.attrs
-            .insert("lang".to_string(), Value::String("python".to_string()));
-    }
+    editor.blocks[0]
+        .plugin
+        .attrs
+        .insert("lang".to_string(), Value::String("python".to_string()));
 
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back.blocks[0].r#type, "code");
@@ -336,7 +333,8 @@ fn pluginless_code_block_round_trips() {
     };
 
     // Verify plugin-less.
-    assert!(doc.blocks[0].plugin.is_none());
+    // All blocks carry PluginMeta.
+    assert!(doc.blocks[0].plugin.block_type_name.len() > 0);
 
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
@@ -351,7 +349,7 @@ fn pluginless_code_block_round_trips() {
     let editor_back = doc_from_core(&core, &registry);
     // The code block now has PluginMeta (loaded through the registry path).
     assert!(
-        editor_back.blocks[0].plugin.is_some(),
+        editor_back.blocks[0].plugin.block_type_name.len() > 0,
         "loaded code block must carry PluginMeta"
     );
     assert!(matches!(
@@ -478,7 +476,7 @@ fn image_block_round_trips_with_caption() {
         "image kind lost: {:?}",
         b.kind
     );
-    let meta = b.plugin.as_ref().unwrap();
+    let meta = &b.plugin;
     assert_eq!(meta.editor.as_deref(), Some("image"));
     assert_eq!(meta.native.as_deref(), Some("image"));
     let back = doc_to_core(&edoc);
@@ -500,7 +498,7 @@ fn separator_loads_as_separator_not_paragraph() {
     let edoc = doc_from_core(&core, &reg);
     assert_eq!(edoc.blocks.len(), 3);
     let sep = &edoc.blocks[1];
-    let meta = sep.plugin.as_ref().unwrap();
+    let meta = &sep.plugin;
     assert_eq!(meta.editor.as_deref(), Some("separator"));
     assert_eq!(meta.native.as_deref(), Some("separator"));
     let back = doc_to_core(&edoc);
@@ -541,8 +539,11 @@ fn paragraph_round_trips_via_native_path() {
 
     // Sanity: the editor classifies it correctly.
     for b in &editor.blocks {
-        assert!(b.plugin.is_some(), "loaded paragraph must carry PluginMeta");
-        let meta = b.plugin.as_ref().unwrap();
+        assert!(
+            !b.plugin.block_type_name.is_empty(),
+            "loaded paragraph must carry PluginMeta"
+        );
+        let meta = &b.plugin;
         assert_eq!(meta.block_type_name.as_ref(), "paragraph");
         assert_eq!(meta.native.as_deref(), Some("paragraph"));
     }
@@ -562,8 +563,11 @@ fn heading_round_trips_via_native_path() {
     let editor = doc_from_core(&core, &registry);
 
     for b in &editor.blocks {
-        assert!(b.plugin.is_some(), "loaded heading must carry PluginMeta");
-        let meta = b.plugin.as_ref().unwrap();
+        assert!(
+            !b.plugin.block_type_name.is_empty(),
+            "loaded heading must carry PluginMeta"
+        );
+        let meta = &b.plugin;
         assert_eq!(meta.block_type_name.as_ref(), "heading");
         assert_eq!(meta.native.as_deref(), Some("heading"));
         assert!(meta.attrs.contains_key("level"));

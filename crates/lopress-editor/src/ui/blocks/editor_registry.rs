@@ -48,8 +48,8 @@ fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let ordered = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("ordered"))
+        .attrs
+        .get("ordered")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     list::editable_list_view(items, block.id, ordered, env)
@@ -84,8 +84,8 @@ fn heading_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let level = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("level"))
+        .attrs
+        .get("level")
         .and_then(serde_json::Value::as_u64)
         .and_then(|n| u8::try_from(n).ok())
         .unwrap_or(1);
@@ -106,8 +106,8 @@ fn code_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let lang = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("lang"))
+        .attrs
+        .get("lang")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     code_editor::editable_code_view(body, lang, block.id, env)

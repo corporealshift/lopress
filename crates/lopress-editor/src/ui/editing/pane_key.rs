@@ -34,16 +34,16 @@ pub fn build_pane_key(
                     .map(|b| {
                         let editor = b
                             .plugin
-                            .as_ref()
-                            .and_then(|m| m.editor.clone())
+                            .editor
+                            .clone()
                             .unwrap_or_else(|| Rc::from(descriptor::EDITOR_PARAGRAPH));
                         // For headings, include the level in the key so
                         // H1→H2 changes trigger a rebuild.
                         let key = if &*editor == descriptor::EDITOR_HEADING {
                             let level = b
                                 .plugin
-                                .as_ref()
-                                .and_then(|m| m.attrs.get("level"))
+                                .attrs
+                                .get("level")
                                 .and_then(|v| v.as_u64())
                                 .map(|n| format!("{}:{}", descriptor::EDITOR_HEADING, n))
                                 .unwrap_or_else(|| editor.to_string());

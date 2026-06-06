@@ -67,7 +67,7 @@ pub fn block_toolbar_for(
     let mut buttons: Vec<AnyView> = Vec::with_capacity(entries.len() + 5);
     for (lbl, default_block_fn) in entries {
         let block = default_block_fn();
-        let meta = block.plugin.as_ref().unwrap();
+        let meta = &block.plugin;
         let entry_editor = meta.editor.as_ref().unwrap().clone();
         let entry_attrs = meta.attrs.clone();
         let is_current =
@@ -411,7 +411,7 @@ mod tests {
         match action {
             BlockAction::InsertAfter { anchor, new_block } => {
                 assert_eq!(anchor, id);
-                let meta = new_block.plugin.as_ref().unwrap();
+                let meta = &new_block.plugin;
                 assert_eq!(&*meta.block_type_name, "table");
             }
             _ => panic!("expected InsertAfter"),

@@ -197,14 +197,8 @@ fn apply_edit_attrs(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
-    let old_attrs = block
-        .plugin
-        .as_ref()
-        .map(|m| m.attrs.clone())
-        .unwrap_or_default();
-    if let Some(meta) = block.plugin.as_mut() {
-        meta.attrs = new_attrs.clone();
-    }
+    let old_attrs = block.plugin.attrs.clone();
+    block.plugin.attrs = new_attrs.clone();
     Some((
         BlockAction::EditAttrs {
             block_id: id,
@@ -223,10 +217,7 @@ fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
 
 /// True when `block` is the read-more marker (`lopress:more`).
 fn is_read_more(block: &EditorBlock) -> bool {
-    block
-        .plugin
-        .as_ref()
-        .is_some_and(|m| &*m.block_type_name == "lopress:more")
+    &*block.plugin.block_type_name == "lopress:more"
 }
 
 fn apply_split(
@@ -242,13 +233,13 @@ fn apply_split(
     let body = block.body.clone();
     let source_editor = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.editor.as_deref())
+        .editor
+        .as_deref()
         .unwrap_or(descriptor::EDITOR_PARAGRAPH);
     let source_level = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("level"))
+        .attrs
+        .get("level")
         .and_then(|v| v.as_u64())
         .and_then(|n| u8::try_from(n).ok());
 
@@ -587,11 +578,7 @@ fn canonical_meta(
 ) -> PluginMeta {
     match desc {
         Some(d) => {
-            let mut attrs = (d.default_block)()
-                .plugin
-                .as_ref()
-                .map(|m| m.attrs.clone())
-                .unwrap_or_default();
+            let mut attrs = (d.default_block)().plugin.attrs.clone();
             for (k, v) in new_attrs.iter() {
                 attrs.insert(k.clone(), v.clone());
             }
@@ -681,14 +668,10 @@ fn apply_change_type(
     // Snapshot the old state for the inverse (full undo: editor + attrs + body).
     let old_editor: Rc<str> = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.editor.clone())
+        .editor
+        .clone()
         .unwrap_or_else(|| Rc::from(descriptor::EDITOR_PARAGRAPH));
-    let old_attrs = block
-        .plugin
-        .as_ref()
-        .map(|m| m.attrs.clone())
-        .unwrap_or_default();
+    let old_attrs = block.plugin.attrs.clone();
 
     // Look up the target descriptor to get body_shape + default attrs.
     let desc = descriptor::descriptor_for(&new_editor);
@@ -707,9 +690,9 @@ fn apply_change_type(
 
     // Canonical PluginMeta for the target editor: descriptor identity + default
     // attrs merged with the caller-provided attrs. Compute into a local first so
-    // the `block.plugin.as_ref()` read finishes before reassigning `block.plugin`.
-    let new_meta = canonical_meta(&new_editor, &new_attrs, desc, block.plugin.as_ref());
-    block.plugin = Some(new_meta);
+    // the `&block.plugin` read finishes before reassigning `block.plugin`.
+    let new_meta = canonical_meta(&new_editor, &new_attrs, desc, Some(&block.plugin));
+    block.plugin = new_meta;
     // TEMP until Task 8 deletes BlockKind: keep kind in sync with the new editor.
     block.kind = kind_for_editor(&new_editor, &new_attrs);
 
@@ -1044,17 +1027,13 @@ fn apply_edit_block_body(
     // For blocks without plugin meta (e.g. raw list/code constructed via
     // ctor), fall back to the current body's shape so coercion doesn't
     // accidentally flatten a list into inline.
-    let editor = block
-        .plugin
-        .as_ref()
-        .and_then(|m| m.editor.as_deref())
-        .unwrap_or(match &block.body {
-            BlockBody::List(_) => descriptor::EDITOR_LIST,
-            BlockBody::Code(_) => descriptor::EDITOR_CODE,
-            BlockBody::Table(_) => descriptor::EDITOR_TABLE,
-            BlockBody::Opaque(_) => descriptor::EDITOR_PARAGRAPH,
-            BlockBody::Inline(_) => descriptor::EDITOR_PARAGRAPH,
-        });
+    let editor = block.plugin.editor.as_deref().unwrap_or(match &block.body {
+        BlockBody::List(_) => descriptor::EDITOR_LIST,
+        BlockBody::Code(_) => descriptor::EDITOR_CODE,
+        BlockBody::Table(_) => descriptor::EDITOR_TABLE,
+        BlockBody::Opaque(_) => descriptor::EDITOR_PARAGRAPH,
+        BlockBody::Inline(_) => descriptor::EDITOR_PARAGRAPH,
+    });
     // If the plugin's editor doesn't match the current body shape (e.g. a
     // paragraph plugin with a code body), prefer the body's shape. This
     // handles edge cases where the block was manually mutated.
@@ -1130,7 +1109,7 @@ mod change_type_tests {
         .expect("ChangeType records");
 
         assert!(matches!(
-            doc.blocks[0].plugin.as_ref().unwrap().editor.as_deref(),
+            doc.blocks[0].plugin.editor.as_deref(),
             Some("heading")
         ));
         assert!(matches!(canonical, BlockAction::ChangeType { .. }));
@@ -1138,7 +1117,7 @@ mod change_type_tests {
         // Apply the inverse: body must be restored.
         apply(&mut doc, inverse);
         assert!(matches!(
-            doc.blocks[0].plugin.as_ref().unwrap().editor.as_deref(),
+            doc.blocks[0].plugin.editor.as_deref(),
             Some("paragraph")
         ));
         assert!(
@@ -1252,7 +1231,7 @@ mod change_type_tests {
                     lang: Rc::from("rust"),
                 },
                 body: BlockBody::Code("fn main() {}".to_string()),
-                plugin: Some(PluginMeta::code("rust")),
+                plugin: PluginMeta::code("rust"),
             }],
             front_matter: lopress_core::FrontMatter::default(),
         };
@@ -1272,7 +1251,7 @@ mod change_type_tests {
 
         // Apply inverse: lang should be back to "rust".
         apply(&mut doc, inverse);
-        let meta = doc.blocks[0].plugin.as_ref().unwrap();
+        let meta = &doc.blocks[0].plugin;
         assert_eq!(
             meta.attrs.get("lang").and_then(|v| v.as_str()),
             Some("rust")
@@ -1310,7 +1289,7 @@ mod split_tests {
         assert_eq!(doc.blocks.len(), 2);
         // Both blocks must carry the same editor ("heading") and level=3.
         for b in &doc.blocks {
-            let meta = b.plugin.as_ref().unwrap();
+            let meta = &b.plugin;
             assert_eq!(meta.editor.as_deref(), Some("heading"));
             assert_eq!(meta.attrs.get("level").and_then(|v| v.as_u64()), Some(3));
         }

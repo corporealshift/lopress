@@ -507,10 +507,7 @@ fn change_type_to_list_stamps_plugin_meta() {
     let block = &doc.blocks[0];
     assert!(matches!(block.kind, BlockKind::List { ordered: false }));
     assert!(matches!(block.body, BlockBody::List(_)));
-    let meta = block
-        .plugin
-        .as_ref()
-        .expect("a list block created via ChangeType must carry PluginMeta");
+    let meta = &block.plugin;
     assert_eq!(meta.editor.as_deref(), Some("list"));
     assert_eq!(meta.native.as_deref(), Some("list"));
     assert!(meta.builtin);
@@ -912,7 +909,7 @@ fn change_type_code_to_paragraph_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "fn main() {}"),
         "body must be Inline with the original code text"
     );
-    let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "paragraph");
     assert_eq!(meta.native.as_deref(), Some("paragraph"));
 }
@@ -929,7 +926,7 @@ fn change_type_code_to_heading_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "print('hello')"),
         "body must be Inline with the original code text"
     );
-    let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "heading");
     assert_eq!(meta.native.as_deref(), Some("heading"));
     assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(2));
@@ -960,10 +957,7 @@ fn change_type_code_to_list_converts_body_to_list() {
         }
         _ => panic!("body must be List"),
     }
-    let meta = b
-        .plugin
-        .as_ref()
-        .expect("a list block must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "list");
 }
 
@@ -973,7 +967,7 @@ fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
     // BlockKind::Code.lang AND plugin.attrs["lang"].
     let mut block = EditorBlock::code("rust".into(), "fn main() {}".into());
     // Stamp a PluginMeta manually (simulating a block loaded via from_core).
-    block.plugin = Some(PluginMeta::code("rust"));
+    block.plugin = PluginMeta::code("rust");
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
@@ -991,7 +985,7 @@ fn change_type_code_to_code_updates_lang_and_mirrors_into_plugin() {
         matches!(&b.body, BlockBody::Code(t) if t == "fn main() {}"),
         "code text must be preserved"
     );
-    let meta = b.plugin.as_ref().expect("code block must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(
         meta.attrs.get("lang").and_then(Value::as_str),
         Some("python"),
@@ -1007,7 +1001,7 @@ fn change_type_list_to_paragraph_converts_body_to_inline() {
     };
     let mut block = EditorBlock::list(false, vec![it]);
     // Stamp list PluginMeta (matching what from_core produces).
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
@@ -1017,7 +1011,7 @@ fn change_type_list_to_paragraph_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first item"),
         "body must be Inline with flattened list item text"
     );
-    let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "paragraph");
     assert_eq!(meta.native.as_deref(), Some("paragraph"));
 }
@@ -1033,7 +1027,7 @@ fn change_type_list_to_heading_converts_body_to_inline() {
         runs: vec![InlineRun::plain("second")],
     };
     let mut block = EditorBlock::list(true, vec![it0, it1]);
-    block.plugin = Some(PluginMeta::list(true));
+    block.plugin = PluginMeta::list(true);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(&mut doc, change_type_for(id, BlockKind::Heading(3)));
@@ -1043,7 +1037,7 @@ fn change_type_list_to_heading_converts_body_to_inline() {
         matches!(&b.body, BlockBody::Inline(runs) if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "first\nsecond"),
         "body must be Inline with joined list item texts"
     );
-    let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "heading");
     assert_eq!(meta.native.as_deref(), Some("heading"));
     assert_eq!(meta.attrs.get("level").and_then(Value::as_u64), Some(3));
@@ -1060,7 +1054,7 @@ fn change_type_list_to_code_converts_body_to_code() {
         runs: vec![InlineRun::plain("line2")],
     };
     let mut block = EditorBlock::list(false, vec![it0, it1]);
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
@@ -1078,7 +1072,7 @@ fn change_type_list_to_code_converts_body_to_code() {
         matches!(&b.body, BlockBody::Code(t) if t == "line1\nline2"),
         "code body must be joined list item texts"
     );
-    let meta = b.plugin.as_ref().expect("code block must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "code");
 }
 
@@ -1091,7 +1085,7 @@ fn change_type_list_to_list_updates_ordered_and_mirrors_into_plugin() {
         runs: vec![InlineRun::plain("item")],
     };
     let mut block = EditorBlock::list(false, vec![it]);
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
@@ -1107,7 +1101,7 @@ fn change_type_list_to_list_updates_ordered_and_mirrors_into_plugin() {
         }
         _ => panic!("body must be List"),
     }
-    let meta = b.plugin.as_ref().expect("list block must carry PluginMeta");
+    let meta = &b.plugin;
     assert_eq!(
         meta.attrs.get("ordered").and_then(Value::as_bool),
         Some(true),
@@ -1126,14 +1120,14 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
         "lang".to_string(),
         serde_json::Value::String("rust".to_string()),
     );
-    block.plugin = Some(PluginMeta {
+    block.plugin = PluginMeta {
         block_type_name: Rc::from("code"),
         attrs: attrs.clone(),
         attr_decls: Rc::from([]),
         builtin: true,
         editor: Some(Rc::from("code")),
         native: Some(Rc::from("code")),
-    });
+    };
     let id = block.id;
     let mut doc = doc_with(vec![block]);
 
@@ -1152,10 +1146,7 @@ fn edit_attrs_on_code_block_mirrors_lang_into_kind() {
     );
 
     // Verify attrs updated.
-    let meta = doc.blocks[0]
-        .plugin
-        .as_ref()
-        .expect("plugin meta must exist");
+    let meta = &doc.blocks[0].plugin;
     assert_eq!(
         meta.attrs.get("lang").and_then(Value::as_str),
         Some("python")
@@ -1213,7 +1204,7 @@ fn change_type_code_to_list_round_trips() {
 #[test]
 fn change_type_code_to_code_new_lang_round_trips() {
     let mut block = EditorBlock::code("rust".into(), "fn main() {}".into());
-    block.plugin = Some(PluginMeta::code("rust"));
+    block.plugin = PluginMeta::code("rust");
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
@@ -1238,7 +1229,7 @@ fn change_type_list_to_paragraph_round_trips() {
         runs: vec![InlineRun::plain("first item")],
     };
     let mut block = EditorBlock::list(false, vec![it]);
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(&mut doc, change_type_for(id, BlockKind::Paragraph));
@@ -1258,7 +1249,7 @@ fn change_type_list_to_heading_round_trips() {
         runs: vec![InlineRun::plain("second")],
     };
     let mut block = EditorBlock::list(true, vec![it0, it1]);
-    block.plugin = Some(PluginMeta::list(true));
+    block.plugin = PluginMeta::list(true);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(&mut doc, change_type_for(id, BlockKind::Heading(3)));
@@ -1278,7 +1269,7 @@ fn change_type_list_to_code_round_trips() {
         runs: vec![InlineRun::plain("line2")],
     };
     let mut block = EditorBlock::list(false, vec![it0, it1]);
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(
@@ -1303,7 +1294,7 @@ fn change_type_list_to_list_ordered_toggle_round_trips() {
         runs: vec![InlineRun::plain("item")],
     };
     let mut block = EditorBlock::list(false, vec![it]);
-    block.plugin = Some(PluginMeta::list(false));
+    block.plugin = PluginMeta::list(false);
     let id = block.id;
     let mut doc = doc_with(vec![block]);
     apply(

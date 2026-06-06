@@ -14,7 +14,7 @@ use std::rc::Rc;
 /// Built-in types (`paragraph`, `heading`, `code`, `list`) are mapped
 /// directly. For any other type, the registry is consulted: when a matching
 /// `BlockDecl` is found the block is rendered with the editor implied by
-/// the plugin's `editor` field and `plugin: Some(PluginMeta { ... })` is
+/// the plugin's `editor` field and `plugin: PluginMeta { ... }` is
 /// stamped onto the result so `to_core` can reconstruct it byte-identically.
 /// Unknown types — neither built-in nor in the registry — fall through to
 /// `Opaque` (so verbatim round-trip survives plugin removal).
@@ -99,7 +99,7 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         id: BlockId::new(),
         kind,
         body,
-        plugin: Some(plugin),
+        plugin,
     }
 }
 
@@ -161,20 +161,20 @@ fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
 /// `editor: "image"`) so the loaded block routes through the image widget
 /// (`editor_for("image")`) and serializes back via `to_core`'s native arm.
 /// Routing it through the generic `Opaque` path instead would drop the image
-/// identity (`plugin: None`) and render it as a read-only fallback card.
+/// identity (`plugin` with no editor/native) and render it as a read-only fallback card.
 fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     EditorBlock {
         id: BlockId::new(),
         kind: BlockKind::Image,
         body: BlockBody::Opaque(Value::Null),
-        plugin: Some(PluginMeta {
+        plugin: PluginMeta {
             block_type_name: Rc::from(decl.name.as_str()),
             attrs: block_attrs_as_object(&b.attrs),
             attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
             builtin: decl.builtin,
             editor: decl.editor.as_deref().map(Rc::from),
             native: decl.native.as_deref().map(Rc::from),
-        }),
+        },
     }
 }
 
@@ -217,14 +217,14 @@ fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
             let mut block = EditorBlock::list(ordered, items);
             let mut attrs = Map::new();
             attrs.insert("ordered".to_string(), Value::Bool(ordered));
-            block.plugin = Some(PluginMeta {
+            block.plugin = PluginMeta {
                 block_type_name: Rc::from(decl.name.as_str()),
                 attrs,
                 attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
                 builtin: decl.builtin,
                 editor: decl.editor.as_deref().map(Rc::from),
                 native: decl.native.as_deref().map(Rc::from),
-            });
+            };
             block
         }
         None => EditorBlock::opaque(
@@ -241,14 +241,14 @@ fn native_list_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
 fn native_paragraph_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let text = b.text.as_deref().unwrap_or("");
     let mut block = EditorBlock::paragraph(parse_inline(text));
-    block.plugin = Some(PluginMeta {
+    block.plugin = PluginMeta {
         block_type_name: Rc::from(decl.name.as_str()),
         attrs: serde_json::Map::new(),
         attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
         builtin: decl.builtin,
         editor: decl.editor.as_deref().map(Rc::from),
         native: decl.native.as_deref().map(Rc::from),
-    });
+    };
     block
 }
 
@@ -272,14 +272,14 @@ fn native_heading_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
         "level".to_string(),
         serde_json::Value::Number(serde_json::Number::from(level)),
     );
-    block.plugin = Some(PluginMeta {
+    block.plugin = PluginMeta {
         block_type_name: Rc::from(decl.name.as_str()),
         attrs,
         attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
         builtin: decl.builtin,
         editor: decl.editor.as_deref().map(Rc::from),
         native: decl.native.as_deref().map(Rc::from),
-    });
+    };
     block
 }
 
@@ -299,14 +299,14 @@ fn native_code_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let mut block = EditorBlock::code(lang.clone(), text);
     let mut attrs = Map::new();
     attrs.insert("lang".to_string(), Value::String(lang));
-    block.plugin = Some(PluginMeta {
+    block.plugin = PluginMeta {
         block_type_name: Rc::from(decl.name.as_str()),
         attrs,
         attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
         builtin: decl.builtin,
         editor: decl.editor.as_deref().map(Rc::from),
         native: decl.native.as_deref().map(Rc::from),
-    });
+    };
     block
 }
 

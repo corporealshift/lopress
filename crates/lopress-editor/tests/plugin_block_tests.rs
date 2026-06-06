@@ -27,8 +27,8 @@ fn plugin_block_round_trips_byte_identical() {
     // First block is the plugin block; second is a plain paragraph.
     assert_eq!(editor.blocks.len(), 2);
     let first = &editor.blocks[0];
-    assert!(first.plugin.is_some(), "plugin block should be detected");
-    let meta = first.plugin.as_ref().unwrap();
+    // All blocks now carry PluginMeta.
+    let meta = &first.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "lopress:codehighlight");
     assert_eq!(
         meta.attrs.get("lang").and_then(|v| v.as_str()),
@@ -58,10 +58,8 @@ fn unknown_plugin_falls_back_to_opaque_and_round_trips() {
     // Empty registry: no plugin matches → opaque path.
     let editor = doc_from_core(&core, &PluginRegistry::default());
     let first = &editor.blocks[0];
-    assert!(
-        first.plugin.is_none(),
-        "unknown plugin should not flag plugin meta"
-    );
+    // All blocks now carry PluginMeta; the key invariant is the Opaque kind.
+    assert!(matches!(first.kind, BlockKind::Opaque { .. }));
     assert!(matches!(first.kind, BlockKind::Opaque { .. }));
 
     let core_back = doc_to_core(&editor);

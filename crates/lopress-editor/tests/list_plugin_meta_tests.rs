@@ -45,7 +45,7 @@ fn list_block_gets_plugin_meta_when_base_plugin_registered() {
     let block = &editor_doc.blocks[0];
     assert!(matches!(block.kind, BlockKind::List { ordered: true }));
     assert!(matches!(block.body, BlockBody::List(_)));
-    let meta = block.plugin.as_ref().expect("list block has plugin meta");
+    let meta = &block.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "list");
     assert!(meta.builtin);
     assert_eq!(
@@ -69,7 +69,7 @@ fn list_block_serializes_back_to_core_list_type() {
 fn list_without_registered_base_plugin_degrades_to_opaque() {
     let editor_doc = doc_from_core(&list_doc(), &PluginRegistry::default());
     let block = &editor_doc.blocks[0];
-    assert!(block.plugin.is_none());
+    // All blocks carry PluginMeta; the key invariant is the Opaque kind.
     assert!(matches!(block.kind, BlockKind::Opaque { .. }));
 }
 

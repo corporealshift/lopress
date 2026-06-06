@@ -37,7 +37,7 @@ pub struct EditorBlock {
     pub id: BlockId,
     pub kind: BlockKind,
     pub body: BlockBody,
-    pub plugin: Option<PluginMeta>,
+    pub plugin: PluginMeta,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -308,7 +308,7 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(runs),
-            plugin: Some(PluginMeta::paragraph()),
+            plugin: PluginMeta::paragraph(),
         }
     }
 
@@ -318,27 +318,48 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Heading(level),
             body: BlockBody::Inline(runs),
-            plugin: Some(PluginMeta::heading(level)),
+            plugin: PluginMeta::heading(level),
         }
     }
 
     pub fn code(lang: String, text: String) -> Self {
+        let meta = PluginMeta {
+            block_type_name: Rc::from("code"),
+            attrs: {
+                let mut m = serde_json::Map::new();
+                m.insert("lang".to_string(), Value::String(lang.clone()));
+                m
+            },
+            attr_decls: Rc::from([]),
+            builtin: true,
+            editor: Some(Rc::from("code")),
+            native: Some(Rc::from("code")),
+        };
         Self {
             id: BlockId::new(),
             kind: BlockKind::Code {
                 lang: Rc::from(lang),
             },
             body: BlockBody::Code(text),
-            plugin: None,
+            plugin: meta,
         }
     }
 
     pub fn list(ordered: bool, items: Vec<ListItem>) -> Self {
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("ordered".to_string(), Value::Bool(ordered));
         Self {
             id: BlockId::new(),
             kind: BlockKind::List { ordered },
             body: BlockBody::List(items),
-            plugin: None,
+            plugin: PluginMeta {
+                block_type_name: Rc::from("list"),
+                attrs,
+                attr_decls: Rc::from([]),
+                builtin: true,
+                editor: Some(Rc::from("list")),
+                native: Some(Rc::from("list")),
+            },
         }
     }
 
@@ -346,10 +367,17 @@ impl EditorBlock {
         Self {
             id: BlockId::new(),
             kind: BlockKind::Opaque {
-                type_name: Rc::from(type_name),
+                type_name: Rc::from(type_name.clone()),
             },
             body: BlockBody::Opaque(value),
-            plugin: None,
+            plugin: PluginMeta {
+                block_type_name: Rc::from(type_name),
+                attrs: serde_json::Map::new(),
+                attr_decls: Rc::from([]),
+                builtin: false,
+                editor: None,
+                native: None,
+            },
         }
     }
 
@@ -361,7 +389,7 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
-            plugin: Some(PluginMeta::read_more()),
+            plugin: PluginMeta::read_more(),
         }
     }
 
@@ -373,7 +401,7 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
-            plugin: Some(PluginMeta::separator()),
+            plugin: PluginMeta::separator(),
         }
     }
 
@@ -383,7 +411,7 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Table,
             body: BlockBody::Table(data),
-            plugin: Some(PluginMeta::table()),
+            plugin: PluginMeta::table(),
         }
     }
 
@@ -413,7 +441,7 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Image,
             body: BlockBody::Opaque(Value::Null),
-            plugin: Some(PluginMeta::image(src, alt, caption)),
+            plugin: PluginMeta::image(src, alt, caption),
         }
     }
 
@@ -433,14 +461,14 @@ impl EditorBlock {
             id: BlockId::new(),
             kind: BlockKind::Paragraph,
             body: BlockBody::Inline(Vec::new()),
-            plugin: Some(PluginMeta {
+            plugin: PluginMeta {
                 block_type_name: item.type_name.clone(),
                 attrs: item.default_attrs.clone(),
                 attr_decls: item.attr_decls.clone(),
                 builtin: false,
                 editor: None,
                 native: None,
-            }),
+            },
         }
     }
 }
@@ -453,7 +481,7 @@ mod paragraph_heading_meta_tests {
     #[test]
     fn paragraph_block_carries_plugin_meta() {
         let b = EditorBlock::paragraph(vec![InlineRun::plain("hello")]);
-        let meta = b.plugin.as_ref().expect("paragraph must carry PluginMeta");
+        let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "paragraph");
         assert_eq!(meta.editor.as_deref(), Some("paragraph"));
         assert_eq!(meta.native.as_deref(), Some("paragraph"));
@@ -464,7 +492,7 @@ mod paragraph_heading_meta_tests {
     #[test]
     fn heading_block_carries_plugin_meta_with_level() {
         let b = EditorBlock::heading(3, vec![InlineRun::plain("title")]);
-        let meta = b.plugin.as_ref().expect("heading must carry PluginMeta");
+        let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "heading");
         assert_eq!(meta.editor.as_deref(), Some("heading"));
         assert_eq!(meta.native.as_deref(), Some("heading"));
@@ -482,7 +510,7 @@ mod image_ctor_tests {
     fn image_block_carries_attrs_in_meta() {
         let b = EditorBlock::image("/images/p.jpg", "alt text", "");
         assert!(matches!(b.kind, BlockKind::Image));
-        let meta = b.plugin.as_ref().unwrap();
+        let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "image");
         assert_eq!(meta.editor.as_deref(), Some("image"));
         assert_eq!(meta.native.as_deref(), Some("image"));
@@ -508,7 +536,7 @@ mod read_more_ctor_tests {
     fn read_more_block_has_marker_meta() {
         let b = EditorBlock::read_more();
         // The constructor always sets plugin.
-        let meta = b.plugin.as_ref().expect("read_more always sets plugin");
+        let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "lopress:more");
         assert_eq!(meta.editor.as_deref(), Some("more"));
         assert!(meta.builtin);
@@ -545,7 +573,7 @@ mod plugin_inserter_ctor_tests {
         // empty Inline body, identity carried in PluginMeta.
         assert!(matches!(b.kind, BlockKind::Paragraph));
         assert!(matches!(&b.body, BlockBody::Inline(runs) if runs.is_empty()));
-        let meta = b.plugin.as_ref().expect("plugin meta present");
+        let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "lopress:test");
         assert_eq!(meta.attrs.get("foo").and_then(Value::as_str), Some("bar"));
         assert!(!meta.builtin);

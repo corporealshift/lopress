@@ -93,11 +93,9 @@ pub fn editor_pane(
                 // Omit "Read more" when the document already has a marker.
                 let has_more = current_doc.with_untracked(|d| {
                     d.as_ref().is_some_and(|doc| {
-                        doc.blocks.iter().any(|b| {
-                            b.plugin
-                                .as_ref()
-                                .is_some_and(|m| &*m.block_type_name == "lopress:more")
-                        })
+                        doc.blocks
+                            .iter()
+                            .any(|b| &*b.plugin.block_type_name == "lopress:more")
                     })
                 });
                 let items: Vec<_> = crate::ui::slash_menu::slash_menu_items()
