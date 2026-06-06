@@ -1,0 +1,263 @@
+//! Block descriptor table — one authoritative declaration per built-in block type.
+//!
+//! This is the **single source of truth** for each block type's data facts:
+//! core type (native claim), body shape, editor key, whether it's a built-in,
+//! and slash/toolbar presentation metadata. Every other site that previously
+//! re-encoded these facts (hardcoded match arms, magic strings, separate
+//! `editor_for` registry) now reads from this table.
+//!
+//! ## Architecture: model ← ui
+//!
+//! This module is in `model/` and references **no ui types** (`EditorWidget`,
+//! `BlockEnv`, `AnyView`, nothing under `crate::ui`). The widget fn-pointers
+//! live in `crate::ui::blocks::editor_registry::editor_for`, keyed by the
+//! same `editor` string the descriptor carries. The link between the two
+//! layers is that string — nothing else.
+//!
+//! ## Heading-level menu wrinkle
+//!
+//! There is ONE `heading` descriptor, but the slash menu shows H1–H3 and
+//! the toolbar shows H1–H6. The descriptor carries a single `MenuEntry`
+//! with `title: "Heading"`. The menu-generation code (in `slash_menu.rs`
+//! and `toolbar.rs`) detects the heading descriptor by its `editor` key
+//! and expands it into per-level entries. Each expanded entry uses a
+//! `default_block` closure that produces `EditorBlock::heading(n, vec![])`
+//! with the correct level.
+
+use crate::model::types::EditorBlock;
+
+/// The body shape a block's editor produces and round-trips.
+///
+/// This enum is the stable contract between the descriptor table and the
+/// parser/serializer helpers in `from_core.rs` and `to_core.rs`. It outlives
+/// `BlockKind` (Stage B deletes `BlockKind` and leans on `BodyShape`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyShape {
+    /// `Vec<InlineRun>` — paragraph, heading.
+    Inline,
+    /// `String` — code block.
+    Code,
+    /// `Vec<ListItem>` — ordered or unordered list.
+    List,
+    /// `TableData` — table with rows, cells, and column alignments.
+    Table,
+    /// `serde_json::Value` — image placeholder, unknown/removed types.
+    Opaque,
+}
+
+/// Human-readable presentation entry for the slash menu or toolbar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuEntry {
+    /// Display title shown in the slash menu (e.g. "Paragraph", "Heading 2").
+    pub title: &'static str,
+    /// Category bucket for grouping in the menu (e.g. "Text", "Blocks").
+    pub category: &'static str,
+}
+
+/// Everything the editor needs to know about one built-in block type, in one place.
+///
+/// A descriptor is the **single source of truth** for:
+/// - Which editor key this type uses (`editor`)
+/// - Which native core type it claims when serialized (`native`)
+/// - What body shape its editor produces (`body_shape`)
+/// - Whether it's a built-in (suppresses plugin chrome) (`builtin`)
+/// - How it appears in the slash menu / toolbar (`menu`)
+/// - How to construct a fresh default block (`default_block`)
+///
+/// The widget fn-pointer lives in `crate::ui::blocks::editor_registry`, keyed
+/// by the same `editor` string. This module does NOT reference any ui types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(unpredictable_function_pointer_comparisons)] // default_block is a fn pointer; equality is only used in tests
+pub struct BlockDescriptor {
+    /// The `editor` key — the primary identity. Matches PluginMeta.editor and
+    /// the manifest `editor` field. E.g. "paragraph", "heading", "code", "list",
+    /// "image", "table", "separator", "more".
+    pub editor: &'static str,
+    /// The core markdown type this block claims when serialized natively, if any.
+    /// `Some("paragraph")`, `Some("list")`, … ; `None` → comment container.
+    pub native: Option<&'static str>,
+    /// Body shape produced by this block's editor widget.
+    pub body_shape: BodyShape,
+    /// Whether this block is a built-in (base plugin) — suppresses plugin chrome.
+    pub builtin: bool,
+    /// Slash-menu / toolbar presentation. `None` → not directly insertable
+    /// (e.g. "more" marker is inserted by a dedicated affordance, not the menu).
+    pub menu: Option<MenuEntry>,
+    /// Construct the canonical empty/default block for this type (used by the
+    /// slash menu, toolbar ChangeType, and split's tail-block creation).
+    ///
+    /// For the heading descriptor itself, this produces a level-1 heading.
+    /// Menu-generation code that expands the heading descriptor into H1–H6
+    /// replaces this closure with one that produces the correct level.
+    pub default_block: fn() -> EditorBlock,
+}
+
+/// Named constants for built-in editor keys — replaces magic strings in
+/// `actions.rs`, `to_core.rs`, and other sites that previously checked
+/// `block_type_name == "lopress:more"` or `editor == "list"` etc.
+pub const EDITOR_PARAGRAPH: &str = "paragraph";
+pub const EDITOR_HEADING: &str = "heading";
+pub const EDITOR_CODE: &str = "code";
+pub const EDITOR_LIST: &str = "list";
+pub const EDITOR_IMAGE: &str = "image";
+pub const EDITOR_TABLE: &str = "table";
+pub const EDITOR_SEPARATOR: &str = "separator";
+pub const EDITOR_MORE: &str = "more";
+
+/// The full descriptor table — one entry per built-in block type.
+///
+/// The order defines display order in menus: paragraph, heading, code, list,
+/// image, read-more, separator, table.
+fn descriptor_table() -> &'static [BlockDescriptor] {
+    &[
+        BlockDescriptor {
+            editor: EDITOR_PARAGRAPH,
+            native: Some(EDITOR_PARAGRAPH),
+            body_shape: BodyShape::Inline,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Paragraph",
+                category: "Text",
+            }),
+            default_block: || EditorBlock::paragraph(vec![]),
+        },
+        BlockDescriptor {
+            editor: EDITOR_HEADING,
+            native: Some(EDITOR_HEADING),
+            body_shape: BodyShape::Inline,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Heading",
+                category: "Text",
+            }),
+            default_block: || EditorBlock::heading(1, vec![]),
+        },
+        BlockDescriptor {
+            editor: EDITOR_CODE,
+            native: Some(EDITOR_CODE),
+            body_shape: BodyShape::Code,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Code block",
+                category: "Blocks",
+            }),
+            default_block: || EditorBlock::code(String::new(), String::new()),
+        },
+        BlockDescriptor {
+            editor: EDITOR_LIST,
+            native: Some(EDITOR_LIST),
+            body_shape: BodyShape::List,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Unordered list",
+                category: "Blocks",
+            }),
+            default_block: || EditorBlock::list(false, vec![]),
+        },
+        BlockDescriptor {
+            editor: EDITOR_IMAGE,
+            native: Some(EDITOR_IMAGE),
+            body_shape: BodyShape::Opaque,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Image",
+                category: "Blocks",
+            }),
+            default_block: || EditorBlock::image("", "", ""),
+        },
+        BlockDescriptor {
+            editor: EDITOR_MORE,
+            native: None,
+            body_shape: BodyShape::Inline,
+            builtin: true,
+            menu: None, // "more" is inserted by a dedicated affordance, not the slash menu
+            default_block: || EditorBlock::read_more(),
+        },
+        BlockDescriptor {
+            editor: EDITOR_SEPARATOR,
+            native: Some(EDITOR_SEPARATOR),
+            body_shape: BodyShape::Inline,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Separator",
+                category: "Blocks",
+            }),
+            default_block: || EditorBlock::separator(),
+        },
+        BlockDescriptor {
+            editor: EDITOR_TABLE,
+            native: Some(EDITOR_TABLE),
+            body_shape: BodyShape::Table,
+            builtin: true,
+            menu: Some(MenuEntry {
+                title: "Table",
+                category: "Blocks",
+            }),
+            default_block: || EditorBlock::table_default(),
+        },
+    ]
+}
+
+/// Return all descriptors in display order.
+pub fn descriptors() -> &'static [BlockDescriptor] {
+    descriptor_table()
+}
+
+/// Look up a descriptor by its `editor` key.
+pub fn descriptor_for(editor: &str) -> Option<&'static BlockDescriptor> {
+    descriptor_table().iter().find(|d| d.editor == editor)
+}
+
+/// Look up a descriptor by its native core type claim.
+pub fn descriptor_for_native(core_type: &str) -> Option<&'static BlockDescriptor> {
+    descriptor_table()
+        .iter()
+        .find(|d| d.native == Some(core_type))
+}
+
+#[cfg(test)]
+mod exclusivity_tests {
+    use super::*;
+
+    #[test]
+    fn no_two_descriptors_share_editor_key() {
+        let mut seen = std::collections::HashSet::new();
+        for d in descriptors() {
+            assert!(seen.insert(d.editor), "duplicate editor key: {}", d.editor);
+        }
+    }
+
+    #[test]
+    fn no_two_descriptors_share_native_claim() {
+        let mut seen = std::collections::HashSet::new();
+        for d in descriptors() {
+            if let Some(native) = d.native {
+                assert!(seen.insert(native), "duplicate native claim: {}", native);
+            }
+        }
+    }
+
+    #[test]
+    fn descriptor_for_editor_finds_all() {
+        for d in descriptors() {
+            assert!(
+                descriptor_for(d.editor).is_some(),
+                "descriptor_for({}) returned None",
+                d.editor
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_for_native_finds_all_native() {
+        for d in descriptors() {
+            if let Some(native) = d.native {
+                assert!(
+                    descriptor_for_native(native).is_some(),
+                    "descriptor_for_native({}) returned None",
+                    native
+                );
+            }
+        }
+    }
+}
