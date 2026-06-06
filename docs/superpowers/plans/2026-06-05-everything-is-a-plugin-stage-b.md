@@ -267,8 +267,10 @@ fn apply_change_type(
     };
 
     // Canonical PluginMeta for the target editor: descriptor identity + default
-    // attrs merged with the caller-provided attrs.
-    block.plugin = Some(canonical_meta(&new_editor, &new_attrs, desc));
+    // attrs merged with the caller-provided attrs. Compute into a local first so
+    // the `block.plugin.as_ref()` read finishes before reassigning `block.plugin`.
+    let new_meta = canonical_meta(&new_editor, &new_attrs, desc, block.plugin.as_ref());
+    block.plugin = Some(new_meta);
     // TEMP until Task 8 deletes BlockKind: keep kind in sync with the new editor.
     block.kind = kind_for_editor(&new_editor, &new_attrs);
 
@@ -360,66 +362,11 @@ fn runs_to_plain_string(runs: &[InlineRun]) -> String {
 
 /// Build the canonical `PluginMeta` for a target editor.
 ///
-/// Starts from the descriptor's `default_block().plugin` attrs (descriptor
-/// defaults), overlays `new_attrs`, and sets identity fields from the
-/// descriptor. If `desc` is `None`, keeps the block's existing meta with
-/// `editor`/`attrs` updated.
-fn canonical_meta(
-    new_editor: &str,
-    new_attrs: &serde_json::Map<String, serde_json::Value>,
-    desc: Option<&descriptor::BlockDescriptor>,
-) -> PluginMeta {
-    match desc {
-        Some(d) => {
-            let mut attrs = d
-                .default_block()
-                .plugin
-                .attrs
-                .clone();
-            for (k, v) in new_attrs.iter() {
-                attrs.insert(k.clone(), v.clone());
-            }
-            PluginMeta {
-                block_type_name: Rc::from(d.editor),
-                attrs,
-                attr_decls: Rc::from([]),
-                builtin: d.builtin,
-                editor: Some(Rc::from(d.editor)),
-                native: d.native.map(|n| Rc::from(n)),
-            }
-        }
-        None => {
-            // Unknown editor key: keep the block's existing PluginMeta but
-            // update the editor field. This shouldn't happen in normal use.
-            let mut meta = match &block.plugin {
-                Some(m) => m.clone(),
-                None => PluginMeta {
-                    block_type_name: Rc::from(new_editor),
-                    attrs: (*new_attrs).clone(),
-                    attr_decls: Rc::from([]),
-                    builtin: false,
-                    editor: Some(Rc::from(new_editor)),
-                    native: None,
-                },
-            };
-            meta.attrs = (*new_attrs).clone();
-            meta.editor = Some(Rc::from(new_editor));
-            meta
-        }
-    }
-}
-```
-
-**IMPLEMENTER NOTE — use only the corrected `canonical_meta` below (ignore the version
-above).** Two fixes vs. the version above: (1) it takes `existing_meta: Option<&PluginMeta>`
-instead of referencing a nonexistent `block`; (2) **`EditorBlock.plugin` is still `Option`
-until Task 7**, so `default_block().plugin` here is `Option<PluginMeta>` — read its attrs as
-`d.default_block().plugin.as_ref().map(|m| m.attrs.clone()).unwrap_or_default()`, NOT
-`d.default_block().plugin.attrs.clone()` (that only compiles after Task 7). The call site is
-`canonical_meta(&new_editor, &new_attrs, desc, block.plugin.as_ref())`.
-
-```rust
-/// Build the canonical `PluginMeta` for a target editor.
+/// Starts from the descriptor's default-block attrs, overlays `new_attrs`, and
+/// sets identity fields from the descriptor. `EditorBlock.plugin` is still
+/// `Option` until Task 7, so the default block's attrs are read via `as_ref()`.
+/// If `desc` is `None` (unknown editor key — shouldn't happen) keeps
+/// `existing_meta` with `editor`/`attrs` updated.
 fn canonical_meta(
     new_editor: &str,
     new_attrs: &serde_json::Map<String, serde_json::Value>,
@@ -431,8 +378,9 @@ fn canonical_meta(
             let mut attrs = d
                 .default_block()
                 .plugin
-                .attrs
-                .clone();
+                .as_ref()
+                .map(|m| m.attrs.clone())
+                .unwrap_or_default();
             for (k, v) in new_attrs.iter() {
                 attrs.insert(k.clone(), v.clone());
             }
@@ -460,11 +408,6 @@ fn canonical_meta(
         }
     }
 }
-```
-
-And update the call site in `apply_change_type`:
-```rust
-    block.plugin = Some(canonical_meta(&new_editor, &new_attrs, desc, block.plugin.as_ref()));
 ```
 
 - [ ] **Step 6: Add the `kind_for_editor` helper** (TEMP — deleted in Task 8):
@@ -646,14 +589,16 @@ Expected: FAIL (compilation error — `apply_split` still references `block.kind
                 .unwrap_or(descriptor::EDITOR_PARAGRAPH);
             let source_level = source_meta
                 .and_then(|m| m.attrs.get("level"))
-                .and_then(Value::as_u64())
+                .and_then(|v| v.as_u64())
                 .and_then(|n| u8::try_from(n).ok());
 
-            let mut tail_block = match source_editor {
-                descriptor::EDITOR_HEADING if let Some(level) = source_level => {
-                    EditorBlock::heading(level, vec![InlineRun::plain(tail)])
-                }
-                _ => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
+            // A heading splits into a heading at the same level; everything else
+            // (paragraph and any non-inline source) splits into a paragraph.
+            // (if-let match guards are unstable, so branch with a plain `if`.)
+            let mut tail_block = if source_editor == descriptor::EDITOR_HEADING {
+                EditorBlock::heading(source_level.unwrap_or(1), vec![InlineRun::plain(tail)])
+            } else {
+                EditorBlock::paragraph(vec![InlineRun::plain(tail)])
             };
 ```
 
@@ -2662,12 +2607,18 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
                 None => paragraph::render_paragraph_editable(runs, block_id, env).into_any(),
             }
         }
-        BlockBody::Code(_) => code_editor::editable_code_view(
-            "", // placeholder — real code path should be via editor_for
-            &Rc::from(""),
-            block_id,
-            env,
-        ).into_any(),
+        BlockBody::Code(text) => {
+            // Only reached for an `editor: None` block with a Code body; use the
+            // real text + the `lang` attr (do NOT pass empty placeholders).
+            let lang: Rc<str> = block
+                .plugin
+                .attrs
+                .get("lang")
+                .and_then(|v| v.as_str())
+                .map(Rc::from)
+                .unwrap_or_else(|| Rc::from(""));
+            code_editor::editable_code_view(text, &lang, block_id, env).into_any()
+        }
         BlockBody::List(items) => {
             let ordered = block.plugin.attrs.get("ordered").and_then(|v| v.as_bool()).unwrap_or(false);
             list::editable_list_view(items, block_id, ordered, env)
