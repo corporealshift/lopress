@@ -146,4 +146,29 @@ mod tests {
     fn editor_for_resolves_table() {
         assert!(editor_for("table").is_some());
     }
+
+    #[test]
+    fn editor_for_keys_match_descriptor_keys() {
+        // Every descriptor's editor key must resolve in editor_for.
+        for d in crate::model::descriptor::descriptors() {
+            assert!(
+                editor_for(d.editor).is_some(),
+                "descriptor editor '{}' not registered in editor_for",
+                d.editor
+            );
+        }
+
+        // Every known editor_for key must have a matching descriptor.
+        let known_keys = [
+            "list", "code", "paragraph", "heading",
+            "more", "separator", "image", "table",
+        ];
+        for key in &known_keys {
+            assert!(
+                crate::model::descriptor::descriptor_for(key).is_some(),
+                "editor_for key '{}' has no descriptor",
+                key
+            );
+        }
+    }
 }
