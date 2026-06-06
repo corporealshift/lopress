@@ -15,7 +15,7 @@ use lopress_core::{parse, serialize, Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
 use lopress_editor::model::to_core::doc_to_core;
 use lopress_editor::model::types::{
-    BlockBody, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
+    BlockBody, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use lopress_plugin::PluginRegistry;
 use serde_json::{json, Value};
@@ -41,10 +41,7 @@ fn code_round_trips_with_language() {
     let editor = doc_from_core(&core, &registry);
 
     // Sanity: the editor classifies it correctly.
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Code { lang } if &**lang == "rust"
-    ));
+    assert!(matches!(editor.blocks[0].body, BlockBody::Code(_)));
 
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
@@ -64,9 +61,10 @@ fn opaque_block_preserved_byte_identical() {
 
     let video = &editor.blocks[1];
     assert!(
-        matches!(&video.kind, BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"),
-        "expected Opaque(lopress:video), got {:?}",
-        video.kind
+        matches!(&video.body, BlockBody::Opaque(_))
+            && video.plugin.block_type_name.as_ref() == "lopress:video",
+        "expected Opaque with lopress:video type, got {:?}",
+        video.body
     );
     assert!(matches!(video.body, BlockBody::Opaque(_)));
 
@@ -85,10 +83,10 @@ fn nested_block_inside_custom_falls_through_opaque() {
     // A `lopress:callout` containing children must still come back as a single
     // Opaque block — the editor doesn't currently model nested children.
     assert_eq!(editor.blocks.len(), 1);
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:callout"
-    ));
+    assert!(
+        matches!(editor.blocks[0].body, BlockBody::Opaque(_))
+            && editor.blocks[0].plugin.block_type_name.as_ref() == "lopress:callout"
+    );
 
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core);
@@ -101,7 +99,7 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     // Instead we build the editor representation directly, convert to core,
     // and assert the resulting `Document` matches the shape the rest of the
     // pipeline expects (list → list_item → paragraph).
-    // A list block as `from_core` produces it: `BlockKind::List` body plus
+    // A list block as `from_core` produces it: `::List` body plus
     // `PluginMeta` claiming the native `list` type, so `to_core` serializes
     // it natively.
     let mut list_block = EditorBlock::list(
@@ -152,10 +150,7 @@ fn list_constructed_in_editor_round_trips_to_core_shape() {
     let mut registry = PluginRegistry::default();
     registry.load_base_plugins().unwrap();
     let editor_back = doc_from_core(&core, &registry);
-    assert!(matches!(
-        editor_back.blocks[0].kind,
-        BlockKind::List { ordered: false }
-    ));
+    assert!(matches!(editor_back.blocks[0].body, BlockBody::List(_)));
     let BlockBody::List(items) = &editor_back.blocks[0].body else {
         panic!("expected List body, got {:?}", editor_back.blocks[0].body);
     };
@@ -199,10 +194,10 @@ fn nested_list_becomes_opaque() {
     };
 
     let editor = doc_from_core(&core, &PluginRegistry::default());
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name.as_ref() == "list"
-    ));
+    assert!(
+        matches!(editor.blocks[0].body, BlockBody::Opaque(_))
+            && editor.blocks[0].plugin.block_type_name.as_ref() == "list"
+    );
 
     let core_back = doc_to_core(&editor);
     assert_eq!(core_back, core, "nested list must round-trip verbatim");
@@ -250,9 +245,17 @@ fn heading_levels_round_trip() {
     let levels: Vec<u8> = editor
         .blocks
         .iter()
-        .map(|b| match b.kind {
-            BlockKind::Heading(l) => l,
-            _ => 0,
+        .map(|b| {
+            if b.plugin.editor.as_deref() == Some("heading") {
+                b.plugin
+                    .attrs
+                    .get("level")
+                    .and_then(|v| v.as_u64())
+                    .map(|l| l as u8)
+                    .unwrap_or(0)
+            } else {
+                0
+            }
         })
         .collect();
     assert_eq!(levels, vec![1, 2, 3, 4, 5, 6]);
@@ -279,7 +282,7 @@ fn code_block_carries_plugin_meta_after_from_core() {
     assert!(meta.builtin);
     assert_eq!(meta.editor.as_deref(), Some("code"));
     assert_eq!(meta.native.as_deref(), Some("code"));
-    assert!(matches!(&block.kind, BlockKind::Code { lang } if &**lang == "rust"));
+    assert!(matches!(&block.body, BlockBody::Code(_)));
     assert!(matches!(&block.body, BlockBody::Code(t) if t == "fn main() {}\n"));
 }
 
@@ -323,7 +326,7 @@ fn code_attrs_lang_mutation_serializes_correctly() {
 #[test]
 fn pluginless_code_block_round_trips() {
     // Code blocks created at runtime via EditorBlock::code(...) have
-    // plugin: None and serialize via the bottom-half BlockKind::Code arm
+    // plugin: None and serialize via the bottom-half::Code arm
     // in block_to_core (retained as the fallback). This test proves the
     // round-trip still works for such blocks.
     let block = EditorBlock::code("go".into(), "package main\n".to_string());
@@ -352,10 +355,7 @@ fn pluginless_code_block_round_trips() {
         editor_back.blocks[0].plugin.block_type_name.len() > 0,
         "loaded code block must carry PluginMeta"
     );
-    assert!(matches!(
-        &editor_back.blocks[0].kind,
-        BlockKind::Code { lang } if &**lang == "go"
-    ));
+    assert!(matches!(editor_back.blocks[0].body, BlockBody::Code(_)));
 }
 
 // ============================================================================
@@ -380,10 +380,10 @@ fn unknown_block_type_loads_as_opaque_no_panic() {
 
     let editor = doc_from_core(&core, &PluginRegistry::default());
     assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name.as_ref() == "unknown:foobar"
-    ));
+    assert!(
+        matches!(editor.blocks[0].body, BlockBody::Opaque(_))
+            && editor.blocks[0].plugin.block_type_name.as_ref() == "unknown:foobar"
+    );
     assert!(matches!(
         &editor.blocks[0].body,
         BlockBody::Opaque(v) if v.get("text").and_then(Value::as_str) == Some("raw text content")
@@ -407,10 +407,10 @@ fn malformed_attrs_loads_as_opaque_no_panic() {
 
     let editor = doc_from_core(&core, &PluginRegistry::default());
     assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name.as_ref() == "weird:block"
-    ));
+    assert!(
+        matches!(editor.blocks[0].body, BlockBody::Opaque(_))
+            && editor.blocks[0].plugin.block_type_name.as_ref() == "weird:block"
+    );
 }
 
 #[test]
@@ -432,10 +432,10 @@ fn unregistered_plugin_type_loads_as_opaque() {
     let registry = PluginRegistry::default();
     let editor = doc_from_core(&core, &registry);
     assert_eq!(editor.blocks.len(), 1, "block must not be dropped");
-    assert!(matches!(
-        &editor.blocks[0].kind,
-        BlockKind::Opaque { type_name } if type_name.as_ref() == "lopress:video"
-    ));
+    assert!(
+        matches!(editor.blocks[0].body, BlockBody::Opaque(_))
+            && editor.blocks[0].plugin.block_type_name.as_ref() == "lopress:video"
+    );
 
     // Round-trip: the Opaque body preserves the original JSON.
     let core_back = doc_to_core(&editor);
@@ -461,10 +461,10 @@ fn image_block_round_trips_with_caption() {
     let src = "![the alt](/images/p.jpg \"A caption\")\n";
     let core = lopress_core::parse(src).unwrap();
     let edoc = doc_from_core(&core, &reg);
-    // The image becomes a BlockKind::Image with attrs in PluginMeta.
+    // The image becomes a::Image with attrs in PluginMeta.
     assert_eq!(edoc.blocks.len(), 1);
     // Regression guard (descriptor-table refactor): a loaded image must keep
-    // its image identity — BlockKind::Image + PluginMeta with editor "image" —
+    // its image identity —::Image + PluginMeta with editor "image" —
     // so it routes to the image widget, not the read-only opaque fallback card.
     // Dispatching from_core on `body_shape` alone routed image (Opaque shape)
     // through EditorBlock::opaque, dropping `plugin` and breaking rendering.
@@ -472,9 +472,9 @@ fn image_block_round_trips_with_caption() {
     // verbatim), so the identity assertions are the real guard.
     let b = &edoc.blocks[0];
     assert!(
-        matches!(b.kind, BlockKind::Image),
+        matches!(&b.body, BlockBody::Opaque(serde_json::Value::Null)),
         "image kind lost: {:?}",
-        b.kind
+        b.body
     );
     let meta = &b.plugin;
     assert_eq!(meta.editor.as_deref(), Some("image"));

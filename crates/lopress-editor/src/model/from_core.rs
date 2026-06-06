@@ -1,8 +1,6 @@
 use crate::model::descriptor;
 use crate::model::inline::parse_inline;
-use crate::model::types::{
-    BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, ListItem, PluginMeta,
-};
+use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc, ListItem, PluginMeta};
 use lopress_core::{Block, Document};
 use lopress_plugin::{BlockDecl, PluginRegistry};
 use serde_json::{Map, Value};
@@ -42,10 +40,10 @@ fn block_from_core(b: &Block, registry: &PluginRegistry) -> EditorBlock {
     }
 }
 
-/// Build an `EditorBlock` for a plugin-declared type. Picks `kind` + `body`
-/// based on `decl.editor`. The body lives in the plugin block's *children*
-/// (this is how the core serializer round-trips `<!-- lopress:foo -->` blocks
-/// — anything between the comment markers parses into `b.children`).
+/// Build an `EditorBlock` for a plugin-declared type. The body lives in the
+/// plugin block's *children* (this is how the core serializer round-trips
+/// `<!-- lopress:foo -->` blocks — anything between the comment markers parses
+/// into `b.children`).
 fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let plugin = PluginMeta {
         block_type_name: Rc::from(b.r#type.as_str()),
@@ -58,46 +56,37 @@ fn plugin_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
 
     let editor = decl.editor.as_deref().unwrap_or("paragraph");
     let inner = b.children.first();
-    let (kind, body) = match editor {
+    let body = match editor {
         "heading" => {
-            let level = inner
+            let _level = inner
                 .and_then(|c| c.attrs.get("level").and_then(serde_json::Value::as_u64))
                 .and_then(|n| u8::try_from(n).ok())
                 .unwrap_or(1);
             let text = inner.and_then(|c| c.text.as_deref()).unwrap_or("");
-            (
-                BlockKind::Heading(level.clamp(1, 6)),
-                BlockBody::Inline(parse_inline(text)),
-            )
+            BlockBody::Inline(parse_inline(text))
         }
         "code" => {
-            let lang = inner
+            let _lang = inner
                 .and_then(|c| c.attrs.get("lang").and_then(serde_json::Value::as_str))
                 .unwrap_or("");
             let text = inner.and_then(|c| c.text.clone()).unwrap_or_default();
-            (
-                BlockKind::Code {
-                    lang: Rc::from(lang),
-                },
-                BlockBody::Code(text),
-            )
+            BlockBody::Code(text)
         }
         "list" => {
-            let ordered = inner
+            let _ordered = inner
                 .and_then(|c| c.attrs.get("ordered").and_then(serde_json::Value::as_bool))
                 .unwrap_or(false);
             let items = inner.map(list_items_from_block).unwrap_or_default();
-            (BlockKind::List { ordered }, BlockBody::List(items))
+            BlockBody::List(items)
         }
         _ => {
             let text = inner.and_then(|c| c.text.as_deref()).unwrap_or("");
-            (BlockKind::Paragraph, BlockBody::Inline(parse_inline(text)))
+            BlockBody::Inline(parse_inline(text))
         }
     };
 
     EditorBlock {
         id: BlockId::new(),
-        kind,
         body,
         plugin,
     }
@@ -165,7 +154,6 @@ fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
 fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     EditorBlock {
         id: BlockId::new(),
-        kind: BlockKind::Image,
         body: BlockBody::Opaque(Value::Null),
         plugin: PluginMeta {
             block_type_name: Rc::from(decl.name.as_str()),

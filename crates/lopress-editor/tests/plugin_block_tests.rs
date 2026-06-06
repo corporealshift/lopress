@@ -2,7 +2,7 @@
 
 use lopress_editor::model::from_core::doc_from_core;
 use lopress_editor::model::to_core::doc_to_core;
-use lopress_editor::model::types::{BlockBody, BlockKind};
+use lopress_editor::model::types::BlockBody;
 use lopress_plugin::{load_dir, PluginRegistry};
 use std::path::PathBuf;
 
@@ -34,7 +34,7 @@ fn plugin_block_round_trips_byte_identical() {
         meta.attrs.get("lang").and_then(|v| v.as_str()),
         Some("rust")
     );
-    assert!(matches!(first.kind, BlockKind::Code { .. }));
+    assert!(matches!(first.body, BlockBody::Code { .. }));
     let t = match &first.body {
         BlockBody::Code(t) => t,
         other => {
@@ -59,8 +59,8 @@ fn unknown_plugin_falls_back_to_opaque_and_round_trips() {
     let editor = doc_from_core(&core, &PluginRegistry::default());
     let first = &editor.blocks[0];
     // All blocks now carry PluginMeta; the key invariant is the Opaque kind.
-    assert!(matches!(first.kind, BlockKind::Opaque { .. }));
-    assert!(matches!(first.kind, BlockKind::Opaque { .. }));
+    assert!(matches!(first.body, BlockBody::Opaque { .. }));
+    assert!(matches!(first.body, BlockBody::Opaque { .. }));
 
     let core_back = doc_to_core(&editor);
     let serialized = lopress_core::serialize(&core_back);

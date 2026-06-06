@@ -1,6 +1,6 @@
 use crate::model::descriptor;
 use crate::model::inline::serialize_inline;
-use crate::model::types::{BlockBody, BlockKind, EditorBlock, EditorDoc, PluginMeta};
+use crate::model::types::{BlockBody, EditorBlock, EditorDoc, PluginMeta};
 use lopress_core::{Block, Document};
 use serde_json::{json, Map, Value};
 
@@ -169,33 +169,47 @@ fn empty_attrs() -> Value {
 
 /// Reconstruct a plugin-flagged block to core form. The plugin block itself
 /// carries only `type` + `attrs` + `children`; the body lives inside a
-/// single child block whose shape is dictated by `kind` (this matches the
+/// single child block whose shape is dictated by the body (this matches the
 /// core serializer's `<!-- lopress:foo -->` contract: anything between the
 /// markers is parsed as markdown into `children`, and `text` is ignored).
 fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
     let attrs = Value::Object(meta.attrs.clone());
-    let inner = match (&b.kind, &b.body) {
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => Block {
-            r#type: "paragraph".into(),
-            attrs: empty_attrs(),
-            children: vec![],
-            text: Some(serialize_inline(runs)),
-        },
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => Block {
-            r#type: "heading".into(),
-            attrs: json!({ "level": level }),
-            children: vec![],
-            text: Some(serialize_inline(runs)),
-        },
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => Block {
+    let inner = match &b.body {
+        BlockBody::Inline(runs) => {
+            // Determine the inner type from the editor key in PluginMeta.
+            let inner_type = match meta.editor.as_deref() {
+                Some(descriptor::EDITOR_HEADING) => {
+                    let level = meta
+                        .attrs
+                        .get("level")
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u8::try_from(n).ok())
+                        .unwrap_or(1);
+                    Block {
+                        r#type: "heading".into(),
+                        attrs: json!({ "level": level }),
+                        children: vec![],
+                        text: Some(serialize_inline(runs)),
+                    }
+                }
+                _ => Block {
+                    r#type: "paragraph".into(),
+                    attrs: empty_attrs(),
+                    children: vec![],
+                    text: Some(serialize_inline(runs)),
+                },
+            };
+            inner_type
+        }
+        BlockBody::Code(text) => Block {
             r#type: "code".into(),
-            attrs: json!({ "lang": &**lang }),
+            attrs: json!({ "lang": meta.attrs.get("lang").and_then(Value::as_str).unwrap_or("") }),
             children: vec![],
             text: Some(text.clone()),
         },
-        (BlockKind::List { ordered }, BlockBody::List(items)) => Block {
+        BlockBody::List(items) => Block {
             r#type: "list".into(),
-            attrs: json!({ "ordered": ordered }),
+            attrs: json!({ "ordered": false }),
             children: items
                 .iter()
                 .map(|i| Block {
@@ -212,7 +226,7 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
                 .collect(),
             text: None,
         },
-        // Body/kind mismatch: emit empty paragraph child rather than panic.
+        // Body mismatch: emit empty paragraph child rather than panic.
         _ => Block {
             r#type: "paragraph".into(),
             attrs: empty_attrs(),
@@ -231,13 +245,12 @@ fn plugin_block_to_core(b: &EditorBlock, meta: &PluginMeta) -> Block {
 #[cfg(test)]
 mod more_marker_tests {
     use super::*;
-    use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, PluginMeta};
+    use crate::model::types::{BlockBody, BlockId, EditorBlock, PluginMeta};
     use std::rc::Rc;
 
     fn marker_block() -> EditorBlock {
         EditorBlock {
             id: BlockId::new(),
-            kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
             plugin: PluginMeta {
                 block_type_name: Rc::from("lopress:more"),

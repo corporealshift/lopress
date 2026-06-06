@@ -35,20 +35,8 @@ pub struct EditorDoc {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorBlock {
     pub id: BlockId,
-    pub kind: BlockKind,
     pub body: BlockBody,
     pub plugin: PluginMeta,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BlockKind {
-    Paragraph,
-    Heading(u8), // 1..=6
-    Code { lang: Rc<str> },
-    List { ordered: bool },
-    Image,
-    Table,
-    Opaque { type_name: Rc<str> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -177,7 +165,7 @@ impl PluginMeta {
     /// Mirrors what `from_core` stamps for a `heading` core block, so a
     /// heading created inside the editor (e.g. via `ChangeType` from the
     /// toolbar or slash menu) carries the same plugin identity as one loaded
-    /// from disk. `attrs["level"]` mirrors `BlockKind::Heading(level)` so
+    /// from disk. `attrs["level"]` carries the heading level so
     /// the heading widget can read the level from attrs (not from the enum).
     /// `attr_decls` is empty: the heading is `builtin`, so the attr form
     /// is suppressed.
@@ -306,7 +294,6 @@ impl EditorBlock {
     pub fn paragraph(runs: Vec<InlineRun>) -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Paragraph,
             body: BlockBody::Inline(runs),
             plugin: PluginMeta::paragraph(),
         }
@@ -316,7 +303,6 @@ impl EditorBlock {
         let level = level.clamp(1, 6);
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Heading(level),
             body: BlockBody::Inline(runs),
             plugin: PluginMeta::heading(level),
         }
@@ -337,9 +323,6 @@ impl EditorBlock {
         };
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Code {
-                lang: Rc::from(lang),
-            },
             body: BlockBody::Code(text),
             plugin: meta,
         }
@@ -350,7 +333,6 @@ impl EditorBlock {
         attrs.insert("ordered".to_string(), Value::Bool(ordered));
         Self {
             id: BlockId::new(),
-            kind: BlockKind::List { ordered },
             body: BlockBody::List(items),
             plugin: PluginMeta {
                 block_type_name: Rc::from("list"),
@@ -366,9 +348,6 @@ impl EditorBlock {
     pub fn opaque(type_name: String, value: Value) -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Opaque {
-                type_name: Rc::from(type_name.clone()),
-            },
             body: BlockBody::Opaque(value),
             plugin: PluginMeta {
                 block_type_name: Rc::from(type_name),
@@ -387,7 +366,6 @@ impl EditorBlock {
     pub fn read_more() -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
             plugin: PluginMeta::read_more(),
         }
@@ -399,7 +377,6 @@ impl EditorBlock {
     pub fn separator() -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Paragraph,
             body: BlockBody::Inline(vec![]),
             plugin: PluginMeta::separator(),
         }
@@ -409,7 +386,6 @@ impl EditorBlock {
     pub fn table(data: TableData) -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Table,
             body: BlockBody::Table(data),
             plugin: PluginMeta::table(),
         }
@@ -439,7 +415,6 @@ impl EditorBlock {
     pub fn image(src: &str, alt: &str, caption: &str) -> Self {
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Image,
             body: BlockBody::Opaque(Value::Null),
             plugin: PluginMeta::image(src, alt, caption),
         }
@@ -453,13 +428,12 @@ impl EditorBlock {
     /// / `<!-- /lopress:NAME -->` comment container.
     pub fn from_plugin_item(item: &crate::model::inserter::PluginInserterItem) -> Self {
         // Mirror exactly what `plugin_block_from_core` produces for a loaded
-        // comment-container plugin block (its `editor`-less default arm): a
-        // `Paragraph` kind with an empty `Inline` body. Using `Opaque`/`Opaque(Null)`
+        // comment-container plugin block (its `editor`-less default arm): an
+        // empty `Inline` body. Using `Opaque`/`Opaque(Null)`
         // here would make the plugin block view render the scary "raw content,
         // can't be edited" fallback panel instead of just the attr form.
         Self {
             id: BlockId::new(),
-            kind: BlockKind::Paragraph,
             body: BlockBody::Inline(Vec::new()),
             plugin: PluginMeta {
                 block_type_name: item.type_name.clone(),
@@ -509,7 +483,7 @@ mod image_ctor_tests {
     #[test]
     fn image_block_carries_attrs_in_meta() {
         let b = EditorBlock::image("/images/p.jpg", "alt text", "");
-        assert!(matches!(b.kind, BlockKind::Image));
+        assert!(matches!(b.body, BlockBody::Opaque(Value::Null)));
         let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "image");
         assert_eq!(meta.editor.as_deref(), Some("image"));
@@ -571,7 +545,7 @@ mod plugin_inserter_ctor_tests {
         let b = EditorBlock::from_plugin_item(&item);
         // Mirrors a loaded comment-container plugin block: Paragraph kind,
         // empty Inline body, identity carried in PluginMeta.
-        assert!(matches!(b.kind, BlockKind::Paragraph));
+        assert!(matches!(&b.body, BlockBody::Inline(runs) if runs.is_empty()));
         assert!(matches!(&b.body, BlockBody::Inline(runs) if runs.is_empty()));
         let meta = &b.plugin;
         assert_eq!(&*meta.block_type_name, "lopress:test");

@@ -8,7 +8,7 @@
 use crate::model::descriptor::{self, BodyShape};
 use crate::model::sync::canonicalize_body;
 use crate::model::types::{
-    Align, BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
+    Align, BlockBody, BlockId, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
 use std::rc::Rc;
 
@@ -607,38 +607,6 @@ fn canonical_meta(
     }
 }
 
-/// TEMP until Task 8 deletes BlockKind: derive `BlockKind` from the editor
-/// key + attrs. This keeps `block.kind` in sync during Task 1.
-fn kind_for_editor(
-    new_editor: &str,
-    new_attrs: &serde_json::Map<String, serde_json::Value>,
-) -> BlockKind {
-    match new_editor {
-        descriptor::EDITOR_HEADING => {
-            let level = new_attrs
-                .get("level")
-                .and_then(|v| v.as_u64())
-                .and_then(|n| u8::try_from(n).ok())
-                .unwrap_or(2); // Default heading level = 2
-            BlockKind::Heading(level.clamp(1, 6))
-        }
-        descriptor::EDITOR_CODE => BlockKind::Code {
-            lang: new_attrs
-                .get("lang")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .into(),
-        },
-        descriptor::EDITOR_LIST => BlockKind::List {
-            ordered: new_attrs
-                .get("ordered")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
-        _ => BlockKind::Paragraph,
-    }
-}
-
 fn apply_change_type(
     doc: &mut EditorDoc,
     id: BlockId,
@@ -693,8 +661,6 @@ fn apply_change_type(
     // the `&block.plugin` read finishes before reassigning `block.plugin`.
     let new_meta = canonical_meta(&new_editor, &new_attrs, desc, Some(&block.plugin));
     block.plugin = new_meta;
-    // TEMP until Task 8 deletes BlockKind: keep kind in sync with the new editor.
-    block.kind = kind_for_editor(&new_editor, &new_attrs);
 
     Some((
         BlockAction::ChangeType {
@@ -1222,14 +1188,10 @@ mod change_type_tests {
 
     #[test]
     fn apply_edit_attrs_no_longer_mirrors_into_kind() {
-        // After BlockKind is gone, there is no kind.lang mirror to update.
         // EditAttrs on a code block should only touch plugin.attrs.
         let mut doc = EditorDoc {
             blocks: vec![EditorBlock {
                 id: BlockId::new(),
-                kind: BlockKind::Code {
-                    lang: Rc::from("rust"),
-                },
                 body: BlockBody::Code("fn main() {}".to_string()),
                 plugin: PluginMeta::code("rust"),
             }],

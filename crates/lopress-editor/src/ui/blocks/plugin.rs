@@ -12,7 +12,8 @@
 //!      editable widget the rest of the editor uses.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::model::descriptor;
+use crate::model::types::{BlockBody, BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
@@ -351,33 +352,61 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         }
     }
 
-    // Fallback: editor keys not yet migrated to the registry (code) still
-    // dispatch on the Rust `BlockKind` enum.
+    // Fallback: dispatch on body shape for container plugins without a
+    // registered editor. The editor key in PluginMeta determines the inner
+    // type for heading blocks.
     let block_id = block.id;
-    match (&block.kind, &block.body) {
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+    match &block.body {
+        BlockBody::Code(text) => {
+            let lang = block
+                .plugin
+                .attrs
+                .get("lang")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             code_editor::editable_code_view(text, lang, block_id, env).into_any()
         }
-        (BlockKind::List { ordered }, BlockBody::List(items)) => {
-            list::editable_list_view(items, block_id, *ordered, env)
+        BlockBody::List(items) => {
+            let ordered = block
+                .plugin
+                .attrs
+                .get("ordered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            list::editable_list_view(items, block_id, ordered, env).into_any()
         }
-        // Container plugins (e.g. `lopress:callout`) carry `editor: None` and a
-        // Paragraph/Heading + Inline body, so they skip the `editor_for` path
-        // above and land here. Render their body as an editable paragraph/
-        // heading — NOT the fallback warning. (Migrated built-in paragraphs and
-        // headings carry `editor: "paragraph"`/`"heading"` and take the registry
-        // path, so they never reach this arm; only container plugins do.)
-        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
-            paragraph::render_paragraph_editable(runs, block_id, env).into_any()
-        }
-        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
-            heading::render_heading_editable(*level, runs, block_id, env).into_any()
+        BlockBody::Inline(runs) => {
+            // Container plugins (e.g. `lopress:callout`) carry `editor: None`
+            // and an Inline body. Render as an editable paragraph or heading
+            // based on the editor key in PluginMeta.
+            let level = block
+                .plugin
+                .editor
+                .as_deref()
+                .and_then(|e| {
+                    if e == descriptor::EDITOR_HEADING {
+                        block
+                            .plugin
+                            .attrs
+                            .get("level")
+                            .and_then(|v| v.as_u64())
+                            .and_then(|n| u8::try_from(n).ok())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1);
+            if level > 1 {
+                heading::render_heading_editable(level, runs, block_id, env).into_any()
+            } else {
+                paragraph::render_paragraph_editable(runs, block_id, env).into_any()
+            }
         }
         _ => {
             #[cfg(debug_assertions)]
             eprintln!(
-                "[fallback] plugin block {:?}: kind/body mismatch ({:?} + {:?})",
-                block.id, block.kind, block.body
+                "[fallback] plugin block {:?}: body {:?} has no renderer",
+                block.id, block.body
             );
             crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
