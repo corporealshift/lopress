@@ -15,7 +15,7 @@ use crate::actions::BlockAction;
 use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::ActionSink;
-use crate::ui::blocks::{code_editor, list};
+use crate::ui::blocks::{code_editor, heading, list, paragraph};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -65,7 +65,25 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let on_action_for_attrs = env.on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    v_stack((header, form, body))
+    // The attr-form inputs don't publish focus, so interacting with a plugin's
+    // header/form would never mount the toolbar (Change Type / Delete). Publish
+    // focus on PointerDown over the chrome (header + form) so the toolbar mounts.
+    // Clear `editor_and_spans` because the chrome has no body editor — this
+    // prevents the toolbar's pre-commit from firing a previously-focused block's
+    // inline editor against this one (mirrors fallback.rs). The body is kept OUT
+    // of this region so its own inline editor still publishes `editor_and_spans`
+    // when the body is focused (otherwise the toolbar's bold/italic would break).
+    let focus_pub = env.focus_pub;
+    let chrome = v_stack((header, form)).style(|s| s.gap(4.)).on_event(
+        floem::event::EventListener::PointerDown,
+        move |_| {
+            focus_pub.block.set(Some(block_id));
+            focus_pub.editor_and_spans.set(None);
+            floem::event::EventPropagation::Continue
+        },
+    );
+
+    v_stack((chrome, body))
         .style(|s| {
             s.gap(4.)
                 .padding(6.)
@@ -345,6 +363,18 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         }
         (BlockKind::List { ordered }, BlockBody::List(items)) => {
             list::editable_list_view(items, block_id, *ordered, env)
+        }
+        // Container plugins (e.g. `lopress:callout`) carry `editor: None` and a
+        // Paragraph/Heading + Inline body, so they skip the `editor_for` path
+        // above and land here. Render their body as an editable paragraph/
+        // heading — NOT the fallback warning. (Migrated built-in paragraphs and
+        // headings carry `editor: "paragraph"`/`"heading"` and take the registry
+        // path, so they never reach this arm; only container plugins do.)
+        (BlockKind::Paragraph, BlockBody::Inline(runs)) => {
+            paragraph::render_paragraph_editable(runs, block_id, env).into_any()
+        }
+        (BlockKind::Heading(level), BlockBody::Inline(runs)) => {
+            heading::render_heading_editable(*level, runs, block_id, env).into_any()
         }
         _ => {
             #[cfg(debug_assertions)]
