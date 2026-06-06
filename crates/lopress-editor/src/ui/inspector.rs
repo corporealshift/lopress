@@ -220,7 +220,18 @@ fn form(
             let h1 = d
                 .blocks
                 .iter()
-                .find(|b| b.kind == crate::model::types::BlockKind::Heading(1))?;
+                .find(|b| {
+                b.plugin
+                    .as_ref()
+                    .is_some_and(|m| {
+                        m.editor.as_deref() == Some("heading")
+                            && m.attrs
+                                .get("level")
+                                .and_then(|v| v.as_u64())
+                                .map(|n| n == 1)
+                                .unwrap_or(false)
+                    })
+            })?;
             match &h1.body {
                 crate::model::types::BlockBody::Inline(runs) => {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())

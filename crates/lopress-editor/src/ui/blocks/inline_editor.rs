@@ -3,7 +3,8 @@
 use crate::actions::BlockAction;
 use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
-use crate::model::types::{BlockId, BlockKind, EditorDoc, InlineRun};
+use crate::model::descriptor;
+use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::style_span::InlineRunStyling;
 use floem::event::{Event, EventListener};
@@ -157,7 +158,14 @@ pub fn editable_inline(
                 doc.blocks
                     .iter()
                     .find(|b| b.id == block_id)
-                    .map(|b| matches!(b.kind, BlockKind::Paragraph | BlockKind::Heading(_)))
+                    .map(|b| {
+                        let editor = b
+                            .plugin
+                            .as_ref()
+                            .and_then(|m| m.editor.as_deref())
+                            .unwrap_or(descriptor::EDITOR_PARAGRAPH);
+                        matches!(editor, descriptor::EDITOR_PARAGRAPH | descriptor::EDITOR_HEADING)
+                    })
             })
         });
         if should_commit.unwrap_or(false) {

@@ -22,7 +22,7 @@ pub mod style_span;
 pub mod table;
 
 use crate::model::descriptor;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::model::types::{BlockBody, BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
 use crate::ui::toolbar::block_toolbar_for;
@@ -56,7 +56,6 @@ const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246)
 /// other kinds remain read-only for now.
 pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
-    let kind = block.kind.clone();
     let block_editor = block
         .plugin
         .as_ref()
@@ -75,7 +74,6 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
         return wrap_block(
             plugin_view,
             block_id,
-            kind,
             dnd,
             env,
             block_editor,
@@ -83,28 +81,34 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
         );
     }
 
-    let body = match (&block.kind, &block.body) {
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+    let body = match &block.body {
+        BlockBody::Code(text) => {
+            let lang = block
+                .plugin
+                .as_ref()
+                .and_then(|m| m.attrs.get("lang"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             code_editor::editable_code_view(text, lang, block_id, env)
         }
-        (BlockKind::Opaque { .. }, BlockBody::Opaque(_)) => {
+        BlockBody::Opaque(_) => {
             // Opaque blocks load from disk with unknown/removed plugin types.
             // Route through the fallback so they're visible and recoverable,
             // not a silent drop or a read-only card with no toolbar.
             fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
-        // Body/kind mismatch — render fallback so content is visible and recoverable.
+        // Body mismatch — render fallback so content is visible and recoverable.
         _ => {
             #[cfg(debug_assertions)]
             eprintln!(
-                "[fallback] block {:?}: kind/body mismatch ({:?} + {:?})",
-                block_id, block.kind, block.body
+                "[fallback] block {:?}: body {:?} has no non-plugin renderer",
+                block_id, block.body
             );
             fallback::fallback_block_view(block, env.focus_pub).into_any()
         }
     };
 
-    wrap_block(body, block_id, kind, dnd, env, block_editor, block_attrs)
+    wrap_block(body, block_id, dnd, env, block_editor, block_attrs)
 }
 
 /// Wrap a block's body in the shared chrome: a drag-handle gutter, hover/focus
@@ -118,7 +122,6 @@ pub fn block_view(block: &EditorBlock, dnd: DndState, env: &BlockEnv) -> AnyView
 fn wrap_block(
     body: AnyView,
     block_id: BlockId,
-    _kind: BlockKind,
     dnd: DndState,
     env: &BlockEnv,
     block_editor: Rc<str>,
