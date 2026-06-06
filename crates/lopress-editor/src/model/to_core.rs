@@ -65,13 +65,16 @@ fn block_to_core(b: &EditorBlock) -> Block {
 /// Serialize a `native`-claiming plugin block to its core markdown form.
 /// Dispatches on the body shape; `list` and `code` are the native types today.
 fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> Block {
-    // The descriptor's editor key drives the inline paragraph-vs-heading
-    // distinction (replacing the old `core_type == "heading"` string guard);
-    // the body shape itself comes from matching `&b.body`, and each per-shape
-    // serializer below is byte-for-byte the existing one.
-    let is_heading = descriptor::descriptor_for_native(core_type)
-        .map(|d| d.editor == descriptor::EDITOR_HEADING)
-        .unwrap_or(false);
+    // The descriptor's editor key drives the inline paragraph/heading/other
+    // distinction (replacing the old `core_type == "paragraph"/"heading"` string
+    // guards). The body shape comes from matching `&b.body`; each per-shape
+    // serializer below is byte-for-byte the existing one. Note: only `paragraph`
+    // and `heading` serialize their inline runs as text — other inline-bodied
+    // native types (e.g. `separator`, whose body is an empty Inline) must fall to
+    // the `_` arm (text: None), not the paragraph arm (which would emit text: "").
+    let editor = descriptor::descriptor_for_native(core_type).map(|d| d.editor);
+    let is_heading = editor == Some(descriptor::EDITOR_HEADING);
+    let is_paragraph = editor == Some(descriptor::EDITOR_PARAGRAPH);
     match &b.body {
         BlockBody::List(items) => {
             let ordered = meta
@@ -154,14 +157,14 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                 text: Some(serialize_inline(runs)),
             }
         }
-        BlockBody::Inline(runs) => Block {
+        BlockBody::Inline(runs) if is_paragraph => Block {
             r#type: core_type.to_string(),
             attrs: empty_attrs(),
             children: vec![],
             text: Some(serialize_inline(runs)),
         },
-        // Other body shapes belong to native types not yet migrated; emit a
-        // typed block carrying the attrs rather than panicking.
+        // Other native types (e.g. separator: an empty Inline body) and other
+        // body shapes: emit a bare typed block carrying its attrs, text None.
         _ => Block {
             r#type: core_type.to_string(),
             attrs: Value::Object(meta.attrs.clone()),

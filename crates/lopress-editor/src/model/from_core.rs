@@ -1,4 +1,4 @@
-use crate::model::descriptor::{self, BodyShape};
+use crate::model::descriptor;
 use crate::model::inline::parse_inline;
 use crate::model::types::{
     BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, ListItem, PluginMeta,
@@ -136,29 +136,45 @@ fn list_items_from_block(b: &Block) -> Vec<ListItem> {
 /// is unreachable today and degrades to `Opaque` for a verbatim round-trip.
 fn native_block_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     let core_type = b.r#type.as_str();
-    let desc = descriptor::descriptor_for_native(core_type);
+    // Dispatch on the descriptor's editor key — the block's identity. NOTE:
+    // `body_shape` is too coarse to dispatch parsers here: `image` shares the
+    // `Opaque` shape with unknown/removed blocks, and `separator` shares the
+    // `Inline` shape with `paragraph`/`heading`. Each editor key needs its own
+    // parser, so the dispatch keys on `editor`, not `body_shape`.
+    match descriptor::descriptor_for_native(core_type).map(|d| d.editor) {
+        Some(descriptor::EDITOR_LIST) => native_list_from_core(b, decl),
+        Some(descriptor::EDITOR_CODE) => native_code_from_core(b, decl),
+        Some(descriptor::EDITOR_PARAGRAPH) => native_paragraph_from_core(b, decl),
+        Some(descriptor::EDITOR_HEADING) => native_heading_from_core(b, decl),
+        Some(descriptor::EDITOR_IMAGE) => native_image_from_core(b, decl),
+        Some(descriptor::EDITOR_SEPARATOR) => EditorBlock::separator(),
+        Some(descriptor::EDITOR_TABLE) => native_table_from_core(b),
+        _ => EditorBlock::opaque(
+            core_type.to_string(),
+            serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
+        ),
+    }
+}
 
-    match desc.map(|d| d.body_shape) {
-        Some(BodyShape::Code) => native_code_from_core(b, decl),
-        Some(BodyShape::List) => native_list_from_core(b, decl),
-        Some(BodyShape::Table) => native_table_from_core(b),
-        Some(BodyShape::Inline) => {
-            // Inline: paragraph or heading — dispatch by editor key.
-            match desc.map(|d| d.editor) {
-                Some(descriptor::EDITOR_HEADING) => native_heading_from_core(b, decl),
-                _ => native_paragraph_from_core(b, decl),
-            }
-        }
-        Some(BodyShape::Opaque) | None => {
-            // Fallback: separator or unknown.
-            match decl.editor.as_deref() {
-                Some(descriptor::EDITOR_SEPARATOR) => EditorBlock::separator(),
-                _ => EditorBlock::opaque(
-                    core_type.to_string(),
-                    serde_json::to_value(b).unwrap_or(serde_json::Value::Null),
-                ),
-            }
-        }
+/// Native-image body parser. An image carries no inline/structured body — its
+/// `src`/`alt`/`caption` live in `attrs`. Stamps `PluginMeta` (with
+/// `editor: "image"`) so the loaded block routes through the image widget
+/// (`editor_for("image")`) and serializes back via `to_core`'s native arm.
+/// Routing it through the generic `Opaque` path instead would drop the image
+/// identity (`plugin: None`) and render it as a read-only fallback card.
+fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
+    EditorBlock {
+        id: BlockId::new(),
+        kind: BlockKind::Image,
+        body: BlockBody::Opaque(Value::Null),
+        plugin: Some(PluginMeta {
+            block_type_name: Rc::from(decl.name.as_str()),
+            attrs: block_attrs_as_object(&b.attrs),
+            attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
+            builtin: decl.builtin,
+            editor: decl.editor.as_deref().map(Rc::from),
+            native: decl.native.as_deref().map(Rc::from),
+        }),
     }
 }
 

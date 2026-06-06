@@ -465,8 +465,46 @@ fn image_block_round_trips_with_caption() {
     let edoc = doc_from_core(&core, &reg);
     // The image becomes a BlockKind::Image with attrs in PluginMeta.
     assert_eq!(edoc.blocks.len(), 1);
+    // Regression guard (descriptor-table refactor): a loaded image must keep
+    // its image identity — BlockKind::Image + PluginMeta with editor "image" —
+    // so it routes to the image widget, not the read-only opaque fallback card.
+    // Dispatching from_core on `body_shape` alone routed image (Opaque shape)
+    // through EditorBlock::opaque, dropping `plugin` and breaking rendering.
+    // The round-trip below stays green either way (opaque stashes JSON
+    // verbatim), so the identity assertions are the real guard.
+    let b = &edoc.blocks[0];
+    assert!(
+        matches!(b.kind, BlockKind::Image),
+        "image kind lost: {:?}",
+        b.kind
+    );
+    let meta = b.plugin.as_ref().unwrap();
+    assert_eq!(meta.editor.as_deref(), Some("image"));
+    assert_eq!(meta.native.as_deref(), Some("image"));
     let back = doc_to_core(&edoc);
     assert_eq!(serialize(&back), src);
+}
+
+#[test]
+fn separator_loads_as_separator_not_paragraph() {
+    // Regression guard (descriptor-table refactor): `---` parses to core type
+    // "separator", which flows through the native path. Dispatching from_core
+    // on `body_shape` routed it (Inline shape) into the paragraph parser,
+    // turning a loaded separator into an empty paragraph. It must dispatch on
+    // the editor key and load as a separator block.
+    let mut reg = PluginRegistry::default();
+    reg.load_base_plugins().unwrap();
+    // Thematic break between paragraphs (a leading bare `---` is frontmatter).
+    let src = "before\n\n---\n\nafter\n";
+    let core = parse(src).unwrap();
+    let edoc = doc_from_core(&core, &reg);
+    assert_eq!(edoc.blocks.len(), 3);
+    let sep = &edoc.blocks[1];
+    let meta = sep.plugin.as_ref().unwrap();
+    assert_eq!(meta.editor.as_deref(), Some("separator"));
+    assert_eq!(meta.native.as_deref(), Some("separator"));
+    let back = doc_to_core(&edoc);
+    assert_eq!(back, core);
 }
 
 #[test]
