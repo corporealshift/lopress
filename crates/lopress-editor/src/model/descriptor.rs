@@ -260,4 +260,74 @@ mod exclusivity_tests {
             }
         }
     }
+
+    #[test]
+    fn blockkind_variants_align_with_descriptor_bodies() {
+        // BlockKind variants and descriptor body_shapes agree on the mapping:
+        // Paragraph → Inline, Heading(n) → Inline, Code → Code, List → List,
+        // Table → Table, Opaque → Opaque.
+        // This test asserts the alignment; Stage B deletes BlockKind.
+
+        let paragraph_desc = descriptor_for(EDITOR_PARAGRAPH).unwrap();
+        assert!(matches!(paragraph_desc.body_shape, BodyShape::Inline));
+
+        let heading_desc = descriptor_for(EDITOR_HEADING).unwrap();
+        assert!(matches!(heading_desc.body_shape, BodyShape::Inline));
+
+        let code_desc = descriptor_for(EDITOR_CODE).unwrap();
+        assert!(matches!(code_desc.body_shape, BodyShape::Code));
+
+        let list_desc = descriptor_for(EDITOR_LIST).unwrap();
+        assert!(matches!(list_desc.body_shape, BodyShape::List));
+
+        let table_desc = descriptor_for(EDITOR_TABLE).unwrap();
+        assert!(matches!(table_desc.body_shape, BodyShape::Table));
+
+        let image_desc = descriptor_for(EDITOR_IMAGE).unwrap();
+        assert!(matches!(image_desc.body_shape, BodyShape::Opaque));
+    }
+
+    #[test]
+    fn all_descriptors_have_consistent_editor_and_native() {
+        // Every descriptor that has a native claim must find a matching
+        // descriptor when looked up by that native value.
+        for d in descriptors() {
+            if let Some(native) = d.native {
+                assert_eq!(
+                    descriptor_for_native(native).map(|x| x.editor),
+                    Some(d.editor),
+                    "native '{}' maps to wrong editor",
+                    native
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn descriptor_default_blocks_produce_valid_blocks() {
+        use crate::model::types::BlockBody;
+
+        // Each descriptor's default_block closure must produce a block whose
+        // body_shape matches the descriptor's declared body_shape.
+        for desc in descriptors() {
+            let block = (desc.default_block)();
+            match desc.body_shape {
+                BodyShape::Inline => {
+                    assert!(matches!(&block.body, BlockBody::Inline(_)));
+                }
+                BodyShape::Code => {
+                    assert!(matches!(&block.body, BlockBody::Code(_)));
+                }
+                BodyShape::List => {
+                    assert!(matches!(&block.body, BlockBody::List(_)));
+                }
+                BodyShape::Table => {
+                    assert!(matches!(&block.body, BlockBody::Table(_)));
+                }
+                BodyShape::Opaque => {
+                    assert!(matches!(&block.body, BlockBody::Opaque(_)));
+                }
+            }
+        }
+    }
 }
