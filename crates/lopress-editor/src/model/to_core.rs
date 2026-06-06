@@ -1,3 +1,4 @@
+use crate::model::descriptor;
 use crate::model::inline::serialize_inline;
 use crate::model::types::{BlockBody, BlockKind, EditorBlock, EditorDoc, PluginMeta};
 use lopress_core::{Block, Document};
@@ -64,6 +65,13 @@ fn block_to_core(b: &EditorBlock) -> Block {
 /// Serialize a `native`-claiming plugin block to its core markdown form.
 /// Dispatches on the body shape; `list` and `code` are the native types today.
 fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> Block {
+    // The descriptor's editor key drives the inline paragraph-vs-heading
+    // distinction (replacing the old `core_type == "heading"` string guard);
+    // the body shape itself comes from matching `&b.body`, and each per-shape
+    // serializer below is byte-for-byte the existing one.
+    let is_heading = descriptor::descriptor_for_native(core_type)
+        .map(|d| d.editor == descriptor::EDITOR_HEADING)
+        .unwrap_or(false);
     match &b.body {
         BlockBody::List(items) => {
             let ordered = meta
@@ -132,13 +140,7 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                 text: None,
             }
         }
-        BlockBody::Inline(runs) if core_type == "paragraph" => Block {
-            r#type: core_type.to_string(),
-            attrs: empty_attrs(),
-            children: vec![],
-            text: Some(serialize_inline(runs)),
-        },
-        BlockBody::Inline(runs) if core_type == "heading" => {
+        BlockBody::Inline(runs) if is_heading => {
             let level = meta
                 .attrs
                 .get("level")
@@ -152,6 +154,12 @@ fn native_block_to_core(b: &EditorBlock, meta: &PluginMeta, core_type: &str) -> 
                 text: Some(serialize_inline(runs)),
             }
         }
+        BlockBody::Inline(runs) => Block {
+            r#type: core_type.to_string(),
+            attrs: empty_attrs(),
+            children: vec![],
+            text: Some(serialize_inline(runs)),
+        },
         // Other body shapes belong to native types not yet migrated; emit a
         // typed block carrying the attrs rather than panicking.
         _ => Block {
