@@ -45,10 +45,10 @@ fn block_to_core(b: &EditorBlock) -> Block {
             });
         }
     }
-    return match &meta.native {
+    match &meta.native {
         Some(core_type) => native_block_to_core(b, meta, core_type),
         None => plugin_block_to_core(b, meta),
-    };
+    }
 }
 
 /// Serialize a `native`-claiming plugin block to its core markdown form.

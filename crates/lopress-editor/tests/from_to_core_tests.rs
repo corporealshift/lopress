@@ -251,7 +251,7 @@ fn heading_levels_round_trip() {
                     .attrs
                     .get("level")
                     .and_then(|v| v.as_u64())
-                    .map(|l| l as u8)
+                    .and_then(|l| u8::try_from(l).ok())
                     .unwrap_or(0)
             } else {
                 0
@@ -337,7 +337,7 @@ fn pluginless_code_block_round_trips() {
 
     // Verify plugin-less.
     // All blocks carry PluginMeta.
-    assert!(doc.blocks[0].plugin.block_type_name.len() > 0);
+    assert!(!doc.blocks[0].plugin.block_type_name.is_empty());
 
     let core = doc_to_core(&doc);
     assert_eq!(core.blocks[0].r#type, "code");
@@ -352,7 +352,7 @@ fn pluginless_code_block_round_trips() {
     let editor_back = doc_from_core(&core, &registry);
     // The code block now has PluginMeta (loaded through the registry path).
     assert!(
-        editor_back.blocks[0].plugin.block_type_name.len() > 0,
+        !editor_back.blocks[0].plugin.block_type_name.is_empty(),
         "loaded code block must carry PluginMeta"
     );
     assert!(matches!(editor_back.blocks[0].body, BlockBody::Code(_)));
