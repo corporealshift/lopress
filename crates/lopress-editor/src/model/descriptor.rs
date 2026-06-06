@@ -285,7 +285,7 @@ pub fn descriptor_for_native(core_type: &str) -> Option<&'static BlockDescriptor
 /// whose `slash_label` is `None` — this is a programming error since the
 /// filter guarantees only `Some` entries are mapped.
 #[allow(clippy::unwrap_used)] // safe: filter guarantees slash_label.is_some()
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity)] // a slice of (label, fn() -> EditorBlock) tuples is the natural menu-projection shape
 pub fn slash_menu_entries() -> &'static [(&'static str, fn() -> EditorBlock)] {
     static CACHED: std::sync::OnceLock<Vec<(&'static str, fn() -> EditorBlock)>> =
         std::sync::OnceLock::new();
@@ -308,7 +308,7 @@ pub fn slash_menu_entries() -> &'static [(&'static str, fn() -> EditorBlock)] {
 /// whose `toolbar_label` is `None` — this is a programming error since the
 /// filter guarantees only `Some` entries are mapped.
 #[allow(clippy::unwrap_used)] // safe: filter guarantees toolbar_label.is_some()
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity)] // a slice of (label, fn() -> EditorBlock) tuples is the natural menu-projection shape
 pub fn toolbar_menu_entries() -> &'static [(&'static str, fn() -> EditorBlock)] {
     static CACHED: std::sync::OnceLock<Vec<(&'static str, fn() -> EditorBlock)>> =
         std::sync::OnceLock::new();

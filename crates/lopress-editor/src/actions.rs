@@ -1048,7 +1048,7 @@ fn apply_edit_block_body(
         .plugin
         .as_ref()
         .and_then(|m| m.editor.as_deref())
-        .unwrap_or_else(|| match &block.body {
+        .unwrap_or(match &block.body {
             BlockBody::List(_) => descriptor::EDITOR_LIST,
             BlockBody::Code(_) => descriptor::EDITOR_CODE,
             BlockBody::Table(_) => descriptor::EDITOR_TABLE,

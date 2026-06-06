@@ -53,7 +53,7 @@ pub struct ToolbarState {
 /// `PluginMeta` or without `editor: Some` — this is a programming error
 /// since all built-in constructors stamp plugin meta.
 #[allow(clippy::unwrap_used)] // safe: built-in PluginMeta always has editor: Some
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity)] // builder threads the attrs map plus the focus/action sinks
 pub fn block_toolbar_for(
     block_id: BlockId,
     current_editor: Rc<str>,
