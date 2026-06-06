@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 use crate::actions::BlockAction;
 use crate::model::descriptor;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun};
+use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc, InlineRun};
 
 // ── Public handle ─────────────────────────────────────────────────────────────
 
@@ -367,15 +367,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                                 .map(|d| d.editor.to_string())
                                 .unwrap_or_else(|| "Unknown".to_string())
                         })
-                        .unwrap_or_else(|| match &b.kind {
-                            BlockKind::Paragraph => "Paragraph".to_string(),
-                            BlockKind::Heading(n) => format!("Heading{n}"),
-                            BlockKind::Code { .. } => "Code".to_string(),
-                            BlockKind::List { .. } => "List".to_string(),
-                            BlockKind::Image => "Image".to_string(),
-                            BlockKind::Table => "Table".to_string(),
-                            BlockKind::Opaque { type_name } => format!("Opaque({type_name})"),
-                        });
+                        .unwrap_or_else(|| descriptor::EDITOR_PARAGRAPH.to_string());
                     serde_json::json!({ "id": id, "kind": kind, "text": text })
                 }
                 BlockBody::Table(data) => {
