@@ -160,8 +160,14 @@ mod tests {
 
         // Every known editor_for key must have a matching descriptor.
         let known_keys = [
-            "list", "code", "paragraph", "heading",
-            "more", "separator", "image", "table",
+            "list",
+            "code",
+            "paragraph",
+            "heading",
+            "more",
+            "separator",
+            "image",
+            "table",
         ];
         for key in &known_keys {
             assert!(

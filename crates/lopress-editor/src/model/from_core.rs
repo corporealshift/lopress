@@ -294,25 +294,6 @@ fn native_code_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
     block
 }
 
-/// Build an image `EditorBlock` from a core `image` block. `src`/`alt`/`caption`
-/// come from the core block's attrs and are stamped into `PluginMeta.attrs`;
-/// the body is an empty Opaque placeholder.
-fn native_image_from_core(b: &Block, decl: &BlockDecl) -> EditorBlock {
-    EditorBlock {
-        id: BlockId::new(),
-        kind: BlockKind::Image,
-        body: BlockBody::Opaque(Value::Null),
-        plugin: Some(PluginMeta {
-            block_type_name: Rc::from(decl.name.as_str()),
-            attrs: block_attrs_as_object(&b.attrs),
-            attr_decls: Rc::from(decl.attrs.values().cloned().collect::<Vec<_>>()),
-            builtin: decl.builtin,
-            editor: decl.editor.as_deref().map(Rc::from),
-            native: decl.native.as_deref().map(Rc::from),
-        }),
-    }
-}
-
 /// Build a table `EditorBlock` from a core `table` block. A well-formed table
 /// has only `table_row` children, each with only `table_cell` children whose
 /// content is inline text. A malformed table degrades to `Opaque` so it
