@@ -37,11 +37,10 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let meta = block.plugin.clone();
 
-    let body = render_body(block, env);
-
     // Builtin (base-plugin) blocks suppress plugin chrome: no header strip,
-    // no attr form — they render as plain editable blocks.
+    // no attr form — they render as plain editable blocks via their body editor.
     if meta.builtin {
+        let body = render_body(block, env);
         return v_stack((body,)).style(|s| s.width_full()).into_any();
     }
 
@@ -63,25 +62,17 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let on_action_for_attrs = env.on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    // The attr-form inputs don't publish focus, so interacting with a plugin's
-    // header/form would never mount the toolbar (Change Type / Delete). Publish
-    // focus on PointerDown over the chrome (header + form) so the toolbar mounts.
-    // Clear `editor_and_spans` because the chrome has no body editor — this
-    // prevents the toolbar's pre-commit from firing a previously-focused block's
-    // inline editor against this one (mirrors fallback.rs). The body is kept OUT
-    // of this region so its own inline editor still publishes `editor_and_spans`
-    // when the body is focused (otherwise the toolbar's bold/italic would break).
+    // Attr-form plugins (e.g. `lopress:callout`) keep ALL their content in attrs
+    // (the form) and have no block-body content concept, so render header + form
+    // ONLY — no editable body. Rendering one let the user type "phantom" text that
+    // `plugin_block_to_core` serializes as an inner-container child, competing with
+    // the attrs. The attr inputs don't publish focus, so publish it on PointerDown
+    // over the whole block — clicking anywhere mounts the toolbar (Change Type /
+    // Delete). `editor_and_spans` is cleared because there is no inline body editor
+    // here (mirrors fallback.rs), so the toolbar's pre-commit can't fire a stale
+    // editor against this block.
     let focus_pub = env.focus_pub;
-    let chrome = v_stack((header, form)).style(|s| s.gap(4.)).on_event(
-        floem::event::EventListener::PointerDown,
-        move |_| {
-            focus_pub.block.set(Some(block_id));
-            focus_pub.editor_and_spans.set(None);
-            floem::event::EventPropagation::Continue
-        },
-    );
-
-    v_stack((chrome, body))
+    v_stack((header, form))
         .style(|s| {
             s.gap(4.)
                 .padding(6.)
@@ -90,6 +81,11 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
                 .border_radius(4.)
                 .background(FORM_BG)
                 .width_full()
+        })
+        .on_event(floem::event::EventListener::PointerDown, move |_| {
+            focus_pub.block.set(Some(block_id));
+            focus_pub.editor_and_spans.set(None);
+            floem::event::EventPropagation::Continue
         })
         .into_any()
 }
