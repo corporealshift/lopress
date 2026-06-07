@@ -14,7 +14,8 @@ use crossbeam_channel::Sender;
 use serde::Deserialize;
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun};
+use crate::model::descriptor;
+use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc, InlineRun};
 
 // ── Public handle ─────────────────────────────────────────────────────────────
 
@@ -49,7 +50,9 @@ pub(crate) enum CtrlAction {
     },
     ChangeType {
         block_id: u64,
-        new_kind: CtrlBlockKind,
+        new_editor: String,
+        #[serde(default)]
+        new_attrs: serde_json::Map<String, serde_json::Value>,
     },
     InsertAfter {
         block_id: u64,
@@ -88,16 +91,6 @@ pub(crate) enum CtrlAction {
         col: usize,
         align: CtrlAlign,
     },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
-pub(crate) enum CtrlBlockKind {
-    Paragraph,
-    Heading { level: u8 },
-    Code { lang: String },
-    List { ordered: bool },
-    Table,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -143,17 +136,14 @@ impl CtrlAction {
                 block_id: find(doc, block_id)?,
                 to_index,
             },
-            CtrlAction::ChangeType { block_id, new_kind } => BlockAction::ChangeType {
+            CtrlAction::ChangeType {
+                block_id,
+                new_editor,
+                new_attrs,
+            } => BlockAction::ChangeType {
                 block_id: find(doc, block_id)?,
-                new_kind: match new_kind {
-                    CtrlBlockKind::Paragraph => BlockKind::Paragraph,
-                    CtrlBlockKind::Heading { level } => BlockKind::Heading(level.clamp(1, 6)),
-                    CtrlBlockKind::Code { lang } => BlockKind::Code {
-                        lang: Rc::from(lang),
-                    },
-                    CtrlBlockKind::List { ordered } => BlockKind::List { ordered },
-                    CtrlBlockKind::Table => BlockKind::Table,
-                },
+                new_editor: Rc::from(new_editor),
+                new_attrs: Box::new(new_attrs),
             },
             CtrlAction::InsertAfter {
                 block_id,
@@ -368,30 +358,40 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
             match &b.body {
                 BlockBody::Inline(runs) => {
                     let text: String = runs.iter().map(|r| r.text.as_str()).collect();
-                    let kind = match &b.kind {
-                        BlockKind::Paragraph => "Paragraph".to_string(),
-                        BlockKind::Heading(n) => format!("Heading{n}"),
-                        BlockKind::Code { .. } => "Code".to_string(),
-                        BlockKind::List { .. } => "List".to_string(),
-                        BlockKind::Image => "Image".to_string(),
-                        BlockKind::Table => "Table".to_string(),
-                        BlockKind::Opaque { type_name } => format!("Opaque({type_name})"),
-                    };
+                    let kind = b
+                        .plugin
+                        .editor
+                        .as_deref()
+                        .map(|e| {
+                            descriptor::descriptor_for(e)
+                                .map(|d| d.editor.to_string())
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        })
+                        .unwrap_or_else(|| descriptor::EDITOR_PARAGRAPH.to_string());
                     serde_json::json!({ "id": id, "kind": kind, "text": text })
                 }
                 BlockBody::Table(data) => {
                     let text = crate::actions::body_to_flat_text(&BlockBody::Table(data.clone()));
-                    let kind = match &b.kind {
-                        BlockKind::Table => "Table".to_string(),
-                        _ => "Table".to_string(),
-                    };
+                    let kind = b
+                        .plugin
+                        .editor
+                        .as_deref()
+                        .map(|e| {
+                            descriptor::descriptor_for(e)
+                                .map(|d| d.editor.to_string())
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        })
+                        .unwrap_or_else(|| "Table".to_string());
                     serde_json::json!({ "id": id, "kind": kind, "text": text })
                 }
                 BlockBody::Code(text) => {
-                    let lang = match &b.kind {
-                        BlockKind::Code { lang } => lang.clone(),
-                        _ => Rc::from(""),
-                    };
+                    let lang = b
+                        .plugin
+                        .attrs
+                        .get("lang")
+                        .and_then(|v| v.as_str())
+                        .map(|s: &str| -> Rc<str> { Rc::from(s) })
+                        .unwrap_or_else(|| Rc::from(""));
                     serde_json::json!({ "id": id, "kind": "Code", "lang": &*lang, "text": text })
                 }
                 BlockBody::List(items) => {
@@ -408,10 +408,7 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
                     serde_json::json!({ "id": id, "kind": "List", "text": text })
                 }
                 BlockBody::Opaque(_) => {
-                    let type_name = match &b.kind {
-                        BlockKind::Opaque { type_name } => type_name.clone(),
-                        _ => Rc::from(""),
-                    };
+                    let type_name = &b.plugin.block_type_name;
                     serde_json::json!({
                         "id": id,
                         "kind": format!("Opaque({type_name})"),
@@ -919,30 +916,39 @@ mod tests {
     fn change_type_maps_each_kind() {
         let (doc, raw) = doc_one_paragraph();
         let cases = [
-            (CtrlBlockKind::Paragraph, BlockKind::Paragraph),
-            (CtrlBlockKind::Heading { level: 2 }, BlockKind::Heading(2)),
-            (
-                CtrlBlockKind::Code {
-                    lang: "rust".to_string(),
-                },
-                BlockKind::Code {
-                    lang: Rc::from("rust"),
-                },
-            ),
-            (
-                CtrlBlockKind::List { ordered: true },
-                BlockKind::List { ordered: true },
-            ),
+            ("paragraph", serde_json::Map::new()),
+            ("heading", {
+                let mut m = serde_json::Map::new();
+                m.insert("level".into(), 2u64.into());
+                m
+            }),
+            ("code", {
+                let mut m = serde_json::Map::new();
+                m.insert("lang".into(), "rust".into());
+                m
+            }),
+            ("list", {
+                let mut m = serde_json::Map::new();
+                m.insert("ordered".into(), true.into());
+                m
+            }),
         ];
-        for (ctrl_kind, expected_block_kind) in cases {
+        for (ctrl_editor, ctrl_attrs) in cases {
+            let ctrl_attrs_clone = ctrl_attrs.clone();
             let ctrl = CtrlAction::ChangeType {
                 block_id: raw,
-                new_kind: ctrl_kind,
+                new_editor: ctrl_editor.to_string(),
+                new_attrs: ctrl_attrs,
             };
             match ctrl.into_block_action(&doc).expect("known id translates") {
-                BlockAction::ChangeType { block_id, new_kind } => {
+                BlockAction::ChangeType {
+                    block_id,
+                    new_editor,
+                    new_attrs,
+                } => {
                     assert_eq!(block_id.raw(), raw);
-                    assert_eq!(new_kind, expected_block_kind);
+                    assert_eq!(&*new_editor, ctrl_editor);
+                    assert_eq!(*new_attrs, ctrl_attrs_clone);
                 }
                 other => panic!("expected ChangeType, got {other:?}"),
             }
@@ -950,29 +956,23 @@ mod tests {
     }
 
     #[test]
-    fn change_type_clamps_heading_level() {
+    fn change_type_passes_attrs_through() {
         let (doc, raw) = doc_one_paragraph();
-
-        // level 9 clamps to 6
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("lang".into(), "python".into());
         let ctrl = CtrlAction::ChangeType {
             block_id: raw,
-            new_kind: CtrlBlockKind::Heading { level: 9 },
+            new_editor: "code".to_string(),
+            new_attrs: attrs.clone(),
         };
         match ctrl.into_block_action(&doc).expect("known id translates") {
-            BlockAction::ChangeType { new_kind, .. } => {
-                assert_eq!(new_kind, BlockKind::Heading(6));
-            }
-            other => panic!("expected ChangeType, got {other:?}"),
-        }
-
-        // level 0 clamps to 1
-        let ctrl = CtrlAction::ChangeType {
-            block_id: raw,
-            new_kind: CtrlBlockKind::Heading { level: 0 },
-        };
-        match ctrl.into_block_action(&doc).expect("known id translates") {
-            BlockAction::ChangeType { new_kind, .. } => {
-                assert_eq!(new_kind, BlockKind::Heading(1));
+            BlockAction::ChangeType {
+                new_editor,
+                new_attrs,
+                ..
+            } => {
+                assert_eq!(&*new_editor, "code");
+                assert_eq!(*new_attrs, attrs);
             }
             other => panic!("expected ChangeType, got {other:?}"),
         }
@@ -1027,7 +1027,8 @@ mod tests {
         assert_eq!(
             CtrlAction::ChangeType {
                 block_id: 5,
-                new_kind: CtrlBlockKind::Paragraph
+                new_editor: "paragraph".to_string(),
+                new_attrs: serde_json::Map::new(),
             }
             .block_id(),
             5

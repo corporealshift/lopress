@@ -3,7 +3,7 @@
 //!
 //! `editor_for(key)` maps an editor key string to an `EditorWidget`. The key
 //! comes from a block's `PluginMeta.editor`, which is copied from the plugin
-//! manifest — so dispatch is driven by the manifest, not the Rust `BlockKind`
+//! manifest — so dispatch is driven by the manifest, not any legacy kind enum
 //! enum. Only the `"list"` key is registered in this iteration; paragraph,
 //! heading, and code keep their hardcoded arms in `render_body` until they
 //! migrate the same way.
@@ -36,7 +36,7 @@ pub fn editor_for(key: &str) -> Option<EditorWidget> {
 
 /// The `editor = "list"` widget. Adapts the block and env to the list view:
 /// pulls items from the block body and reads `ordered` from the manifest-
-/// driven `PluginMeta.attrs`, not from the `BlockKind::List` enum.
+/// driven `PluginMeta.attrs`, not from any legacy kind enum.
 fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let BlockBody::List(items) = &block.body else {
         #[cfg(debug_assertions)]
@@ -48,8 +48,8 @@ fn list_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let ordered = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("ordered"))
+        .attrs
+        .get("ordered")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     list::editable_list_view(items, block.id, ordered, env)
@@ -71,7 +71,7 @@ fn paragraph_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
 
 /// The `editor = "heading"` widget. Extracts runs from the block's
 /// `BlockBody::Inline` and reads `level` from `PluginMeta.attrs["level"]`
-/// (mirrored from `BlockKind::Heading(level)`), then calls
+/// (carried in `PluginMeta.attrs["level"]`), then calls
 /// `heading::render_heading_editable`.
 fn heading_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let BlockBody::Inline(runs) = &block.body else {
@@ -84,8 +84,8 @@ fn heading_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let level = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("level"))
+        .attrs
+        .get("level")
         .and_then(serde_json::Value::as_u64)
         .and_then(|n| u8::try_from(n).ok())
         .unwrap_or(1);
@@ -106,8 +106,8 @@ fn code_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     };
     let lang = block
         .plugin
-        .as_ref()
-        .and_then(|m| m.attrs.get("lang"))
+        .attrs
+        .get("lang")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     code_editor::editable_code_view(body, lang, block.id, env)
@@ -145,5 +145,36 @@ mod tests {
     #[test]
     fn editor_for_resolves_table() {
         assert!(editor_for("table").is_some());
+    }
+
+    #[test]
+    fn editor_for_keys_match_descriptor_keys() {
+        // Every descriptor's editor key must resolve in editor_for.
+        for d in crate::model::descriptor::descriptors() {
+            assert!(
+                editor_for(d.editor).is_some(),
+                "descriptor editor '{}' not registered in editor_for",
+                d.editor
+            );
+        }
+
+        // Every known editor_for key must have a matching descriptor.
+        let known_keys = [
+            "list",
+            "code",
+            "paragraph",
+            "heading",
+            "more",
+            "separator",
+            "image",
+            "table",
+        ];
+        for key in &known_keys {
+            assert!(
+                crate::model::descriptor::descriptor_for(key).is_some(),
+                "editor_for key '{}' has no descriptor",
+                key
+            );
+        }
     }
 }

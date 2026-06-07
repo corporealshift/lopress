@@ -15,7 +15,19 @@
       "Bash(git commit -m ' *)",
       "Bash(cargo test *)",
       "Bash(Select-Object -Last 8)",
-      "PowerShell(cargo test *)"
+      "PowerShell(cargo test *)",
+      "Bash(cargo build *)",
+      "Bash(cargo run *)",
+      "PowerShell(Invoke-RestMethod -Uri http://127.0.0.1:7878/state -TimeoutSec 5 | ConvertTo-Json -Depth 6)",
+      "Read(//c/Users/corpo/Documents/lopress-listtest/src/posts/**)",
+      "Read(//c/Users/corpo/Documents/lopress-listtest/**)",
+      "PowerShell($body='{\"x\":400,\"y\":200}'; Invoke-RestMethod -Uri http://127.0.0.1:7878/click -Method Post -Body $body -TimeoutSec 5; Start-Sleep -Milliseconds 300; Invoke-WebRequest http://127.0.0.1:7878/screenshot -OutFile \"$env:TEMP\\\\shot1.png\" -TimeoutSec 10; \"saved\")",
+      "PowerShell(Invoke-WebRequest http://127.0.0.1:7878/screenshot -OutFile \"$env:TEMP\\\\shot2.png\" -TimeoutSec 10; \"saved\")",
+      "PowerShell($body='{\"x\":400,\"y\":223}'; Invoke-RestMethod -Uri http://127.0.0.1:7878/click -Method Post -Body $body -TimeoutSec 5; Start-Sleep -Milliseconds 300; Invoke-WebRequest http://127.0.0.1:7878/screenshot -OutFile \"$env:TEMP\\\\shot3.png\" -TimeoutSec 10; \"saved\")",
+      "PowerShell(Out-Null *)",
+      "PowerShell(try { $r = Invoke-RestMethod -Uri http://127.0.0.1:7878/ping -Method Get -TimeoutSec 3; \"PING: $r\" } catch { \"PING failed: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(cargo run *)",
+      "Bash(pi *)"
     ]
   }
 }

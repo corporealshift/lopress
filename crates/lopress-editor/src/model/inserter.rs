@@ -12,7 +12,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone)]
 pub struct PluginInserterItem {
     /// The block type name (e.g. `"lopress:callout"`). Used to construct
-    /// `BlockKind::Opaque { type_name }` and `PluginMeta.block_type_name`.
+    /// `PluginMeta.block_type_name`.
     pub type_name: Rc<str>,
     /// Human-readable label shown in the slash menu. Derived from the
     /// manifest `title` field or, when absent, from the block `name`

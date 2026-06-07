@@ -1,3 +1,4 @@
+pub mod descriptor;
 pub mod from_core;
 pub mod inline;
 pub mod inserter;

@@ -5,11 +5,11 @@
 //! model stays the single source of truth for persistence — even though
 //! per-block widgets keep reactive copies for live editing.
 
+use crate::model::descriptor::{self, BodyShape};
 use crate::model::sync::canonicalize_body;
 use crate::model::types::{
-    Align, BlockBody, BlockId, BlockKind, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
+    Align, BlockBody, BlockId, EditorBlock, EditorDoc, InlineRun, ListItem, PluginMeta,
 };
-use serde_json::Value;
 use std::rc::Rc;
 
 /// One discrete edit. Each variant maps to one function below.
@@ -41,9 +41,13 @@ pub enum BlockAction {
         to_index: usize,
     },
     /// Change the block's kind. Body is converted when reasonable.
+    /// Boxed to keep `BlockAction` within the 40-byte size guard — the
+    /// attrs map is heap-allocated.
+    #[allow(clippy::large_enum_variant)]
     ChangeType {
         block_id: BlockId,
-        new_kind: BlockKind,
+        new_editor: Rc<str>,
+        new_attrs: Box<serde_json::Map<String, serde_json::Value>>,
     },
     /// UI-only action: request the slash command menu for `block_id`. Handled
     /// by the editor pane's action sink (which sets a reactive flag); the
@@ -151,9 +155,11 @@ pub fn apply(doc: &mut EditorDoc, action: BlockAction) -> Option<(BlockAction, B
         }
         BlockAction::Delete { block_id } => apply_delete(doc, block_id),
         BlockAction::Move { block_id, to_index } => apply_move(doc, block_id, to_index),
-        BlockAction::ChangeType { block_id, new_kind } => {
-            apply_change_type(doc, block_id, new_kind)
-        }
+        BlockAction::ChangeType {
+            block_id,
+            new_editor,
+            new_attrs,
+        } => apply_change_type(doc, block_id, new_editor, new_attrs),
         // UI-only — handled by the editor pane's action sink, not the model.
         BlockAction::OpenSlashMenu { .. } => None,
         BlockAction::EditAttrs {
@@ -191,32 +197,8 @@ fn apply_edit_attrs(
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
-    let old_attrs = block
-        .plugin
-        .as_ref()
-        .map(|m| m.attrs.clone())
-        .unwrap_or_default();
-    if let Some(meta) = block.plugin.as_mut() {
-        meta.attrs = new_attrs.clone();
-    }
-    // Mirror `lang` from attrs into BlockKind::Code.lang so that subsequent
-    // serialization (or any inspection of `block.kind` between edit and save)
-    // sees the canonical lang. The list block has no equivalent mirror because
-    // BlockKind::List carries `ordered`, which is already the source of truth
-    // for the serializer's native arm; for code, attrs is the source of truth,
-    // and kind.lang is the mirror.
-    if let BlockKind::Code { .. } = &block.kind {
-        if let Some(new_lang) = block
-            .plugin
-            .as_ref()
-            .and_then(|m| m.attrs.get("lang"))
-            .and_then(Value::as_str)
-        {
-            block.kind = BlockKind::Code {
-                lang: Rc::from(new_lang),
-            };
-        }
-    }
+    let old_attrs = block.plugin.attrs.clone();
+    block.plugin.attrs = new_attrs.clone();
     Some((
         BlockAction::EditAttrs {
             block_id: id,
@@ -235,10 +217,7 @@ fn find_idx(doc: &EditorDoc, id: BlockId) -> Option<usize> {
 
 /// True when `block` is the read-more marker (`lopress:more`).
 fn is_read_more(block: &EditorBlock) -> bool {
-    block
-        .plugin
-        .as_ref()
-        .is_some_and(|m| &*m.block_type_name == "lopress:more")
+    &*block.plugin.block_type_name == "lopress:more"
 }
 
 fn apply_split(
@@ -248,9 +227,21 @@ fn apply_split(
     new_block_id: Option<BlockId>,
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
-    let block = doc.blocks.get(idx)?;
-    let kind = block.kind.clone();
+    // Clone the whole block to avoid borrow conflicts with subsequent
+    // mutable borrows of doc.blocks.
+    let block = doc.blocks.get(idx)?.clone();
     let body = block.body.clone();
+    let source_editor = block
+        .plugin
+        .editor
+        .as_deref()
+        .unwrap_or(descriptor::EDITOR_PARAGRAPH);
+    let source_level = block
+        .plugin
+        .attrs
+        .get("level")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u8::try_from(n).ok());
 
     match body {
         BlockBody::Code(text) => {
@@ -285,12 +276,14 @@ fn apply_split(
             if let Some(b) = doc.blocks.get_mut(idx) {
                 b.body = BlockBody::Inline(vec![InlineRun::plain(head)]);
             }
-            let mut tail_block = match kind {
-                BlockKind::Paragraph => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
-                BlockKind::Heading(level) => {
-                    EditorBlock::heading(level, vec![InlineRun::plain(tail)])
-                }
-                _ => EditorBlock::paragraph(vec![InlineRun::plain(tail)]),
+
+            // A heading splits into a heading at the same level; everything else
+            // (paragraph and any non-inline source) splits into a paragraph.
+            // (if-let match guards are unstable, so branch with a plain `if`.)
+            let mut tail_block = if source_editor == descriptor::EDITOR_HEADING {
+                EditorBlock::heading(source_level.unwrap_or(1), vec![InlineRun::plain(tail)])
+            } else {
+                EditorBlock::paragraph(vec![InlineRun::plain(tail)])
             };
             let minted_id = if let Some(nid) = new_block_id {
                 tail_block.id = nid;
@@ -502,26 +495,123 @@ fn apply_move(
     ))
 }
 
-/// Build the canonical `PluginMeta` for a paragraph or heading block.
-/// Called from `apply_change_type` where `new_kind` is already known to be
-/// `Paragraph` or `Heading(_)`, so this match is exhaustive.
-fn inline_plugin_meta(kind: &BlockKind) -> PluginMeta {
-    match kind {
-        BlockKind::Paragraph => PluginMeta::paragraph(),
-        BlockKind::Heading(level) => PluginMeta::heading(*level),
-        // The other variants (Code, List, Image, Table, Opaque) are never
-        // passed here — the call site in apply_change_type restricts to
-        // Paragraph | Heading. Clippy's exhaustive-match lint doesn't
-        // understand this constraint, so we suppress it.
-        #[allow(clippy::unreachable)]
-        _ => unreachable!(),
+/// Convert any `BlockBody` into a `Vec<InlineRun>`, preserving formatting.
+///
+/// - Inline → clone the runs.
+/// - List → concatenate each item's runs, inserting a plain `"\n"` between items.
+/// - Code → wrap the text in a single plain run.
+/// - Table / Opaque → empty vec (unreachable via the ChangeType guards).
+fn body_to_runs(body: &BlockBody) -> Vec<InlineRun> {
+    match body {
+        BlockBody::Inline(runs) => runs.clone(),
+        BlockBody::List(items) => {
+            let mut runs = Vec::new();
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    runs.push(InlineRun::plain("\n"));
+                }
+                runs.extend(item.runs.iter().cloned());
+            }
+            runs
+        }
+        BlockBody::Code(text) => vec![InlineRun::plain(text.clone())],
+        BlockBody::Table(_) | BlockBody::Opaque(_) => vec![],
+    }
+}
+
+/// Split a run sequence on `'\n'` into one `ListItem` per line, preserving
+/// each run's formatting within its line. A run containing embedded newlines
+/// is split across items. At least one item is always produced.
+fn runs_to_list_items(runs: Vec<InlineRun>) -> Vec<ListItem> {
+    // Walk the runs once, accumulating a current line. A '\n' inside a run's
+    // text flushes the current line and starts a new one; the run's formatting
+    // is preserved on each side of the split. Always yields at least one item.
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut current: Vec<InlineRun> = Vec::new();
+    for run in runs {
+        let mut segments = run.text.split('\n');
+        // The first segment continues the current line.
+        if let Some(first) = segments.next() {
+            if !first.is_empty() {
+                let mut r = run.clone();
+                r.text = first.to_string();
+                current.push(r);
+            }
+        }
+        // Every subsequent segment begins a new line.
+        for seg in segments {
+            items.push(ListItem {
+                id: BlockId::new(),
+                runs: std::mem::take(&mut current),
+            });
+            if !seg.is_empty() {
+                let mut r = run.clone();
+                r.text = seg.to_string();
+                current.push(r);
+            }
+        }
+    }
+    items.push(ListItem {
+        id: BlockId::new(),
+        runs: current,
+    });
+    items
+}
+
+/// Concatenate run texts into a single plain string.
+fn runs_to_plain_string(runs: &[InlineRun]) -> String {
+    runs.iter().map(|r| r.text.as_str()).collect()
+}
+
+/// Build the canonical `PluginMeta` for a target editor.
+///
+/// Starts from the descriptor's default-block attrs, overlays `new_attrs`, and
+/// sets identity fields from the descriptor. `EditorBlock.plugin` is still
+/// `Option` until Task 7, so the default block's attrs are read via `as_ref()`.
+/// If `desc` is `None` (unknown editor key — shouldn't happen) keeps
+/// `existing_meta` with `editor`/`attrs` updated.
+fn canonical_meta(
+    new_editor: &str,
+    new_attrs: &serde_json::Map<String, serde_json::Value>,
+    desc: Option<&descriptor::BlockDescriptor>,
+    existing_meta: Option<&PluginMeta>,
+) -> PluginMeta {
+    match desc {
+        Some(d) => {
+            let mut attrs = (d.default_block)().plugin.attrs.clone();
+            for (k, v) in new_attrs.iter() {
+                attrs.insert(k.clone(), v.clone());
+            }
+            PluginMeta {
+                block_type_name: Rc::from(d.editor),
+                attrs,
+                attr_decls: Rc::from([]),
+                builtin: d.builtin,
+                editor: Some(Rc::from(d.editor)),
+                native: d.native.map(Rc::from),
+            }
+        }
+        None => {
+            let mut meta = existing_meta.cloned().unwrap_or_else(|| PluginMeta {
+                block_type_name: Rc::from(new_editor),
+                attrs: (*new_attrs).clone(),
+                attr_decls: Rc::from([]),
+                builtin: false,
+                editor: Some(Rc::from(new_editor)),
+                native: None,
+            });
+            meta.attrs = (*new_attrs).clone();
+            meta.editor = Some(Rc::from(new_editor));
+            meta
+        }
     }
 }
 
 fn apply_change_type(
     doc: &mut EditorDoc,
     id: BlockId,
-    new_kind: BlockKind,
+    new_editor: Rc<str>,
+    new_attrs: Box<serde_json::Map<String, serde_json::Value>>,
 ) -> Option<(BlockAction, BlockAction)> {
     let idx = find_idx(doc, id)?;
     let block = doc.blocks.get_mut(idx)?;
@@ -542,114 +632,46 @@ fn apply_change_type(
     if matches!(block.body, BlockBody::Table(_)) {
         return None;
     }
-    let old_kind = block.kind.clone();
-    match (&new_kind, &block.body) {
-        // ── To Inline (Paragraph / Heading) ──────────────────────────────
-        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_runs)) => {
-            // Body shape already matches — just update kind and stamp the
-            // canonical PluginMeta so the block routes through the plugin path.
-            block.kind = new_kind.clone();
-            block.plugin = Some(inline_plugin_meta(&new_kind));
-        }
-        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Code(text)) => {
-            block.kind = new_kind.clone();
-            block.body = BlockBody::Inline(vec![InlineRun::plain(text.clone())]);
-            block.plugin = Some(inline_plugin_meta(&new_kind));
-        }
-        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::List(items)) => {
-            block.kind = new_kind.clone();
-            // Flatten: join each item's runs text with '\n', wrap in a single
-            // InlineRun.  Loses item boundaries — same lossy direction as the
-            // inverse (undo restores via snapshot).
-            let text: String = items
-                .iter()
-                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
-                .collect::<Vec<_>>()
-                .join("\n");
-            block.body = BlockBody::Inline(vec![InlineRun::plain(text)]);
-            block.plugin = Some(inline_plugin_meta(&new_kind));
-        }
 
-        // ── To Code ──────────────────────────────────────────────────────
-        (BlockKind::Code { lang }, BlockBody::Inline(runs)) => {
-            let text: String = runs.iter().map(|r| r.text.clone()).collect();
-            block.kind = BlockKind::Code { lang: lang.clone() };
-            block.body = BlockBody::Code(text);
-            block.plugin = Some(PluginMeta::code(lang));
-        }
-        (BlockKind::Code { lang }, BlockBody::Code(_text)) => {
-            // Only lang changes — update kind.lang and mirror into plugin.
-            block.kind = BlockKind::Code { lang: lang.clone() };
-            if let Some(meta) = block.plugin.as_mut() {
-                meta.attrs
-                    .insert("lang".into(), Value::String(lang.to_string()));
-            }
-        }
-        (BlockKind::Code { lang }, BlockBody::List(items)) => {
-            let text: String = items
-                .iter()
-                .map(|it| it.runs.iter().map(|r| r.text.as_str()).collect::<String>())
-                .collect::<Vec<_>>()
-                .join("\n");
-            block.kind = BlockKind::Code { lang: lang.clone() };
-            block.body = BlockBody::Code(text);
-            block.plugin = Some(PluginMeta::code(lang));
-        }
+    // Snapshot the old state for the inverse (full undo: editor + attrs + body).
+    let old_editor: Rc<str> = block
+        .plugin
+        .editor
+        .clone()
+        .unwrap_or_else(|| Rc::from(descriptor::EDITOR_PARAGRAPH));
+    let old_attrs = block.plugin.attrs.clone();
 
-        // ── To List ──────────────────────────────────────────────────────
-        (BlockKind::List { ordered }, BlockBody::Inline(runs)) => {
-            block.kind = BlockKind::List { ordered: *ordered };
-            block.body = BlockBody::List(vec![ListItem {
-                id: BlockId::new(),
-                runs: runs.clone(),
-            }]);
-            // A list block must carry list `PluginMeta` to render via the
-            // plugin path and serialize natively — `from_core` stamps it for
-            // loaded lists; do the same for one created here.
-            block.plugin = Some(PluginMeta::list(*ordered));
-        }
-        (BlockKind::List { ordered }, BlockBody::Code(text)) => {
-            // Split text on '\n', one ListItem per line.
-            let items: Vec<ListItem> = text
-                .split('\n')
-                .map(|line| ListItem {
-                    id: BlockId::new(),
-                    runs: vec![InlineRun::plain(line.to_string())],
-                })
-                .collect();
-            block.kind = BlockKind::List { ordered: *ordered };
-            block.body = BlockBody::List(items);
-            block.plugin = Some(PluginMeta::list(*ordered));
-        }
-        (BlockKind::List { ordered }, BlockBody::List(_items)) => {
-            // Items already match — just update the ordered flag and mirror.
-            block.kind = BlockKind::List { ordered: *ordered };
-            if let Some(meta) = block.plugin.as_mut() {
-                meta.attrs.insert("ordered".into(), Value::Bool(*ordered));
-            }
-        }
+    // Look up the target descriptor to get body_shape + default attrs.
+    let desc = descriptor::descriptor_for(&new_editor);
+    let shape = desc.map(|d| d.body_shape).unwrap_or(BodyShape::Inline);
 
-        // ── Opaque / fallback ────────────────────────────────────────────
-        _ => {
-            block.kind = new_kind.clone();
-        }
-    }
-    // NOTE: this inverse restores `kind` only, not `body`. Body conversions
-    // (Inline→Code stringifies runs; Inline→List wraps into a single item)
-    // are lossy on undo — the original body is not snapshot here. This
-    // matches the pre-refactor behavior. Stage 3's `EditBlockBody` collapse
-    // makes ChangeType fully reversible by snapshotting body alongside kind.
-    // See
-    // `docs/superpowers/specs/2026-05-20-list-editor-unification-and-generic-undo-design.md`
-    // Section 3 — "Shift B".
+    // Runs-preserving conversion. Code flattens (plain text); list splits per line.
+    let runs = body_to_runs(&block.body);
+    block.body = match shape {
+        BodyShape::Inline => BlockBody::Inline(runs),
+        BodyShape::List => BlockBody::List(runs_to_list_items(runs)),
+        BodyShape::Code => BlockBody::Code(runs_to_plain_string(&runs)),
+        // No ChangeType target has Table/Opaque shape (table/opaque are guarded
+        // above); keep the body unchanged for exhaustiveness.
+        BodyShape::Table | BodyShape::Opaque => block.body.clone(),
+    };
+
+    // Canonical PluginMeta for the target editor: descriptor identity + default
+    // attrs merged with the caller-provided attrs. Compute into a local first so
+    // the `&block.plugin` read finishes before reassigning `block.plugin`.
+    let new_meta = canonical_meta(&new_editor, &new_attrs, desc, Some(&block.plugin));
+    block.plugin = new_meta;
+
     Some((
         BlockAction::ChangeType {
             block_id: id,
-            new_kind,
+            new_editor,
+            new_attrs,
         },
         BlockAction::ChangeType {
             block_id: id,
-            new_kind: old_kind,
+            new_editor: old_editor,
+            new_attrs: Box::new(old_attrs),
         },
     ))
 }
@@ -871,19 +893,18 @@ fn apply_table_set_align(
     ))
 }
 
-/// True when `body` is the expected shape for `kind`. Used by the
-/// debug_assert in apply_edit_block_body to distinguish valid from
-/// mismatched commits.
-fn body_matches_kind(kind: &BlockKind, body: &BlockBody) -> bool {
+/// True when `body` is the expected shape for the editor key.
+fn body_matches_editor(editor: &str, body: &BlockBody) -> bool {
+    let shape = descriptor::descriptor_for(editor)
+        .map(|d| d.body_shape)
+        .unwrap_or(BodyShape::Inline);
     matches!(
-        (kind, body),
-        (
-            BlockKind::Paragraph | BlockKind::Heading(_),
-            BlockBody::Inline(_)
-        ) | (BlockKind::Code { .. }, BlockBody::Code(_))
-            | (BlockKind::List { .. }, BlockBody::List(_))
-            | (BlockKind::Table, BlockBody::Table(_))
-            | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
+        (shape, body),
+        (BodyShape::Inline, BlockBody::Inline(_))
+            | (BodyShape::Code, BlockBody::Code(_))
+            | (BodyShape::List, BlockBody::List(_))
+            | (BodyShape::Table, BlockBody::Table(_))
+            | (BodyShape::Opaque, BlockBody::Opaque(_))
     )
 }
 
@@ -917,36 +938,25 @@ pub fn body_to_flat_text(body: &BlockBody) -> String {
     }
 }
 
-/// Coerce `body` into the shape required by `kind`.
+/// Coerce `body` into the shape required by the editor key.
 ///
-/// `EditBlockBody` carries a body produced by the block's currently-mounted
-/// editor widget, whose shape is fixed by `kind`. A mismatched shape means the
-/// commit is *stale* — it was emitted by a widget that a `ChangeType` has since
-/// swapped out (e.g. the paragraph editor's `FocusLost` commit firing during
-/// the editor-pane rebuild that `ChangeType` triggers, landing *after* the
-/// block already became Code). Letting that stale commit through would drop the
-/// block into an unrenderable `(kind, body)` pair, which `block_view` draws as
-/// an empty, uneditable gap. Instead, convert the body to the kind's shape
-/// (preserving the text). Conversions mirror `apply_change_type`'s body arms.
-fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
-    match (kind, &body) {
-        // Shape already matches the kind — keep as-is (the common case; every
-        // non-stale commit lands here, so this is a no-op in normal editing).
-        (BlockKind::Paragraph | BlockKind::Heading(_), BlockBody::Inline(_))
-        | (BlockKind::Code { .. }, BlockBody::Code(_))
-        | (BlockKind::List { .. }, BlockBody::List(_))
-        | (BlockKind::Table, BlockBody::Table(_))
-        | (BlockKind::Opaque { .. }, BlockBody::Opaque(_))
-        | (BlockKind::Image, BlockBody::Opaque(_)) => body,
-
-        // → Inline (Paragraph / Heading).
-        (BlockKind::Paragraph | BlockKind::Heading(_), _) => {
+/// Reads the body shape from the descriptor table. Keys not found in the
+/// descriptor are treated as `Inline` (the safe default for unknown types).
+fn coerce_body_to_editor(editor: &str, body: BlockBody) -> BlockBody {
+    let shape = descriptor::descriptor_for(editor)
+        .map(|d| d.body_shape)
+        .unwrap_or(BodyShape::Inline);
+    match (shape, &body) {
+        (BodyShape::Inline, BlockBody::Inline(_)) => body,
+        (BodyShape::Code, BlockBody::Code(_)) => body,
+        (BodyShape::List, BlockBody::List(_)) => body,
+        (BodyShape::Table, BlockBody::Table(_)) => body,
+        (BodyShape::Opaque, BlockBody::Opaque(_)) => body,
+        (BodyShape::Inline, _) => {
             BlockBody::Inline(vec![InlineRun::plain(body_to_flat_text(&body))])
         }
-        // → Code.
-        (BlockKind::Code { .. }, _) => BlockBody::Code(body_to_flat_text(&body)),
-        // → List: one item per line of the flattened text.
-        (BlockKind::List { .. }, _) => BlockBody::List(
+        (BodyShape::Code, _) => BlockBody::Code(body_to_flat_text(&body)),
+        (BodyShape::List, _) => BlockBody::List(
             body_to_flat_text(&body)
                 .split('\n')
                 .map(|line| ListItem {
@@ -955,16 +965,8 @@ fn coerce_body_to_kind(kind: &BlockKind, body: BlockBody) -> BlockBody {
                 })
                 .collect(),
         ),
-        // → Opaque from a non-Opaque body: no editor widget commits into an
-        // opaque block, so this is unreachable in practice — leave it untouched.
-        (BlockKind::Opaque { .. }, _) => body,
-        // Image: body is always Opaque(Null); any mismatch is a programming
-        // error — return the body as-is rather than panic.
-        (BlockKind::Image, _) => body,
-        // Table: body is always Table; any mismatch is a programming error —
-        // return the body as-is rather than panic. No widget commits a
-        // non-Table body into a Table block.
-        (BlockKind::Table, _) => body,
+        (BodyShape::Table, _) => body,
+        (BodyShape::Opaque, _) => body,
     }
 }
 
@@ -988,18 +990,39 @@ fn apply_edit_block_body(
     // freshly-typed text into the model (the toolbar can't pre-commit them), so
     // we must accept and coerce it, not reject it. (An earlier assertion keyed
     // on `built_in` panicked here on that legitimate flow.)
-    let new_body = canonicalize_body(&coerce_body_to_kind(&block.kind, new_body));
-    // Invariant: coercion always yields a body whose shape matches the block's
-    // kind, so the stored (kind, body) pair is always renderable. This catches
-    // bugs in `coerce_body_to_kind` itself rather than false-flagging the
+    // For blocks without plugin meta (e.g. raw list/code constructed via
+    // ctor), fall back to the current body's shape so coercion doesn't
+    // accidentally flatten a list into inline.
+    let editor = block.plugin.editor.as_deref().unwrap_or(match &block.body {
+        BlockBody::List(_) => descriptor::EDITOR_LIST,
+        BlockBody::Code(_) => descriptor::EDITOR_CODE,
+        BlockBody::Table(_) => descriptor::EDITOR_TABLE,
+        BlockBody::Opaque(_) => descriptor::EDITOR_PARAGRAPH,
+        BlockBody::Inline(_) => descriptor::EDITOR_PARAGRAPH,
+    });
+    // If the plugin's editor doesn't match the current body shape (e.g. a
+    // paragraph plugin with a code body), prefer the body's shape. This
+    // handles edge cases where the block was manually mutated.
+    let editor = if body_matches_editor(editor, &block.body) {
+        editor
+    } else {
+        match &block.body {
+            BlockBody::List(_) => descriptor::EDITOR_LIST,
+            BlockBody::Code(_) => descriptor::EDITOR_CODE,
+            BlockBody::Table(_) => descriptor::EDITOR_TABLE,
+            BlockBody::Opaque(_) => descriptor::EDITOR_PARAGRAPH,
+            BlockBody::Inline(_) => descriptor::EDITOR_PARAGRAPH,
+        }
+    };
+    let new_body = canonicalize_body(&coerce_body_to_editor(editor, new_body));
+    // Invariant: coercion always yields a body whose shape matches the editor
+    // key, so the stored (editor, body) pair is always renderable. This catches
+    // bugs in `coerce_body_to_editor` itself rather than false-flagging the
     // (expected) stale commit above. `built_in` is surfaced for provenance.
     debug_assert!(
-        body_matches_kind(&block.kind, &new_body),
-        "coerced EditBlockBody still mismatches kind: block {:?} kind {:?}, body {:?}, built_in {}",
-        id,
-        block.kind,
-        new_body,
-        built_in
+        body_matches_editor(editor, &new_body),
+        "coerced EditBlockBody still mismatches editor: block {:?} editor {:?}, body {:?}, built_in {}",
+        id, editor, new_body, built_in
     );
     if canonicalize_body(&block.body) == new_body {
         return None;
@@ -1017,6 +1040,236 @@ fn apply_edit_block_body(
             built_in: false, // Record/inverse: external provenance.
         },
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::unreachable)]
+mod change_type_tests {
+    use super::*;
+
+    #[test]
+    fn change_type_to_heading_snapshots_and_restores_body() {
+        // After the refactor, ChangeType records old editor + attrs + body
+        // in its inverse, so undo restores the body (not just the kind).
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![InlineRun::plain(
+                "hello world",
+            )])],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id = doc.blocks[0].id;
+
+        // Convert para → heading(2).
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::ChangeType {
+                block_id: id,
+                new_editor: Rc::from("heading"),
+                new_attrs: Box::new({
+                    let mut m = serde_json::Map::new();
+                    m.insert("level".into(), serde_json::Value::Number(2.into()));
+                    m
+                }),
+            },
+        )
+        .expect("ChangeType records");
+
+        assert!(matches!(
+            doc.blocks[0].plugin.editor.as_deref(),
+            Some("heading")
+        ));
+        assert!(matches!(canonical, BlockAction::ChangeType { .. }));
+
+        // Apply the inverse: body must be restored.
+        apply(&mut doc, inverse);
+        assert!(matches!(
+            doc.blocks[0].plugin.editor.as_deref(),
+            Some("paragraph")
+        ));
+        assert!(
+            matches!(&doc.blocks[0].body, BlockBody::Inline(runs) if runs.len() == 1 && runs[0].text == "hello world"),
+            "body must be restored on undo"
+        );
+    }
+
+    #[test]
+    fn change_type_preserves_inline_formatting() {
+        // Converting a styled inline body to code must flatten text only;
+        // converting inline → list must preserve formatting within each line.
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![
+                InlineRun::plain("hello "),
+                InlineRun {
+                    text: "world".into(),
+                    bold: true,
+                    ..Default::default()
+                },
+            ])],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id = doc.blocks[0].id;
+
+        // Inline → Code: text is preserved, bold is lost (Code is plain text).
+        let (canonical, _inverse) = apply(
+            &mut doc,
+            BlockAction::ChangeType {
+                block_id: id,
+                new_editor: Rc::from("code"),
+                new_attrs: Box::new(serde_json::Map::new()),
+            },
+        )
+        .expect("ChangeType records");
+
+        assert!(matches!(canonical, BlockAction::ChangeType { .. }));
+        assert!(matches!(doc.blocks[0].body, BlockBody::Code(ref t) if *t == "hello world"));
+
+        // Inline → List: formatting preserved within each run (fresh paragraph).
+        let mut doc2 = EditorDoc {
+            blocks: vec![EditorBlock::paragraph(vec![
+                InlineRun::plain("hello "),
+                InlineRun {
+                    text: "world".into(),
+                    bold: true,
+                    ..Default::default()
+                },
+            ])],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id2 = doc2.blocks[0].id;
+        apply(
+            &mut doc2,
+            BlockAction::ChangeType {
+                block_id: id2,
+                new_editor: Rc::from("list"),
+                new_attrs: Box::new(serde_json::Map::new()),
+            },
+        );
+        assert!(
+            matches!(&doc2.blocks[0].body, BlockBody::List(items) if items.len() == 1 && items[0].runs.len() == 2 && items[0].runs[1].bold)
+        );
+    }
+
+    #[test]
+    fn change_type_opaque_and_table_are_noops() {
+        // Opaque and Table bodies must not accept ChangeType.
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::opaque(
+                "lopress:video".into(),
+                serde_json::json!({}),
+            )],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id = doc.blocks[0].id;
+        let result = apply(
+            &mut doc,
+            BlockAction::ChangeType {
+                block_id: id,
+                new_editor: Rc::from("code"),
+                new_attrs: Box::new(serde_json::Map::new()),
+            },
+        );
+        assert!(result.is_none(), "ChangeType on Opaque must be a no-op");
+
+        let mut doc2 = EditorDoc {
+            blocks: vec![EditorBlock::table_default()],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id2 = doc2.blocks[0].id;
+        let result2 = apply(
+            &mut doc2,
+            BlockAction::ChangeType {
+                block_id: id2,
+                new_editor: Rc::from("code"),
+                new_attrs: Box::new(serde_json::Map::new()),
+            },
+        );
+        assert!(result2.is_none(), "ChangeType on Table must be a no-op");
+    }
+
+    #[test]
+    fn apply_edit_attrs_no_longer_mirrors_into_kind() {
+        // EditAttrs on a code block should only touch plugin.attrs.
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock {
+                id: BlockId::new(),
+                body: BlockBody::Code("fn main() {}".to_string()),
+                plugin: PluginMeta::code("rust"),
+            }],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id = doc.blocks[0].id;
+        let mut new_attrs = serde_json::Map::new();
+        new_attrs.insert("lang".into(), "python".into());
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::EditAttrs {
+                block_id: id,
+                new_attrs: Box::new(new_attrs),
+            },
+        )
+        .expect("EditAttrs records");
+
+        assert!(matches!(canonical, BlockAction::EditAttrs { .. }));
+
+        // Apply inverse: lang should be back to "rust".
+        apply(&mut doc, inverse);
+        let meta = &doc.blocks[0].plugin;
+        assert_eq!(
+            meta.attrs.get("lang").and_then(|v| v.as_str()),
+            Some("rust")
+        );
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn split_preserves_editor_identity() {
+        // After BlockKind is gone, split must derive the tail block from the
+        // source block's PluginMeta editor key + attrs, not from BlockKind.
+        let mut doc = EditorDoc {
+            blocks: vec![EditorBlock::heading(
+                3,
+                vec![InlineRun::plain("section content")],
+            )],
+            front_matter: lopress_core::FrontMatter::default(),
+        };
+        let id = doc.blocks[0].id;
+
+        let (canonical, inverse) = apply(
+            &mut doc,
+            BlockAction::Split {
+                block_id: id,
+                byte_offset: 7,
+                new_block_id: None,
+            },
+        )
+        .expect("Split records");
+
+        assert_eq!(doc.blocks.len(), 2);
+        // Both blocks must carry the same editor ("heading") and level=3.
+        for b in &doc.blocks {
+            let meta = &b.plugin;
+            assert_eq!(meta.editor.as_deref(), Some("heading"));
+            assert_eq!(meta.attrs.get("level").and_then(|v| v.as_u64()), Some(3));
+        }
+        // Head block has "section", tail has " content".
+        let head = &doc.blocks[0];
+        let tail = &doc.blocks[1];
+        assert!(
+            matches!(&head.body, BlockBody::Inline(r) if r.len() == 1 && r[0].text == "section")
+        );
+        assert!(
+            matches!(&tail.body, BlockBody::Inline(r) if r.len() == 1 && r[0].text == " content")
+        );
+
+        // Undo: MergeWithPrev restores one block.
+        apply(&mut doc, inverse);
+        assert_eq!(doc.blocks.len(), 1);
+        assert!(matches!(canonical, BlockAction::Split { .. }));
+    }
 }
 
 #[cfg(test)]

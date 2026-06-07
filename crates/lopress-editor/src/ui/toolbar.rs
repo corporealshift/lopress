@@ -11,8 +11,9 @@
 //!   - inline-flag toggles applied via `apply_style_toggle`
 
 use crate::actions::BlockAction;
+use crate::model::descriptor;
 use crate::model::style_span::{InlineFlag, StyleSpan};
-use crate::model::types::{BlockId, BlockKind};
+use crate::model::types::{BlockId, EditorBlock};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
 use floem::event::{Event, EventListener};
 use floem::keyboard::{Key, NamedKey};
@@ -32,7 +33,7 @@ use std::rc::Rc;
 /// directly from the focused widget's signals via `block_toolbar_for`.
 pub struct ToolbarState {
     pub block_id: BlockId,
-    pub kind: BlockKind,
+    pub editor: Rc<str>,
     pub bold_active: bool,
     pub italic_active: bool,
     pub code_active: bool,
@@ -43,35 +44,36 @@ pub struct ToolbarState {
 /// per-block `block_view` wrapper) is responsible for only mounting this
 /// when its block is in fact the focused one.
 ///
-/// Type selector: rendered as a row of seven small kind buttons (P / H1 /
-/// H2 / H3 / Code / UL / OL). The current kind's button is highlighted.
-/// Floem 0.2 doesn't ship a stock combobox, and a row of buttons is the
-/// simplest interaction that satisfies the acceptance criteria.
+/// Type selector: rendered as a row of buttons projected from the
+/// descriptor table. The current kind's button is highlighted.
+///
+/// # Panics
+///
+/// Panics if any descriptor's `default_block` produces a block without
+/// `PluginMeta` or without `editor: Some` — this is a programming error
+/// since all built-in constructors stamp plugin meta.
+#[allow(clippy::unwrap_used)] // safe: built-in PluginMeta always has editor: Some
+#[allow(clippy::type_complexity)] // builder threads the attrs map plus the focus/action sinks
 pub fn block_toolbar_for(
     block_id: BlockId,
-    current_kind: BlockKind,
+    current_editor: Rc<str>,
+    current_attrs: serde_json::Map<String, serde_json::Value>,
     focus_pub: FocusPublisher,
     on_action: ActionSink,
 ) -> impl IntoView {
-    let kinds: Vec<(&'static str, BlockKind)> = vec![
-        ("P", BlockKind::Paragraph),
-        ("H1", BlockKind::Heading(1)),
-        ("H2", BlockKind::Heading(2)),
-        ("H3", BlockKind::Heading(3)),
-        ("H4", BlockKind::Heading(4)),
-        ("H5", BlockKind::Heading(5)),
-        ("H6", BlockKind::Heading(6)),
-        ("Code", BlockKind::Code { lang: Rc::from("") }),
-        ("UL", BlockKind::List { ordered: false }),
-        ("OL", BlockKind::List { ordered: true }),
-    ];
+    let entries: Vec<(&'static str, fn() -> EditorBlock)> =
+        descriptor::toolbar_menu_entries().to_vec();
 
-    let mut buttons: Vec<AnyView> = Vec::with_capacity(kinds.len() + 5);
-    for (lbl, kind) in kinds {
-        let is_current = same_kind(&current_kind, &kind);
-        let is_inline = is_inline_kind(&current_kind);
+    let mut buttons: Vec<AnyView> = Vec::with_capacity(entries.len() + 5);
+    for (lbl, default_block_fn) in entries {
+        let block = default_block_fn();
+        let meta = &block.plugin;
+        let entry_editor = meta.editor.as_ref().unwrap().clone();
+        let entry_attrs = meta.attrs.clone();
+        let is_current =
+            button_matches_current(&entry_editor, &entry_attrs, &current_editor, &current_attrs);
+        let is_inline = is_inline_editor(&entry_editor);
         let lbl_str: String = lbl.to_string();
-        let kind_for_action = kind.clone();
         let on_action_for_btn = on_action.clone();
         let btn = button(label(move || lbl_str.clone()))
             .on_event_stop(EventListener::PointerDown, move |_| {
@@ -98,7 +100,8 @@ pub fn block_toolbar_for(
                 }
                 on_action_for_btn(BlockAction::ChangeType {
                     block_id,
-                    new_kind: kind_for_action.clone(),
+                    new_editor: entry_editor.clone(),
+                    new_attrs: Box::new(entry_attrs.clone()),
                 });
             })
             .style(move |s| {
@@ -314,24 +317,22 @@ fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
     saw_any
 }
 
-/// True when `kind` is inline-bodied (Paragraph or Heading). These are the
-/// only kinds whose editor publishes `editor_and_spans`; the toolbar's
-/// pre-commit reads from that signal. For non-inline kinds (Code, List) the
-/// signal is None (or stale from a different block), so pre-committing an
-/// Inline body would be wrong — it's the exact regression this fixes.
-fn is_inline_kind(kind: &BlockKind) -> bool {
-    matches!(kind, BlockKind::Paragraph | BlockKind::Heading(_))
+/// True when the button's default block matches the current block's identity.
+fn button_matches_current(
+    entry_editor: &str,
+    entry_attrs: &serde_json::Map<String, serde_json::Value>,
+    current_editor: &str,
+    current_attrs: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    entry_editor == current_editor && entry_attrs == current_attrs
 }
 
-fn same_kind(a: &BlockKind, b: &BlockKind) -> bool {
-    match (a, b) {
-        (BlockKind::Paragraph, BlockKind::Paragraph) => true,
-        (BlockKind::Heading(la), BlockKind::Heading(lb)) => la == lb,
-        (BlockKind::Code { .. }, BlockKind::Code { .. }) => true,
-        (BlockKind::List { ordered: oa }, BlockKind::List { ordered: ob }) => oa == ob,
-        (BlockKind::Opaque { type_name: ta }, BlockKind::Opaque { type_name: tb }) => ta == tb,
-        _ => false,
-    }
+/// True when the editor key corresponds to an inline-bodied block.
+fn is_inline_editor(editor: &str) -> bool {
+    matches!(
+        editor,
+        descriptor::EDITOR_PARAGRAPH | descriptor::EDITOR_HEADING
+    )
 }
 
 /// The action the toolbar's Table button dispatches: insert a fresh default
@@ -386,32 +387,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_inline_kind_paragraph() {
-        assert!(is_inline_kind(&BlockKind::Paragraph));
+    fn is_inline_editor_paragraph_and_heading() {
+        assert!(is_inline_editor(descriptor::EDITOR_PARAGRAPH));
+        assert!(is_inline_editor(descriptor::EDITOR_HEADING));
+        assert!(!is_inline_editor(descriptor::EDITOR_CODE));
+        assert!(!is_inline_editor(descriptor::EDITOR_LIST));
     }
 
     #[test]
-    fn is_inline_kind_heading() {
-        assert!(is_inline_kind(&BlockKind::Heading(1)));
-        assert!(is_inline_kind(&BlockKind::Heading(6)));
-    }
-
-    #[test]
-    fn is_inline_kind_not_code() {
-        assert!(!is_inline_kind(&BlockKind::Code { lang: Rc::from("") }));
-    }
-
-    #[test]
-    fn is_inline_kind_not_list() {
-        assert!(!is_inline_kind(&BlockKind::List { ordered: false }));
-        assert!(!is_inline_kind(&BlockKind::List { ordered: true }));
-    }
-
-    #[test]
-    fn is_inline_kind_not_opaque() {
-        assert!(!is_inline_kind(&BlockKind::Opaque {
-            type_name: Rc::from("video")
-        }));
+    fn toolbar_entries_match_expected_order() {
+        let entries = descriptor::toolbar_menu_entries();
+        let labels: Vec<&str> = entries.iter().map(|(l, _)| *l).collect();
+        assert_eq!(
+            labels,
+            vec!["P", "H1", "H2", "H3", "H4", "H5", "H6", "Code", "UL", "OL"]
+        );
     }
 
     #[test]
@@ -421,7 +411,8 @@ mod tests {
         match action {
             BlockAction::InsertAfter { anchor, new_block } => {
                 assert_eq!(anchor, id);
-                assert!(matches!(new_block.kind, BlockKind::Table));
+                let meta = &new_block.plugin;
+                assert_eq!(&*meta.block_type_name, "table");
             }
             _ => panic!("expected InsertAfter"),
         }

@@ -12,10 +12,11 @@
 //!      editable widget the rest of the editor uses.
 
 use crate::actions::BlockAction;
-use crate::model::types::{BlockBody, BlockId, BlockKind, EditorBlock};
+use crate::model::descriptor;
+use crate::model::types::{BlockBody, BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::ActionSink;
-use crate::ui::blocks::{code_editor, list};
+use crate::ui::blocks::{code_editor, heading, list, paragraph};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
@@ -34,16 +35,12 @@ const BORDER: Color = Color::rgb8(220, 215, 235);
 /// Build the full plugin block view.
 pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
-    let Some(meta) = block.plugin.clone() else {
-        // Shouldn't be called for non-plugin blocks; render a placeholder.
-        return label(|| "(missing plugin meta)".to_string()).into_any();
-    };
-
-    let body = render_body(block, env);
+    let meta = block.plugin.clone();
 
     // Builtin (base-plugin) blocks suppress plugin chrome: no header strip,
-    // no attr form — they render as plain editable blocks.
+    // no attr form — they render as plain editable blocks via their body editor.
     if meta.builtin {
+        let body = render_body(block, env);
         return v_stack((body,)).style(|s| s.width_full()).into_any();
     }
 
@@ -65,7 +62,17 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let on_action_for_attrs = env.on_action.clone();
     let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
 
-    v_stack((header, form, body))
+    // Attr-form plugins (e.g. `lopress:callout`) keep ALL their content in attrs
+    // (the form) and have no block-body content concept, so render header + form
+    // ONLY — no editable body. Rendering one let the user type "phantom" text that
+    // `plugin_block_to_core` serializes as an inner-container child, competing with
+    // the attrs. The attr inputs don't publish focus, so publish it on PointerDown
+    // over the whole block — clicking anywhere mounts the toolbar (Change Type /
+    // Delete). `editor_and_spans` is cleared because there is no inline body editor
+    // here (mirrors fallback.rs), so the toolbar's pre-commit can't fire a stale
+    // editor against this block.
+    let focus_pub = env.focus_pub;
+    v_stack((header, form))
         .style(|s| {
             s.gap(4.)
                 .padding(6.)
@@ -74,6 +81,11 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
                 .border_radius(4.)
                 .background(FORM_BG)
                 .width_full()
+        })
+        .on_event(floem::event::EventListener::PointerDown, move |_| {
+            focus_pub.block.set(Some(block_id));
+            focus_pub.editor_and_spans.set(None);
+            floem::event::EventPropagation::Continue
         })
         .into_any()
 }
@@ -330,27 +342,67 @@ fn render_body(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     use crate::ui::blocks::editor_registry::editor_for;
 
     // Registry path: a manifest `editor` key with a registered widget wins.
-    if let Some(key) = block.plugin.as_ref().and_then(|m| m.editor.as_deref()) {
+    if let Some(key) = block.plugin.editor.as_deref() {
         if let Some(widget) = editor_for(key) {
             return widget(block, env);
         }
     }
 
-    // Fallback: editor keys not yet migrated to the registry (code) still
-    // dispatch on the Rust `BlockKind` enum.
+    // Fallback: dispatch on body shape for container plugins without a
+    // registered editor. The editor key in PluginMeta determines the inner
+    // type for heading blocks.
     let block_id = block.id;
-    match (&block.kind, &block.body) {
-        (BlockKind::Code { lang }, BlockBody::Code(text)) => {
+    match &block.body {
+        BlockBody::Code(text) => {
+            let lang = block
+                .plugin
+                .attrs
+                .get("lang")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             code_editor::editable_code_view(text, lang, block_id, env).into_any()
         }
-        (BlockKind::List { ordered }, BlockBody::List(items)) => {
-            list::editable_list_view(items, block_id, *ordered, env)
+        BlockBody::List(items) => {
+            let ordered = block
+                .plugin
+                .attrs
+                .get("ordered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            list::editable_list_view(items, block_id, ordered, env).into_any()
+        }
+        BlockBody::Inline(runs) => {
+            // Container plugins (e.g. `lopress:callout`) carry `editor: None`
+            // and an Inline body. Render as an editable paragraph or heading
+            // based on the editor key in PluginMeta.
+            let level = block
+                .plugin
+                .editor
+                .as_deref()
+                .and_then(|e| {
+                    if e == descriptor::EDITOR_HEADING {
+                        block
+                            .plugin
+                            .attrs
+                            .get("level")
+                            .and_then(|v| v.as_u64())
+                            .and_then(|n| u8::try_from(n).ok())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1);
+            if level > 1 {
+                heading::render_heading_editable(level, runs, block_id, env).into_any()
+            } else {
+                paragraph::render_paragraph_editable(runs, block_id, env).into_any()
+            }
         }
         _ => {
             #[cfg(debug_assertions)]
             eprintln!(
-                "[fallback] plugin block {:?}: kind/body mismatch ({:?} + {:?})",
-                block.id, block.kind, block.body
+                "[fallback] plugin block {:?}: body {:?} has no renderer",
+                block.id, block.body
             );
             crate::ui::blocks::fallback::fallback_block_view(block, env.focus_pub).into_any()
         }

@@ -8,7 +8,7 @@
 use lopress_core::{Block, Document, FrontMatter};
 use lopress_editor::model::from_core::doc_from_core;
 use lopress_editor::model::to_core::doc_to_core;
-use lopress_editor::model::types::{BlockBody, BlockKind};
+use lopress_editor::model::types::BlockBody;
 use lopress_plugin::PluginRegistry;
 
 fn registry() -> PluginRegistry {
@@ -43,9 +43,9 @@ fn list_doc() -> Document {
 fn list_block_gets_plugin_meta_when_base_plugin_registered() {
     let editor_doc = doc_from_core(&list_doc(), &registry());
     let block = &editor_doc.blocks[0];
-    assert!(matches!(block.kind, BlockKind::List { ordered: true }));
     assert!(matches!(block.body, BlockBody::List(_)));
-    let meta = block.plugin.as_ref().expect("list block has plugin meta");
+    assert!(matches!(block.body, BlockBody::List(_)));
+    let meta = &block.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "list");
     assert!(meta.builtin);
     assert_eq!(
@@ -69,8 +69,8 @@ fn list_block_serializes_back_to_core_list_type() {
 fn list_without_registered_base_plugin_degrades_to_opaque() {
     let editor_doc = doc_from_core(&list_doc(), &PluginRegistry::default());
     let block = &editor_doc.blocks[0];
-    assert!(block.plugin.is_none());
-    assert!(matches!(block.kind, BlockKind::Opaque { .. }));
+    // All blocks carry PluginMeta; the key invariant is the Opaque kind.
+    assert!(matches!(block.body, BlockBody::Opaque { .. }));
 }
 
 /// End-to-end: a *tight* markdown list (no blank lines between items) must
@@ -82,9 +82,9 @@ fn tight_markdown_list_loads_as_an_editable_list_block() {
     assert_eq!(editor_doc.blocks.len(), 1);
     let block = &editor_doc.blocks[0];
     assert!(
-        matches!(block.kind, BlockKind::List { ordered: false }),
+        matches!(block.body, BlockBody::List(_)),
         "tight list should be a List block, got {:?}",
-        block.kind
+        block.body
     );
     match &block.body {
         BlockBody::List(items) => {

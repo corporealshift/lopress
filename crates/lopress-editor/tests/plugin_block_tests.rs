@@ -2,7 +2,7 @@
 
 use lopress_editor::model::from_core::doc_from_core;
 use lopress_editor::model::to_core::doc_to_core;
-use lopress_editor::model::types::{BlockBody, BlockKind};
+use lopress_editor::model::types::BlockBody;
 use lopress_plugin::{load_dir, PluginRegistry};
 use std::path::PathBuf;
 
@@ -27,14 +27,14 @@ fn plugin_block_round_trips_byte_identical() {
     // First block is the plugin block; second is a plain paragraph.
     assert_eq!(editor.blocks.len(), 2);
     let first = &editor.blocks[0];
-    assert!(first.plugin.is_some(), "plugin block should be detected");
-    let meta = first.plugin.as_ref().unwrap();
+    // All blocks now carry PluginMeta.
+    let meta = &first.plugin;
     assert_eq!(meta.block_type_name.as_ref(), "lopress:codehighlight");
     assert_eq!(
         meta.attrs.get("lang").and_then(|v| v.as_str()),
         Some("rust")
     );
-    assert!(matches!(first.kind, BlockKind::Code { .. }));
+    assert!(matches!(first.body, BlockBody::Code { .. }));
     let t = match &first.body {
         BlockBody::Code(t) => t,
         other => {
@@ -58,11 +58,9 @@ fn unknown_plugin_falls_back_to_opaque_and_round_trips() {
     // Empty registry: no plugin matches → opaque path.
     let editor = doc_from_core(&core, &PluginRegistry::default());
     let first = &editor.blocks[0];
-    assert!(
-        first.plugin.is_none(),
-        "unknown plugin should not flag plugin meta"
-    );
-    assert!(matches!(first.kind, BlockKind::Opaque { .. }));
+    // All blocks now carry PluginMeta; the key invariant is the Opaque kind.
+    assert!(matches!(first.body, BlockBody::Opaque { .. }));
+    assert!(matches!(first.body, BlockBody::Opaque { .. }));
 
     let core_back = doc_to_core(&editor);
     let serialized = lopress_core::serialize(&core_back);
