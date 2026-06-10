@@ -71,7 +71,13 @@ pub fn editor_pane(
             ),
             None => empty().into_any(),
         },
-    });
+    })
+    // `width_full()` is load-bearing: this dyn_container sits between the
+    // `scroll` and the block column, and a scroll child's width is otherwise
+    // indefinite — the column's own `width_full()` (a percentage) then has
+    // nothing to resolve against and collapses to min-content, wrapping every
+    // block's text at a few characters.
+    .style(|s| s.width_full());
 
     // `min_height(0)` is load-bearing: a flex item's default `min-height:auto`
     // floors it at its content size, so without this the scroll grows to the
