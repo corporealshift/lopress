@@ -155,8 +155,6 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         title: ws.config.site.title.clone(),
         base_url: ws.config.site.base_url.clone(),
         nav: ws
-            .config
-            .site
             .nav
             .items
             .iter()
