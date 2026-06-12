@@ -316,3 +316,24 @@ fn images_render_as_responsive_picture() {
         "missing 800w variant in srcset"
     );
 }
+
+#[test]
+fn plugin_theme_builds_regardless_of_template_registration_order() {
+    // Regression: theme templates were registered with Tera one at a time in
+    // read_dir order, so a child template sorting before its parent
+    // (404.html extends layout.html) aborted the whole build with
+    // "Template '404.html' is inheriting from 'layout.html', which doesn't
+    // exist or isn't loaded."
+    let (_tmp, root) = copy_fixture("with-plugin-theme");
+    let report = build(&root).unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "failures: {failures:?}",
+        failures = report.failures
+    );
+
+    let www = root.join("www");
+    assert!(www.join("posts/hello/index.html").exists());
+    assert!(www.join("about/index.html").exists());
+    assert!(www.join("404.html").exists());
+}
