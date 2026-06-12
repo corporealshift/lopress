@@ -69,10 +69,16 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     // Build a shared Tera that knows every theme template and every plugin
     // block template, namespaced by plugin name.
     let mut tera = Tera::default();
-    for (name, content) in theme_templates(&ws, &theme)? {
-        tera.add_raw_template(&name, &content)
-            .map_err(|e| BuildError::Config(format!("theme template `{name}`: {e}")))?;
-    }
+    // Register all theme templates in one call so Tera resolves `extends`
+    // chains regardless of directory iteration order.
+    let theme_tpls = theme_templates(&ws, &theme)?;
+    tera.add_raw_templates(
+        theme_tpls
+            .iter()
+            .map(|(n, c)| (n.as_str(), c.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| BuildError::Config(format!("theme templates: {e}")))?;
     for plugin in &registry.plugins {
         for block in &plugin.manifest.blocks {
             let plugin_name = &plugin.manifest.name;
