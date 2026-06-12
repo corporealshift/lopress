@@ -37,8 +37,9 @@ file without touching `lopress.toml`.
 - Persistence to a new `nav.toml` file (machine-owned, written via `toml` serialization)
   at the workspace root, sibling to `lopress.toml`.
 - A rebuild after save so the live preview reflects the new nav.
-- Full backward compatibility: sites without `nav.toml` fall back to `[site.nav]` in
-  `lopress.toml`; if both exist, `nav.toml` wins and a warning is emitted.
+- `nav.toml` is the **only** nav source. `[site.nav]` in `lopress.toml` is no longer
+  read; if present it is ignored, and a migration warning tells the user to move the
+  items to `nav.toml` and delete the old block.
 
 ### Non-goals
 
@@ -48,8 +49,8 @@ file without touching `lopress.toml`.
 - No editing of other `lopress.toml` settings (title, base_url, theme) in this spec —
   the panel is nav-only, though it is named "Site settings" to leave room to grow.
 - No automatic nav entries — every link is explicit.
-- The tool never edits `lopress.toml`; the legacy `[site.nav]` form is supported
-  indefinitely and never auto-migrated or auto-deleted.
+- The tool never edits `lopress.toml`; a leftover `[site.nav]` block is never
+  auto-migrated or auto-deleted — only warned about.
 
 ---
 
@@ -71,22 +72,29 @@ The file's top-level key is `items` (a `Vec<NavItem>`), matching the `Nav` struc
 
 ---
 
-## 4. Loading & Precedence
+## 4. Loading
 
-`Workspace::load` (`crates/lopress-build/src/site.rs`) is extended to check for `nav.toml`
+`Workspace::load` (`crates/lopress-build/src/site.rs`) is extended to read `nav.toml`
 at the workspace root:
 
-1. If `nav.toml` exists, deserialize it into a `Vec<NavItem>` and use it as the nav.
-2. Otherwise, fall back to the existing `[site.nav]` in `lopress.toml` (which keeps
-   working indefinitely for existing sites — full back-compat).
-3. If neither exists, nav is empty (`Nav { items: [] }`, the default).
+1. If `nav.toml` exists, deserialize it into `Nav` and use it as the site nav.
+2. If it does not exist, nav is empty (`Nav { items: [] }`, the default).
 
-### Warning on conflict
+`[site.nav]` in `lopress.toml` is **no longer read**. The `nav` field is removed from
+the `Site` struct; `Nav`/`NavItem` remain as the `nav.toml` types. `SiteConfig` does not
+use `deny_unknown_fields`, so an old `lopress.toml` containing `[site.nav]` still parses
+fine — the table is simply ignored. Nav becomes its own field on `Workspace`
+(`pub nav: Nav`), and `build()` reads `ws.nav.items` when assembling `SiteCtx`.
 
-If **both** `nav.toml` and `[site.nav]` in `lopress.toml` exist, `nav.toml` wins and a
-warning is produced. `Workspace` gains a `warnings: Vec<String>` field populated during
+### Migration warning
+
+So existing sites don't silently lose their nav, `Workspace::load` peeks at the parsed
+`lopress.toml` for a leftover `site.nav` key (via the raw `toml::Value`, since the typed
+struct no longer has the field). If found, a warning is produced: "`[site.nav]` in
+`lopress.toml` is no longer supported and is ignored — move the items to `nav.toml` and
+delete the old block." `Workspace` gains a `warnings: Vec<String>` field populated during
 `load`; `build()` copies it into `BuildReport.warnings` (see §5) and also logs it to
-stderr. This surfaces the conflict to the user without blocking the build.
+stderr. The warning never blocks the build.
 
 ### Cache invalidation
 
@@ -96,12 +104,6 @@ bytes of `nav.toml` when present (with a separator so presence/absence of the fi
 changes the hash). Without this, saving nav from the GUI would not invalidate cached
 pages and the old nav would remain baked into previously rendered pages.
 
-### Implementation detail
-
-`Workspace::load` deserializes `lopress.toml` as before. If `nav.toml` is present, it
-deserializes that file separately into `Vec<NavItem>` and replaces `config.site.nav.items`
-with it. The `SiteConfig` struct itself is unchanged — the precedence logic lives in
-`Workspace::load`.
 
 ---
 
@@ -119,8 +121,7 @@ pub struct BuildReport {
 }
 ```
 
-The precedence warning ("both `nav.toml` and `[site.nav]` in `lopress.toml` exist;
-`nav.toml` takes precedence") is appended to this vector. The editor surfaces warnings
+The migration warning from §4 is appended to this vector. The editor surfaces warnings
 in the same place build failures are already surfaced (the build status area).
 
 ---
@@ -143,9 +144,12 @@ rename, mirroring `Session::save`'s `atomic_write`). Zero new dependencies.
   prevents adding them — see §8).
 - An empty `items` list writes an empty `items = []` array.
 
-The first save from the GUI effectively migrates a site: `nav.toml` is created, and a
-now-inert `[site.nav]` left in `lopress.toml` triggers the §4 warning until the user
-deletes it by hand. The tool never edits `lopress.toml`.
+The first save from the GUI creates `nav.toml`. A leftover `[site.nav]` in
+`lopress.toml` triggers the §4 migration warning until the user deletes it by hand.
+The tool never edits `lopress.toml`. Note that an existing site's `[site.nav]` items do
+**not** appear in the panel (the old block is not read), so migrating means re-entering
+the links in the GUI — or hand-moving the items into `nav.toml` — and deleting the old
+block.
 
 ---
 
@@ -160,9 +164,9 @@ snapshot does not block the build.
 Two methods are added:
 
 ```rust
-/// Current nav items, read fresh from nav.toml (falling back to
-/// lopress.toml) on disk so repeated edits in one session reflect
-/// the latest saved state.
+/// Current nav items, read fresh from nav.toml on disk so repeated
+/// edits in one session reflect the latest saved state. Empty when
+/// the file doesn't exist.
 pub fn nav_items(&self) -> Vec<lopress_build::NavItem>;
 
 /// Write nav items to nav.toml, then trigger a rebuild + SSE reload.
@@ -172,8 +176,8 @@ pub fn nav_items(&self) -> Vec<lopress_build::NavItem>;
 pub fn update_nav(&self, items: Vec<lopress_build::NavItem>) -> Result<(), SaveError>;
 ```
 
-`nav_items()` re-reads `nav.toml` (falling back to `lopress.toml`) rather than returning
-the open-time snapshot, so the panel always shows current state. `update_nav()` calls the
+`nav_items()` re-reads `nav.toml` rather than returning the open-time snapshot, so the
+panel always shows current state. `update_nav()` calls the
 new config-writer (§6), then `self.rebuild()`.
 
 ---
@@ -254,7 +258,7 @@ The pickers draw from the workspace summary:
 
 `lopress new` (`crates/lopress-build/src/scaffold.rs`) is updated to write the default
 Home / About nav to `nav.toml` instead of embedding it in `lopress.toml` under
-`[site.nav]`. New sites never have the legacy `[site.nav]` form.
+`[site.nav]`.
 
 ```toml
 # Written to nav.toml by `lopress new`:
@@ -264,8 +268,6 @@ items = [
 ]
 ```
 
-The legacy `[site.nav]` remains supported on existing sites indefinitely; it is never
-auto-migrated or auto-deleted.
 
 ---
 
@@ -274,9 +276,9 @@ auto-migrated or auto-deleted.
 ### lopress-build
 
 - `nav.toml` round-trip: write via `write_nav`, `Workspace::load` reflects the new nav.
-- Precedence: when both `nav.toml` and `[site.nav]` exist, `nav.toml` wins and a warning
-  lands in `BuildReport.warnings`.
-- Fallback: no `nav.toml` → `[site.nav]` is used; neither → empty nav.
+- No `nav.toml` → nav is empty.
+- An old `lopress.toml` containing `[site.nav]` still parses; its items are ignored and
+  the migration warning lands in `Workspace.warnings` → `BuildReport.warnings`.
 - Cache invalidation: changing `nav.toml` changes `hash_config`'s result (and so forces a
   full rebuild); creating or deleting the file also changes it.
 - Scaffold: `lopress new` output contains `nav.toml` and no `[site.nav]` in `lopress.toml`.
@@ -313,9 +315,10 @@ the control workflow.)
 
 1. `lopress-build`: implement `write_nav` (TOML serialization + atomic write) with unit
    tests.
-2. `lopress-build`: extend `Workspace::load` to read `nav.toml` with precedence logic and
-   warning emission; add `warnings` field to `BuildReport`; update `build()` to populate
-   the field; extend `cache::hash_config` to cover `nav.toml`.
+2. `lopress-build`: remove `nav` from `Site`; add `nav: Nav` + `warnings: Vec<String>`
+   to `Workspace` (loaded from `nav.toml`, with the `[site.nav]` migration warning); add
+   `warnings` to `BuildReport` and populate it in `build()` (which now reads `ws.nav`);
+   extend `cache::hash_config` to cover `nav.toml`.
 3. `lopress-build`: update `scaffold.rs` to write `nav.toml` instead of `[site.nav]`.
 4. `lopress-gui-host`: add `slug` to `DocumentRef` and `tags` to `WorkspaceSummary` (scan
    changes); add `nav_items()` and `update_nav()`.
@@ -323,8 +326,8 @@ the control workflow.)
    point + `nav_editor_open` signal; modal wiring in the editing view.
 6. Page/tag pickers (popup-button pattern) wired to `session.workspace()`.
 7. Save path → `session.update_nav` → rebuild; inline error handling; Cancel.
-8. Tests (build round-trip / precedence / fallback / scaffold, gui-host scan/nav methods,
-   editor working-model + pickers, e2e).
+8. Tests (build round-trip / empty-nav / migration-warning / scaffold, gui-host scan/nav
+   methods, editor working-model + pickers, e2e).
 
 ---
 
@@ -340,16 +343,20 @@ is zero new dependencies and no risk of corrupting user formatting.
 Rejected: `toml_edit` surgical write (new dependency on `toml_edit`); re-serializing all
 of `SiteConfig` (destroys user comments and formatting in `lopress.toml`).
 
-### Precedence: `nav.toml` wins with a warning
+### `[site.nav]` support dropped entirely, with a migration warning
 
-Chosen over silent precedence (the user explicitly picked the warning variant) and over
-erroring on conflict (too much friction for existing sites mid-migration). The warning is
-surfaced in the editor via `BuildReport.warnings` and logged to stderr.
+Originally the design kept `[site.nav]` as a fallback (`nav.toml` wins + warning when both
+exist); the user then decided (2026-06-12) not to keep the old path at all. `nav.toml` is
+the only nav source. To avoid silently losing an existing site's nav, `Workspace::load`
+detects a leftover `[site.nav]` table and emits a migration warning via
+`BuildReport.warnings` (also logged to stderr); the build never fails over it and the tool
+never edits `lopress.toml`. Rejected: silent ignoring (nav would just vanish with no
+explanation) and erroring (blocks builds on a cosmetic leftover).
 
 ### `lopress new` scaffolds `nav.toml`
 
-So the legacy `[site.nav]` form only exists on old sites; it remains supported indefinitely,
-never auto-migrated or auto-deleted.
+New sites get the nav file from day one, so `[site.nav]` only ever appears in
+pre-migration sites, where it triggers the warning above.
 
 ### Rebuild-from-disk rather than mutating the shared `Arc<Workspace>`
 
