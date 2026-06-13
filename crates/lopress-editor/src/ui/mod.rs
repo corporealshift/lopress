@@ -165,6 +165,7 @@ fn editing_view(
             name: String::new(),
             posts: Vec::new(),
             pages: Vec::new(),
+            tags: Vec::new(),
         });
     let workspace_signal: RwSignal<WorkspaceSummary> = RwSignal::new(initial_ws);
 

@@ -166,6 +166,7 @@ fn open_document_by_path(
     let doc_ref = DocumentRef {
         path: target.clone(),
         title: String::new(),
+        slug: String::new(),
         is_draft: false,
         has_parse_error: false,
     };
