@@ -370,6 +370,29 @@ impl Session {
             Some(format!("{url}/{slug}/"))
         }
     }
+
+    /// Current nav items, read fresh from nav.toml on disk so repeated
+    /// edits in one session reflect the latest saved state. Empty when
+    /// the file doesn't exist or doesn't parse.
+    pub fn nav_items(&self) -> Vec<lopress_build::NavItem> {
+        let nav_path = self.workspace.root.join("nav.toml");
+        let Ok(src) = std::fs::read_to_string(&nav_path) else {
+            return Vec::new();
+        };
+        toml::from_str::<lopress_build::Nav>(&src)
+            .map(|nav| nav.items)
+            .unwrap_or_default()
+    }
+
+    /// Write nav items to nav.toml, then trigger a rebuild + SSE reload.
+    ///
+    /// # Errors
+    /// Returns an error if nav.toml can't be serialized or written.
+    pub fn update_nav(&self, items: Vec<lopress_build::NavItem>) -> Result<(), SaveError> {
+        lopress_build::write_nav(&self.workspace.root, &items)?;
+        self.rebuild();
+        Ok(())
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

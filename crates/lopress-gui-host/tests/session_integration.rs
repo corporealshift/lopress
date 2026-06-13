@@ -193,6 +193,43 @@ fn workspace_summary_has_slugs_and_tags() {
 }
 
 #[test]
+fn nav_items_reads_from_disk() {
+    let dir = make_workspace();
+    lopress_build::write_nav(
+        dir.path(),
+        &[lopress_build::NavItem {
+            label: "Home".into(),
+            href: "/".into(),
+        }],
+    )
+    .unwrap();
+
+    let session = Session::open(dir.path()).unwrap();
+    let items = session.nav_items();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "Home");
+}
+
+#[test]
+fn update_nav_writes_nav_toml() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+
+    session
+        .update_nav(vec![lopress_build::NavItem {
+            label: "New".into(),
+            href: "/new/".into(),
+        }])
+        .unwrap();
+
+    // The file was written and nav_items reflects it.
+    assert!(dir.path().join("nav.toml").exists());
+    let items = session.nav_items();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "New");
+}
+
+#[test]
 fn import_image_disambiguates_collisions() {
     let dir = make_workspace();
     let session = Session::open(dir.path()).unwrap();
