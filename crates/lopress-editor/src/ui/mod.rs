@@ -7,6 +7,7 @@ pub mod editor_pane;
 pub mod footer;
 pub mod inspector;
 
+pub mod nav_editor;
 pub mod sidebar;
 pub mod slash_menu;
 pub mod toolbar;
