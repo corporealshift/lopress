@@ -53,6 +53,36 @@ fn scaffolded_site_builds_cleanly() {
 }
 
 #[test]
+fn new_site_writes_nav_toml_with_default_items() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+
+    new_site(&dir, "T", "http://localhost:8080").unwrap();
+
+    let nav_path = dir.join("nav.toml");
+    assert!(nav_path.exists(), "nav.toml must be created");
+    let content = std::fs::read_to_string(&nav_path).unwrap();
+    assert!(content.contains("Home"));
+    assert!(content.contains("/"));
+    assert!(content.contains("About"));
+    assert!(content.contains("/about/"));
+}
+
+#[test]
+fn new_site_does_not_write_site_nav_in_lopress_toml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+
+    new_site(&dir, "T", "http://localhost:8080").unwrap();
+
+    let toml_content = std::fs::read_to_string(dir.join("lopress.toml")).unwrap();
+    assert!(
+        !toml_content.contains("[site.nav]"),
+        "lopress.toml must not contain [site.nav]"
+    );
+}
+
+#[test]
 fn new_site_refuses_to_scaffold_into_a_non_empty_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("existing");
