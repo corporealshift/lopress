@@ -403,7 +403,7 @@ fn editing_view(
                 },
             );
 
-            let panel = v_stack((
+            v_stack((
                 label(|| "Site settings \u{2014} navigation".to_string())
                     .style(|s| s.font_size(15.).font_weight(Weight::SEMIBOLD)),
                 error_line,
@@ -418,29 +418,18 @@ fn editing_view(
                     .margin_top(60.)
                     .margin_horiz(PxPctAuto::Auto)
             })
-            // Swallow clicks on the panel so they don't reach the dismiss
-            // handler on the backdrop.
-            .on_click_stop(move |_| {});
-
-            stack((panel,))
-                .style(|s| {
-                    s.position(Position::Absolute)
-                        .inset_top(0.)
-                        .inset_left(0.)
-                        .width_full()
-                        .height_full()
-                        .background(Color::rgba8(0, 0, 0, 110))
-                })
-                .on_click_stop(move |_| nav_editor_open.set(false))
-                .into_any()
+            .into_any()
         },
     )
+    // Follow the slash-menu overlay pattern: a full-width, content-height
+    // absolute layer. Omitting `height_full` means the closed (empty) branch
+    // collapses to zero height and does not intercept clicks to the editor
+    // underneath. Cancel/Save close the panel.
     .style(|s| {
         s.position(Position::Absolute)
             .inset_top(0.)
             .inset_left(0.)
             .width_full()
-            .height_full()
     });
 
     let editing_for_close = Rc::clone(&editing);
