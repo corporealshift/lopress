@@ -8,11 +8,24 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::text::Weight;
 use floem::views::{
-    button, dyn_container, h_stack, label, scroll, text_input, v_stack, v_stack_from_iter,
+    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, v_stack_from_iter,
     Decorators,
 };
 use floem::{AnyView, IntoView};
 use lopress_build::NavItem;
+
+/// A workspace page offered by the "Link to page" picker.
+#[derive(Debug, Clone)]
+pub struct PageChoice {
+    pub slug: String,
+    pub title: String,
+}
+
+/// A tag offered by the "Link to tag" picker.
+#[derive(Debug, Clone)]
+pub struct TagChoice {
+    pub name: String,
+}
 
 // ── Working model (pure data, testable without Floem) ───────────────────────
 
@@ -131,12 +144,20 @@ impl NavModel {
 /// whether to close the modal (it stays open on a save error, which the
 /// caller displays — see Task 10).
 /// `on_cancel` closes the modal without saving.
-/// (Task 11 extends this signature with page/tag picker data.)
+///
+/// `pages` and `tags` populate the "Link to page" / "Link to tag" pickers;
+/// choosing one fills the last row's href (adding a row first if the list is
+/// empty), and the row's label when it was blank.
 pub fn nav_editor_view(
     model: RwSignal<NavModel>,
+    pages: Vec<PageChoice>,
+    tags: Vec<TagChoice>,
     on_save: impl Fn(Vec<NavItem>) + 'static,
     on_cancel: impl Fn() + 'static,
 ) -> impl IntoView {
+    let page_picker_open: RwSignal<bool> = RwSignal::new(false);
+    let tag_picker_open: RwSignal<bool> = RwSignal::new(false);
+
     let save_btn = button(label(|| "Save".to_string()))
         .action(move || {
             let items = model.get_untracked().to_nav_items();
@@ -157,10 +178,73 @@ pub fn nav_editor_view(
         .action(move || model.update(|m| m.add_row()))
         .style(|s| s.padding_vert(4.).font_size(12.));
 
+    let page_btn = button(label(|| "Link to page \u{25be}".to_string())) // ▾
+        .action(move || {
+            tag_picker_open.set(false);
+            page_picker_open.update(|v| *v = !*v);
+        })
+        .style(|s| s.padding_vert(4.).padding_horiz(8.).font_size(12.));
+    let tag_btn = button(label(|| "Link to tag \u{25be}".to_string())) // ▾
+        .action(move || {
+            page_picker_open.set(false);
+            tag_picker_open.update(|v| *v = !*v);
+        })
+        .style(|s| s.padding_vert(4.).padding_horiz(8.).font_size(12.));
+
+    let top_row = h_stack((add_btn, page_btn, tag_btn)).style(|s| s.gap(6.).items_center());
+
+    let page_popup = dyn_container(
+        move || page_picker_open.get(),
+        move |open| {
+            if !open {
+                return empty().into_any();
+            }
+            picker_popup(
+                pages.iter().map(|p| p.title.clone()).collect(),
+                pages.iter().map(|p| p.slug.clone()).collect(),
+                move |slug, title| {
+                    model.update(|m| {
+                        if m.rows.is_empty() {
+                            m.add_row();
+                        }
+                        let last = m.rows.len().saturating_sub(1);
+                        m.fill_href_from_page(last, &slug, &title);
+                    });
+                    page_picker_open.set(false);
+                },
+            )
+        },
+    );
+
+    let tag_popup = dyn_container(
+        move || tag_picker_open.get(),
+        move |open| {
+            if !open {
+                return empty().into_any();
+            }
+            picker_popup(
+                tags.iter().map(|t| t.name.clone()).collect(),
+                tags.iter().map(|t| t.name.clone()).collect(),
+                move |tag: String, _label: String| {
+                    model.update(|m| {
+                        if m.rows.is_empty() {
+                            m.add_row();
+                        }
+                        let last = m.rows.len().saturating_sub(1);
+                        m.fill_href_from_tag(last, &tag);
+                    });
+                    tag_picker_open.set(false);
+                },
+            )
+        },
+    );
+
     let footer = h_stack((save_btn, cancel_btn)).style(|s| s.gap(8.).justify_end().padding_top(8.));
 
     v_stack((
-        add_btn,
+        top_row,
+        page_popup,
+        tag_popup,
         scroll(
             dyn_container(
                 move || model.get(),
@@ -179,6 +263,51 @@ pub fn nav_editor_view(
         footer,
     ))
     .style(|s| s.gap(8.).padding(16.).width(480.))
+}
+
+/// A popup list of choices for a picker. Each entry shows `labels[i]` and,
+/// when clicked, calls `on_select(values[i], labels[i])`. Renders a "(none)"
+/// placeholder when there are no choices.
+fn picker_popup(
+    labels: Vec<String>,
+    values: Vec<String>,
+    on_select: impl Fn(String, String) + Clone + 'static,
+) -> AnyView {
+    let mut entries: Vec<AnyView> = Vec::with_capacity(labels.len());
+    for (lbl, val) in labels.into_iter().zip(values) {
+        let on_sel = on_select.clone();
+        let lbl_for_text = lbl.clone();
+        let btn = button(label(move || lbl_for_text.clone()))
+            .action(move || on_sel(val.clone(), lbl.clone()))
+            .style(|s| {
+                s.width_full()
+                    .font_size(12.)
+                    .padding_vert(2.)
+                    .padding_horiz(6.)
+            });
+        entries.push(btn.into_any());
+    }
+    if entries.is_empty() {
+        entries.push(
+            label(|| "(none)".to_string())
+                .style(|s| {
+                    s.font_size(11.)
+                        .padding(4.)
+                        .color(Color::rgb8(150, 150, 160))
+                })
+                .into_any(),
+        );
+    }
+    v_stack_from_iter(entries)
+        .style(|s| {
+            s.gap(2.)
+                .border(1.)
+                .border_color(Color::rgb8(210, 210, 210))
+                .border_radius(4.)
+                .padding(4.)
+                .max_height(160.)
+        })
+        .into_any()
 }
 
 /// A single nav row view (label input + href input + reorder/remove controls).

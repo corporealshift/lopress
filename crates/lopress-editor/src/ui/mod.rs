@@ -14,8 +14,12 @@ pub mod toolbar;
 pub mod welcome;
 
 use floem::event::{Event, EventListener};
+use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, h_stack, stack, Decorators};
+use floem::style::Position;
+use floem::text::Weight;
+use floem::unit::PxPctAuto;
+use floem::views::{dyn_container, empty, h_stack, label, stack, v_stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,7 +36,9 @@ use crate::ui::editing::save_pipeline;
 use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
 use crate::ui::inspector::inspector_view;
+use crate::ui::nav_editor::{NavModel, PageChoice, TagChoice};
 use crate::ui::sidebar::sidebar_view;
+use lopress_build::NavItem;
 use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
 use std::path::PathBuf;
 
@@ -212,12 +218,23 @@ fn editing_view(
         new_doc::DocKind::Page,
     );
 
+    // ── Nav editor modal state ───────────────────────────────────────────
+    // Opened from the sidebar's "Site settings" button; the modal itself is
+    // built near the end of this function and overlaid on the whole view.
+    let nav_editor_open: RwSignal<bool> = RwSignal::new(false);
+    let nav_save_error: RwSignal<Option<String>> = RwSignal::new(None);
+    let on_site_settings: Rc<dyn Fn()> = Rc::new(move || {
+        nav_save_error.set(None);
+        nav_editor_open.set(true);
+    });
+
     let sidebar = sidebar_view(
         workspace_signal,
         current_path,
         on_open,
         on_new_post,
         on_new_page,
+        on_site_settings,
     );
 
     let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
@@ -326,8 +343,108 @@ fn editing_view(
     let columns = h_stack((sidebar, editor, inspector))
         .style(|s| s.width_full().flex_grow(1.0).min_height(0.));
 
+    // ── Nav editor modal overlay ─────────────────────────────────────────
+    // Absolutely positioned over the whole editing view; `empty` when closed.
+    // A fresh working model and picker lists are built from the session each
+    // time it opens, so it always reflects the latest saved nav.
+    let editing_for_modal = Rc::clone(&editing);
+    let nav_modal = dyn_container(
+        move || nav_editor_open.get(),
+        move |open| {
+            if !open {
+                return empty().into_any();
+            }
+            let (model, pages, tags) = {
+                let guard = editing_for_modal.borrow();
+                let Some(state) = guard.as_ref() else {
+                    return empty().into_any();
+                };
+                let ws = state.session.workspace();
+                let pages: Vec<PageChoice> = ws
+                    .pages
+                    .iter()
+                    .map(|p| PageChoice {
+                        slug: p.slug.clone(),
+                        title: p.title.clone(),
+                    })
+                    .collect();
+                let tags: Vec<TagChoice> = ws
+                    .tags
+                    .iter()
+                    .map(|t| TagChoice { name: t.clone() })
+                    .collect();
+                (NavModel::new(state.session.nav_items()), pages, tags)
+            };
+            let model_sig: RwSignal<NavModel> = RwSignal::new(model);
+
+            let editing_for_save = Rc::clone(&editing_for_modal);
+            let on_save = move |items: Vec<NavItem>| {
+                let guard = editing_for_save.borrow();
+                let Some(state) = guard.as_ref() else {
+                    return;
+                };
+                match state.session.update_nav(items) {
+                    Ok(()) => {
+                        nav_save_error.set(None);
+                        nav_editor_open.set(false);
+                    }
+                    Err(e) => nav_save_error.set(Some(e.to_string())),
+                }
+            };
+            let on_cancel = move || nav_editor_open.set(false);
+
+            let error_line = dyn_container(
+                move || nav_save_error.get(),
+                move |err| match err {
+                    Some(e) => label(move || e.clone())
+                        .style(|s| s.color(Color::rgb8(200, 60, 60)).font_size(12.))
+                        .into_any(),
+                    None => empty().into_any(),
+                },
+            );
+
+            let panel = v_stack((
+                label(|| "Site settings \u{2014} navigation".to_string())
+                    .style(|s| s.font_size(15.).font_weight(Weight::SEMIBOLD)),
+                error_line,
+                nav_editor::nav_editor_view(model_sig, pages, tags, on_save, on_cancel),
+            ))
+            .style(|s| {
+                s.background(Color::rgb8(255, 255, 255))
+                    .border(1.)
+                    .border_color(Color::rgb8(200, 200, 200))
+                    .border_radius(8.)
+                    .padding(16.)
+                    .margin_top(60.)
+                    .margin_horiz(PxPctAuto::Auto)
+            })
+            // Swallow clicks on the panel so they don't reach the dismiss
+            // handler on the backdrop.
+            .on_click_stop(move |_| {});
+
+            stack((panel,))
+                .style(|s| {
+                    s.position(Position::Absolute)
+                        .inset_top(0.)
+                        .inset_left(0.)
+                        .width_full()
+                        .height_full()
+                        .background(Color::rgba8(0, 0, 0, 110))
+                })
+                .on_click_stop(move |_| nav_editor_open.set(false))
+                .into_any()
+        },
+    )
+    .style(|s| {
+        s.position(Position::Absolute)
+            .inset_top(0.)
+            .inset_left(0.)
+            .width_full()
+            .height_full()
+    });
+
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, footer))
+    stack((columns, footer, nav_modal))
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
             // Force-flush any unsaved edits before the window dies.

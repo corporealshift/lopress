@@ -41,6 +41,7 @@ pub fn sidebar_view(
     on_open: Rc<dyn Fn(DocumentRef)>,
     on_new_post: Rc<dyn Fn()>,
     on_new_page: Rc<dyn Fn()>,
+    on_site_settings: Rc<dyn Fn()>,
 ) -> impl IntoView {
     // Re-render the lists when `workspace` or `current_path` changes.
     let on_open_for_lists = on_open;
@@ -75,7 +76,12 @@ pub fn sidebar_view(
         .action(move || (on_new_page_btn)())
         .style(|s| s.width_full().padding_vert(4.));
 
-    let footer = v_stack((new_post_btn, new_page_btn))
+    let on_site_settings_btn = on_site_settings.clone();
+    let site_settings_btn = button(label(|| "\u{2699} Site settings".to_string())) // ⚙
+        .action(move || (on_site_settings_btn)())
+        .style(|s| s.width_full().padding_vert(4.));
+
+    let footer = v_stack((new_post_btn, new_page_btn, site_settings_btn))
         .style(|s| s.gap(4.).padding(8.).border_top(1.).border_color(BORDER));
 
     v_stack((scroll(lists).style(|s| s.flex_grow(1.)), footer)).style(|s| {
