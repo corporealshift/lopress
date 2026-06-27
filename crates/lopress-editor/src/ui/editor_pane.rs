@@ -38,6 +38,7 @@ pub fn editor_pane(
     on_redo: Rc<dyn Fn()>,
     on_insert_image: Rc<dyn Fn(BlockId)>,
     inserter_items: Rc<[crate::model::inserter::PluginInserterItem]>,
+    link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
 ) -> impl IntoView {
     // The block column is rebuilt on every document mutation: Floem's
     // `create_updater` (behind `dyn_container`) fires on every
@@ -68,6 +69,7 @@ pub fn editor_pane(
                 current_doc,
                 Rc::clone(&on_undo),
                 Rc::clone(&on_redo),
+                link_edit,
             ),
             None => empty().into_any(),
         },
@@ -191,6 +193,7 @@ pub fn editor_pane(
 /// block(1), …, gap(N). Gap N (after the last block) is the "drop at end"
 /// target. An empty document has no blocks to click into, so it shows a single
 /// "add block" button instead.
+#[allow(clippy::too_many_arguments)]
 fn block_column(
     doc: &EditorDoc,
     on_action: ActionSink,
@@ -199,6 +202,7 @@ fn block_column(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: Rc<dyn Fn()>,
     on_redo: Rc<dyn Fn()>,
+    link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
 ) -> AnyView {
     // `focus_pub` is created per rebuild and shared by this column's block
     // editors (which publish their editor signals into it on focus) and the
@@ -217,6 +221,7 @@ fn block_column(
         current_doc,
         on_undo,
         on_redo,
+        link_edit,
     };
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
     if doc.blocks.is_empty() {

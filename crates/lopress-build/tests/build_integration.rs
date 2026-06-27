@@ -72,6 +72,29 @@ fn minimal_site_builds_expected_files() {
 }
 
 #[test]
+fn post_with_inline_link_builds_anchor_tag() {
+    let (_tmp, root) = copy_fixture("minimal");
+    // Author a post whose body contains a markdown link, the way the editor
+    // serializes one to disk.
+    let post = "---\ntitle: Linky\ndate: 2026-06-26\n---\n\
+        Check out [the docs](https://example.com) for more.\n";
+    fs::write(root.join("src/posts/linky.md"), post).unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "failures: {failures:?}",
+        failures = report.failures
+    );
+
+    let html = fs::read_to_string(root.join("www/posts/linky/index.html")).unwrap();
+    assert!(
+        html.contains(r#"<a href="https://example.com">the docs</a>"#),
+        "expected anchor in rendered post, got: {html}"
+    );
+}
+
+#[test]
 fn drafts_are_excluded_from_every_output() {
     let (_tmp, root) = copy_fixture("with-draft");
     let report = build(&root).unwrap();

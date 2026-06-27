@@ -6,6 +6,7 @@ pub mod editing;
 pub mod editor_pane;
 pub mod footer;
 pub mod inspector;
+pub mod link_bar;
 
 pub mod nav_editor;
 pub mod sidebar;
@@ -239,6 +240,11 @@ fn editing_view(
 
     let focus_target: RwSignal<Option<BlockId>> = RwSignal::new(None);
     let slash_menu_open: RwSignal<Option<BlockId>> = RwSignal::new(None);
+    // Stable pane-level signal driving the link-URL editor bar. Lives here
+    // (not in the rebuilt block column) so the bar survives the editor-pane
+    // rebuild that a focus-loss commit triggers when the user clicks the Link
+    // button or the bar's own input.
+    let link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>> = RwSignal::new(None);
     let dnd = DndState::new();
 
     // ── Save pipeline ────────────────────────────────────────────────────
@@ -319,6 +325,7 @@ fn editing_view(
         on_redo.clone(),
         on_insert_image_for_pane,
         inserter_items_for_pane,
+        link_edit,
     )
     .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
@@ -331,6 +338,11 @@ fn editing_view(
         current_doc,
         save.serve_status_sig,
     );
+
+    // Pane-level link-URL bar: appears just above the footer while a link is
+    // being edited. Collapses to zero height when `link_edit` is `None`.
+    let link_bar =
+        crate::ui::link_bar::link_bar_view(link_edit, current_doc, on_action.clone(), focus_target);
 
     // ── Debug ctrl wiring ────────────────────────────────────────────────────
     // Snapshot/open/close effects are wired once at root scope; here we only
@@ -433,7 +445,7 @@ fn editing_view(
     });
 
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, footer, nav_modal))
+    stack((columns, link_bar, footer, nav_modal))
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
             // Force-flush any unsaved edits before the window dies.

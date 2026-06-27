@@ -8,7 +8,9 @@ use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::style_span::InlineRunStyling;
 use floem::event::{Event, EventListener};
-use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{
+    create_effect, create_memo, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
+};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
 use floem::views::editor::keypress::default_key_handler;
@@ -31,15 +33,9 @@ const CARET_COLOR: floem::peniko::Color = floem::peniko::Color::rgb8(40, 40, 40)
 /// through the `actions::apply` chokepoint.
 pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
-/// The focused block's editor signal, style-span signal, style-revision
-/// counter, and link-URL signal — published so the toolbar can reach the
-/// active editor.
-pub type EditorHandles = (
-    RwSignal<Editor>,
-    RwSignal<Vec<StyleSpan>>,
-    RwSignal<u64>,
-    RwSignal<Option<String>>,
-);
+/// The focused block's editor signal, style-span signal, and style-revision
+/// counter — published so the toolbar can reach the active editor.
+pub type EditorHandles = (RwSignal<Editor>, RwSignal<Vec<StyleSpan>>, RwSignal<u64>);
 
 /// Pane-level slot that the focused block publishes to so the toolbar
 /// can reach the focused block's editor and style-span signals.
@@ -59,9 +55,6 @@ pub struct BlockEditorState {
     pub style_rev: RwSignal<u64>,
     /// Full block text, kept in sync with the rope via `TextDocument::add_on_update`.
     pub text_sig: RwSignal<Rope>,
-    /// When `Some`, the link-URL input row is shown; holds the editing buffer
-    /// seed. `None` hides the row.
-    pub link_url_sig: RwSignal<Option<String>>,
 }
 
 /// Pixel height of a block given its wrapped visual-line count. Clamps to at
@@ -81,7 +74,6 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
     let spans_sig = cx.create_rw_signal(spans);
     let style_rev = cx.create_rw_signal(0u64);
     let text_sig = cx.create_rw_signal(rope.clone());
-    let link_url_sig = cx.create_rw_signal(None::<String>);
 
     let styling = Rc::new(InlineRunStyling {
         spans: spans_sig,
@@ -110,7 +102,6 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
         spans_sig,
         style_rev,
         text_sig,
-        link_url_sig,
     }
 }
 
@@ -207,7 +198,8 @@ pub fn mount_block_editor(
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
     let style_rev = state.style_rev;
-    let link_url_sig = state.link_url_sig;
+    let text_sig = state.text_sig;
+    let link_edit = env.link_edit;
 
     let commit_for_key = _commit;
     let commit_on_focus_lost = Rc::clone(&commit_for_key);
@@ -246,7 +238,7 @@ pub fn mount_block_editor(
             &handle_on_redo,
             &commit_for_key,
             slash_eligible,
-            link_url_sig,
+            link_edit,
         );
         if result == CommandExecuted::Yes {
             result
@@ -370,7 +362,7 @@ pub fn mount_block_editor(
             focus_pub.block.set(Some(publish_block_id));
             focus_pub
                 .editor_and_spans
-                .set(Some((editor_sig, spans_sig, style_rev, link_url_sig)));
+                .set(Some((editor_sig, spans_sig, style_rev)));
         }
     });
 
@@ -392,16 +384,34 @@ pub fn mount_block_editor(
     // below lands on a normal-flow layout node; the inner `editor_view` fills
     // it via `size_full()`.
     let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
-    stack((view,)).style(move |s| {
-        // Track screen_lines so the height recomputes when wrapping reflows
-        // (text edit or column-width change). `last_vline()` is the index of
-        // the last wrapped visual line; +1 converts it to a count.
-        let visual_lines = editor_sig.with(|ed| {
-            ed.screen_lines.get();
+
+    // The block's height is the wrapped visual-line count times the line
+    // height. We deliberately compute that count inside a `Memo` rather than
+    // reading it directly in the `style` closure below.
+    //
+    // Why: floem's `EditorView::compute_layout` writes `editor.viewport` (and
+    // so recomputes `screen_lines`) from the *height* this very closure sets
+    // via `size_full()`. A previous version subscribed the height closure to
+    // `screen_lines`, which closed a layout feedback loop — set height →
+    // viewport changes → `screen_lines` fires → height recomputes. At an exact
+    // wrap boundary the width-derived line count never reaches a fixed point,
+    // so layout re-runs forever and the window hangs (blank, unresponsive).
+    //
+    // The `Memo` breaks the loop: it re-runs on every viewport change (so a
+    // genuine *width* change still reflows) but, because it returns the line
+    // *count* and `Memo` only notifies on a changed value, our own height
+    // writes — which leave the count untouched — no longer re-trigger the
+    // closure. `text_sig` covers reflow from edits that don't change width.
+    let visual_lines = create_memo(move |_| {
+        text_sig.with(|_| {});
+        editor_sig.with_untracked(|ed| {
+            ed.viewport.get();
             u16::try_from(ed.last_vline().0 + 1).unwrap_or(u16::MAX)
-        });
+        })
+    });
+    stack((view,)).style(move |s| {
         s.width_full()
-            .height(block_height_px(visual_lines, line_height))
+            .height(block_height_px(visual_lines.get(), line_height))
     })
 }
 
@@ -425,7 +435,7 @@ fn handle_key(
     on_redo: &Rc<dyn Fn()>,
     commit: &CommitClosure,
     slash_eligible: bool,
-    link_url_sig: RwSignal<Option<String>>,
+    link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
 ) -> CommandExecuted {
     use floem::keyboard::{Key, NamedKey};
 
@@ -467,11 +477,7 @@ fn handle_key(
                     return CommandExecuted::Yes;
                 }
                 "k" | "K" => {
-                    apply_style_toggle(editor_sig, spans_sig, style_rev, InlineFlag::Link);
-                    // Opening the URL row only makes sense when a link span is
-                    // now active in the selection.
-                    let has_link = selection_has_link(editor_sig, spans_sig);
-                    link_url_sig.set(if has_link { Some(String::new()) } else { None });
+                    open_link_editor(editor_sig, spans_sig, block_id, link_edit);
                     return CommandExecuted::Yes;
                 }
                 _ => {}
@@ -623,24 +629,44 @@ fn handle_key(
     }
 }
 
-/// True if any style span overlapping the current editor selection carries a
-/// link. Used to decide whether the URL input row should open after Ctrl+K.
-fn selection_has_link(editor_sig: RwSignal<Editor>, spans_sig: RwSignal<Vec<StyleSpan>>) -> bool {
+/// Open the pane-level link bar for the current selection.
+///
+/// Captures the selection's byte range (and any existing link URL over it) and
+/// stores them in the stable `link_edit` signal. The bar then applies the URL
+/// to that captured range, so it works even though clicking the toolbar button
+/// blurs the editor and triggers a pane rebuild. A collapsed selection is a
+/// no-op — a link needs text to attach to. Shared by the toolbar Link button
+/// and the Ctrl+K shortcut.
+pub(crate) fn open_link_editor(
+    editor_sig: RwSignal<Editor>,
+    spans_sig: RwSignal<Vec<StyleSpan>>,
+    block_id: BlockId,
+    link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
+) {
     use floem::views::editor::core::cursor::CursorMode;
-    let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
+    let (start, end) = editor_sig.with_untracked(|ed| {
         ed.cursor.with_untracked(|c| match &c.mode {
             CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
             CursorMode::Normal(o) => (*o, *o),
             CursorMode::Visual { start, end, .. } => (*start.min(end), *start.max(end)),
         })
     });
-    spans_sig.with_untracked(|spans| {
-        spans.iter().any(|s| {
-            let lo = s.start.max(sel_start);
-            let hi = s.end.min(sel_end);
-            lo < hi && s.link.is_some()
-        })
-    })
+    if start >= end {
+        return;
+    }
+    // Pre-fill with an existing link URL if the selection already overlaps one.
+    let existing = spans_sig.with_untracked(|spans| {
+        spans
+            .iter()
+            .find(|s| s.start.max(start) < s.end.min(end) && s.link.is_some())
+            .and_then(|s| s.link.clone())
+    });
+    link_edit.set(Some(crate::ui::link_bar::LinkEdit {
+        block_id,
+        start,
+        end,
+        url: existing.unwrap_or_default(),
+    }));
 }
 
 /// Read the current selection byte range from the editor and apply a style
