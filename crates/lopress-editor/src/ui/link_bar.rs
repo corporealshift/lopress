@@ -106,7 +106,13 @@ pub fn link_bar_view(
                                 }
                             }
                         })
-                        .style(|s| s.flex_grow(1.0).font_size(13.)),
+                        // `width_full()` is load-bearing: without an explicit
+                        // width, floem's text_input treats the width as `Auto`
+                        // and clips the *visible* text to a fixed char-count
+                        // target, so a pre-filled URL shows only its first ~20
+                        // chars even though the box fills the bar. A percentage
+                        // width makes the clip track the real (flex-grown) width.
+                        .style(|s| s.flex_grow(1.0).width_full().font_size(13.)),
                     button(label(|| "Apply".to_string()))
                         .on_event_stop(EventListener::PointerDown, move |_| apply()),
                     button(label(|| "Remove".to_string()))
