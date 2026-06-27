@@ -402,10 +402,19 @@ pub fn mount_block_editor(
     // *count* and `Memo` only notifies on a changed value, our own height
     // writes — which leave the count untouched — no longer re-trigger the
     // closure. `text_sig` covers reflow from edits that don't change width.
-    let visual_lines = create_memo(move |_| {
+    let visual_lines = create_memo(move |prev: Option<&u16>| {
         text_sig.with(|_| {});
         editor_sig.with_untracked(|ed| {
-            ed.viewport.get();
+            // The editor wraps text at its viewport width. During initial and
+            // relayout passes the viewport is momentarily 0-width, where every
+            // character wraps onto its own line and `last_vline` reports a bogus
+            // huge count — which would balloon the block to one-char-per-line
+            // height. Ignore readings taken at a collapsed width and keep the
+            // last good value; this memo re-runs (it reads `viewport`) once a
+            // real width is assigned, yielding the correct count.
+            if ed.viewport.get().width() < 1.0 {
+                return prev.copied().unwrap_or(1);
+            }
             u16::try_from(ed.last_vline().0 + 1).unwrap_or(u16::MAX)
         })
     });
