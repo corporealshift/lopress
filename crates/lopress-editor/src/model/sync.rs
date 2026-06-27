@@ -1,4 +1,4 @@
-use crate::model::style_span::{coalesce_spans, StyleSpan};
+use crate::model::style_span::{coalesce_spans, split_span_at, StyleSpan};
 use crate::model::types::{BlockBody, InlineRun, ListItem};
 use lapce_xi_rope::Rope;
 
@@ -158,10 +158,86 @@ pub fn rope_and_spans_to_runs(rope: &Rope, spans: &[StyleSpan]) -> Vec<InlineRun
     canonicalize_runs(&runs)
 }
 
+/// Apply (or clear) a link over the byte range `[start, end)` of an inline
+/// run list, returning the new canonical runs.
+///
+/// `url = Some(u)` sets the link on every character in the range; `url = None`
+/// removes any link there. A collapsed or inverted range (`start >= end`)
+/// returns the input unchanged (canonicalized). Offsets are byte offsets into
+/// the run list's flattened text, matching the editor's rope offsets.
+pub fn set_link_on_range(
+    runs: &[InlineRun],
+    start: usize,
+    end: usize,
+    url: Option<String>,
+) -> Vec<InlineRun> {
+    if start >= end {
+        return canonicalize_runs(runs);
+    }
+    let (rope, mut spans) = inline_runs_to_rope_and_spans(runs);
+    // Split the spans straddling the range boundaries so the link applies to
+    // exactly `[start, end)` and not to whole runs that only partly overlap.
+    split_span_at(&mut spans, end);
+    split_span_at(&mut spans, start);
+    for span in spans.iter_mut() {
+        if span.start >= start && span.end <= end {
+            span.link = url.clone();
+        }
+    }
+    coalesce_spans(&mut spans);
+    rope_and_spans_to_runs(&rope, &spans)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
     use super::*;
+
+    #[test]
+    fn set_link_on_range_links_subrange() {
+        // "see the docs": "see "=0..4, "the docs"=4..12
+        let runs = vec![InlineRun::plain("see the docs")];
+        let out = set_link_on_range(&runs, 4, 12, Some("https://x".into()));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].text, "see ");
+        assert_eq!(out[0].link, None);
+        assert_eq!(out[1].text, "the docs");
+        assert_eq!(out[1].link.as_deref(), Some("https://x"));
+    }
+
+    #[test]
+    fn set_link_on_range_removes_link() {
+        let runs = vec![InlineRun {
+            text: "the docs".into(),
+            link: Some("https://x".into()),
+            ..InlineRun::default()
+        }];
+        let out = set_link_on_range(&runs, 0, 8, None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "the docs");
+        assert_eq!(out[0].link, None);
+    }
+
+    #[test]
+    fn set_link_on_range_collapsed_is_noop() {
+        let runs = vec![InlineRun::plain("hello")];
+        let out = set_link_on_range(&runs, 3, 3, Some("https://x".into()));
+        assert_eq!(out, vec![InlineRun::plain("hello")]);
+    }
+
+    #[test]
+    fn set_link_on_range_preserves_other_styles() {
+        // A bold run; linking part of it keeps bold and adds the link.
+        let runs = vec![InlineRun {
+            text: "bold".into(),
+            bold: true,
+            ..InlineRun::default()
+        }];
+        let out = set_link_on_range(&runs, 0, 4, Some("https://x".into()));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].bold);
+        assert_eq!(out[0].link.as_deref(), Some("https://x"));
+    }
 
     #[test]
     fn rope_and_spans_to_runs_matches_string_roundtrip() {

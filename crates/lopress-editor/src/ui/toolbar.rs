@@ -12,19 +12,15 @@
 
 use crate::actions::BlockAction;
 use crate::model::descriptor;
-use crate::model::style_span::{InlineFlag, StyleSpan};
+use crate::model::style_span::InlineFlag;
 use crate::model::types::{BlockId, EditorBlock};
 use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
-use floem::event::{Event, EventListener};
-use floem::keyboard::{Key, NamedKey};
+use crate::ui::link_bar::LinkEdit;
+use floem::event::EventListener;
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{RwSignal, SignalGet, SignalWith};
 use floem::text::Weight;
-use floem::views::editor::Editor;
-use floem::views::{
-    button, dyn_container, empty, h_stack, h_stack_from_iter, label, text_input, v_stack,
-    Decorators,
-};
+use floem::views::{button, h_stack_from_iter, label, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
@@ -60,6 +56,7 @@ pub fn block_toolbar_for(
     current_attrs: serde_json::Map<String, serde_json::Value>,
     focus_pub: FocusPublisher,
     on_action: ActionSink,
+    link_edit: RwSignal<Option<LinkEdit>>,
 ) -> impl IntoView {
     let entries: Vec<(&'static str, fn() -> EditorBlock)> =
         descriptor::toolbar_menu_entries().to_vec();
@@ -84,7 +81,7 @@ pub fn block_toolbar_for(
                 // we skip the pre-commit — the body shape already matches what
                 // ChangeType expects.
                 if is_inline {
-                    if let Some((editor_sig, spans_sig, _, _)) =
+                    if let Some((editor_sig, spans_sig, _)) =
                         focus_pub.editor_and_spans.get_untracked()
                     {
                         let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
@@ -126,7 +123,7 @@ pub fn block_toolbar_for(
         ("</>", InlineFlag::Code),
         ("Link", InlineFlag::Link),
     ] {
-        buttons.push(toggle_button(lbl, flag, focus_pub).into_any());
+        buttons.push(toggle_button(lbl, flag, focus_pub, block_id, link_edit).into_any());
     }
 
     buttons.push(separator().into_any());
@@ -166,92 +163,22 @@ pub fn block_toolbar_for(
             .margin_bottom(6.)
     });
 
-    let on_action_for_url = on_action.clone();
-    let url_row = dyn_container(
-        move || {
-            focus_pub
-                .editor_and_spans
-                .get()
-                .and_then(|(_, _, _, url)| url.get())
-        },
-        move |maybe_url| match maybe_url {
-            None => empty().into_any(),
-            Some(current_url) => {
-                let url_buf: RwSignal<String> = RwSignal::new(current_url);
-                let on_action_commit = on_action_for_url.clone();
-                let commit = move || {
-                    if let Some((editor_sig, spans_sig, _, url_sig)) =
-                        focus_pub.editor_and_spans.get_untracked()
-                    {
-                        let url = url_buf.get_untracked();
-                        write_url_to_selection(editor_sig, spans_sig, &url);
-                        let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
-                        let spans = spans_sig.get_untracked();
-                        let rope = lapce_xi_rope::Rope::from(text.as_str());
-                        let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                        on_action_commit(BlockAction::EditBlockBody {
-                            block_id,
-                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
-                            built_in: true, // Built-in toolbar URL commit.
-                        });
-                        url_sig.set(None);
-                    }
-                };
-                let commit_for_key = commit.clone();
-                let on_action_remove = on_action_for_url.clone();
-                let remove = move || {
-                    if let Some((editor_sig, spans_sig, style_rev, url_sig)) =
-                        focus_pub.editor_and_spans.get_untracked()
-                    {
-                        crate::ui::blocks::inline_editor::apply_style_toggle(
-                            editor_sig,
-                            spans_sig,
-                            style_rev,
-                            InlineFlag::Link,
-                        );
-                        url_sig.set(None);
-                        let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
-                        let spans = spans_sig.get_untracked();
-                        let rope = lapce_xi_rope::Rope::from(text.as_str());
-                        let new_runs = crate::model::sync::rope_and_spans_to_runs(&rope, &spans);
-                        on_action_remove(BlockAction::EditBlockBody {
-                            block_id,
-                            new_body: Box::new(crate::model::types::BlockBody::Inline(new_runs)),
-                            built_in: true, // Built-in toolbar URL remove.
-                        });
-                    }
-                };
-                h_stack((
-                    text_input(url_buf)
-                        .placeholder("https://…")
-                        .on_event_stop(EventListener::KeyDown, move |e: &Event| {
-                            if let Event::KeyDown(k) = e {
-                                if matches!(k.key.logical_key, Key::Named(NamedKey::Enter)) {
-                                    commit_for_key();
-                                }
-                            }
-                        })
-                        .style(|s| s.flex_grow(1.0).font_size(13.)),
-                    button(label(|| "Remove".to_string())).on_event_stop(
-                        EventListener::PointerDown,
-                        move |_| {
-                            remove();
-                        },
-                    ),
-                ))
-                .style(|s| s.gap(4.).width_full().padding_horiz(6.).padding_vert(4.))
-                .into_any()
-            }
-        },
-    )
-    .style(|s| s.width_full());
-
-    v_stack((button_row, url_row)).style(|s| s.width_full())
+    // The URL entry UI is the pane-level `link_bar` (see `ui::link_bar`); it
+    // lives outside this rebuilding toolbar so it survives the focus-loss commit
+    // that clicking a toolbar button triggers. The "Link" button below only
+    // opens that bar with the captured selection.
+    button_row
 }
 
 /// One inline-flag toggle button. Active when the current editor selection
 /// has `flag` set on every overlapping style span; clicking toggles it.
-fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher) -> impl IntoView {
+fn toggle_button(
+    lbl: &'static str,
+    flag: InlineFlag,
+    focus_pub: FocusPublisher,
+    block_id: BlockId,
+    link_edit: RwSignal<Option<LinkEdit>>,
+) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
     let lbl_view = label(move || lbl_owned.clone()).style(move |s| {
@@ -266,12 +193,21 @@ fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher)
 
     button(lbl_view)
         .on_event_stop(EventListener::PointerDown, move |_| {
-            if let Some((editor_sig, spans_sig, style_rev, _)) =
+            if let Some((editor_sig, spans_sig, style_rev)) =
                 focus_pub.editor_and_spans.get_untracked()
             {
-                crate::ui::blocks::inline_editor::apply_style_toggle(
-                    editor_sig, spans_sig, style_rev, flag,
-                );
+                // The Link button opens the pane-level URL bar (which survives
+                // the focus-loss commit/rebuild this click triggers); other
+                // flags toggle the span style directly.
+                if flag == InlineFlag::Link {
+                    crate::ui::blocks::inline_editor::open_link_editor(
+                        editor_sig, spans_sig, block_id, link_edit,
+                    );
+                } else {
+                    crate::ui::blocks::inline_editor::apply_style_toggle(
+                        editor_sig, spans_sig, style_rev, flag,
+                    );
+                }
             }
         })
         .style(|s| s.padding_horiz(6.).padding_vert(2.))
@@ -282,7 +218,7 @@ fn toggle_button(lbl: &'static str, flag: InlineFlag, focus_pub: FocusPublisher)
 fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
     use floem::views::editor::core::cursor::CursorMode;
     // Reactive read so the label updates when selection or spans change
-    let Some((editor_sig, spans_sig, _, _)) = focus_pub.editor_and_spans.get() else {
+    let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get() else {
         return false;
     };
     let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
@@ -353,33 +289,6 @@ fn separator() -> impl IntoView {
             .margin_horiz(4.)
             .background(Color::rgb8(210, 210, 215))
     })
-}
-
-/// Write `url` into every link-bearing style span that overlaps the editor's
-/// current selection.
-fn write_url_to_selection(
-    editor_sig: RwSignal<Editor>,
-    spans_sig: RwSignal<Vec<StyleSpan>>,
-    url: &str,
-) {
-    use floem::views::editor::core::cursor::CursorMode;
-    let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
-        ed.cursor.with_untracked(|c| match &c.mode {
-            CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
-            CursorMode::Normal(o) => (*o, *o),
-            CursorMode::Visual { start, end, .. } => (*start.min(end), *start.max(end)),
-        })
-    });
-    let url_owned = url.to_owned();
-    spans_sig.update(|spans| {
-        for span in spans.iter_mut() {
-            let lo = span.start.max(sel_start);
-            let hi = span.end.min(sel_end);
-            if lo < hi && span.link.is_some() {
-                span.link = Some(url_owned.clone());
-            }
-        }
-    });
 }
 
 #[cfg(test)]

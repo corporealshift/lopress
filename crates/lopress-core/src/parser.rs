@@ -25,6 +25,22 @@ pub fn render_markdown(markdown: &str) -> String {
     html_output
 }
 
+/// Render an inline markdown fragment to HTML *without* the enclosing block
+/// `<p>` wrapper. Block body text (paragraph/heading) is stored as inline
+/// markdown source; the caller's own HTML element (`<p>`, `<h2>`, …) supplies
+/// the wrapper, so the paragraph tags pulldown would emit are filtered out.
+pub fn render_inline_markdown(markdown: &str) -> String {
+    let parser = Parser::new_ext(markdown, Options::ENABLE_TABLES).filter(|ev| {
+        !matches!(
+            ev,
+            Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph)
+        )
+    });
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
+}
+
 fn parse_body(body: &str) -> Result<Vec<Block>, ParseError> {
     let delims = delimiter::scan(body)?;
     if delims.is_empty() {
@@ -299,14 +315,8 @@ fn parse_item(parser: &mut Parser<'_>) -> Result<Block, ParseError> {
             Event::SoftBreak | Event::HardBreak => inline.push('\n'),
             Event::Start(Tag::Emphasis) | Event::End(TagEnd::Emphasis) => inline.push('*'),
             Event::Start(Tag::Strong) | Event::End(TagEnd::Strong) => inline.push_str("**"),
-            Event::Start(Tag::Link { .. }) => {
-                for inner in parser.by_ref() {
-                    match inner {
-                        Event::Text(t) => inline.push_str(&t),
-                        Event::End(TagEnd::Link) => break,
-                        _ => {}
-                    }
-                }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                push_link(&mut inline, &dest_url, parser);
             }
             Event::Start(Tag::Image { .. }) => {
                 // Consistent with `consume_inline`: an image mixed with text
@@ -417,14 +427,8 @@ fn consume_table_cell(parser: &mut Parser<'_>) -> String {
             }
             Event::Start(Tag::Emphasis) | Event::End(TagEnd::Emphasis) => text.push('*'),
             Event::Start(Tag::Strong) | Event::End(TagEnd::Strong) => text.push_str("**"),
-            Event::Start(Tag::Link { .. }) => {
-                for inner in parser.by_ref() {
-                    match inner {
-                        Event::Text(t) => text.push_str(&t),
-                        Event::End(TagEnd::Link) => break,
-                        _ => {}
-                    }
-                }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                push_link(&mut text, &dest_url, parser);
             }
             Event::End(TagEnd::TableCell) => break,
             _ => {}
@@ -446,6 +450,26 @@ fn flush_item_paragraph(children: &mut Vec<Block>, inline: &mut String) {
             text: Some(std::mem::take(inline)),
         });
     }
+}
+
+/// Consume a link's inner events up to `TagEnd::Link`, appending it to `out`
+/// as markdown `[text](dest)`. Only the link's visible text is captured; any
+/// nested inline styling inside the link text is flattened to plain text
+/// (consistent with how the surrounding inline conversions treat link text).
+fn push_link(out: &mut String, dest_url: &str, parser: &mut Parser<'_>) {
+    let mut inner = String::new();
+    for ev in parser.by_ref() {
+        match ev {
+            Event::Text(t) => inner.push_str(&t),
+            Event::End(TagEnd::Link) => break,
+            _ => {}
+        }
+    }
+    out.push('[');
+    out.push_str(&inner);
+    out.push_str("](");
+    out.push_str(dest_url);
+    out.push(')');
 }
 
 fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block>) {
@@ -495,15 +519,9 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
                     text: None,
                 });
             }
-            Event::Start(Tag::Link { .. }) => {
+            Event::Start(Tag::Link { dest_url, .. }) => {
                 other_text = true;
-                for inner in parser.by_ref() {
-                    match inner {
-                        Event::Text(t) => text.push_str(&t),
-                        Event::End(TagEnd::Link) => break,
-                        _ => {}
-                    }
-                }
+                push_link(&mut text, &dest_url, parser);
             }
             Event::Start(Tag::Emphasis) => text.push('*'),
             Event::End(TagEnd::Emphasis) => text.push('*'),
@@ -543,6 +561,29 @@ mod tests {
         assert_eq!(d.blocks[0].r#type, "heading");
         assert_eq!(d.blocks[0].attrs, json!({"level": 2}));
         assert_eq!(d.blocks[0].text.as_deref(), Some("H2 heading"));
+    }
+
+    #[test]
+    fn paragraph_link_preserves_url() {
+        let d = parse("[take a look!](https://example.com)\n").unwrap();
+        assert_eq!(d.blocks.len(), 1);
+        assert_eq!(d.blocks[0].r#type, "paragraph");
+        assert_eq!(
+            d.blocks[0].text.as_deref(),
+            Some("[take a look!](https://example.com)")
+        );
+    }
+
+    #[test]
+    fn list_item_link_preserves_url() {
+        let d = parse("- see [docs](https://example.com)\n").unwrap();
+        let list = &d.blocks[0];
+        assert_eq!(list.r#type, "list");
+        let para = &list.children[0].children[0];
+        assert_eq!(
+            para.text.as_deref(),
+            Some("see [docs](https://example.com)")
+        );
     }
 
     #[test]

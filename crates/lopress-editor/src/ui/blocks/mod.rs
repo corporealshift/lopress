@@ -87,6 +87,7 @@ fn wrap_block(
     // Capture env fields into owned/copy types so the closures outlive `env`.
     let focus_block = env.focus_pub.block;
     let focus_pub = env.focus_pub;
+    let link_edit = env.link_edit;
     let on_action = env.on_action.clone();
 
     // Hover gutter with the drag handle, left of the body.
@@ -144,6 +145,7 @@ fn wrap_block(
                         block_attrs.clone(),
                         focus_pub,
                         on_action.clone(),
+                        link_edit,
                     )
                     .into_any()
                 } else {

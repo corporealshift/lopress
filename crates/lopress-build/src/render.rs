@@ -52,12 +52,12 @@ fn write_block(
 ) -> Result<(), BuildError> {
     match b.r#type.as_str() {
         "paragraph" => {
-            let text = escape(b.text.as_deref().unwrap_or(""));
+            let text = lopress_core::render_inline_markdown(b.text.as_deref().unwrap_or(""));
             let _ = writeln!(out, "<p>{text}</p>");
         }
         "heading" => {
             let level = b.attrs.get("level").and_then(|v| v.as_u64()).unwrap_or(1);
-            let text = escape(b.text.as_deref().unwrap_or(""));
+            let text = lopress_core::render_inline_markdown(b.text.as_deref().unwrap_or(""));
             let _ = writeln!(out, "<h{level}>{text}</h{level}>");
         }
         "quote" => {
@@ -524,6 +524,44 @@ mod tests {
         let tera = Tera::default();
         let html = render_body(&doc, &empty_registry(), &tera, &ImageIndex::default()).unwrap();
         assert_eq!(html, "<h2>Hi</h2>\n<p>body</p>\n");
+    }
+
+    #[test]
+    fn paragraph_renders_inline_link() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block::paragraph("see [the docs](https://example.com)")],
+        };
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            html, "<p>see <a href=\"https://example.com\">the docs</a></p>\n",
+            "got: {html}"
+        );
+    }
+
+    #[test]
+    fn heading_renders_inline_emphasis() {
+        let doc = Document {
+            front_matter: FrontMatter::default(),
+            blocks: vec![Block::heading(2, "a **bold** title")],
+        };
+        let html = render_body(
+            &doc,
+            &empty_registry(),
+            &Tera::default(),
+            &ImageIndex::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            html, "<h2>a <strong>bold</strong> title</h2>\n",
+            "got: {html}"
+        );
     }
 
     #[test]
