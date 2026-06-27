@@ -125,8 +125,6 @@ pub fn render_all(
         title: workspace.config.site.title.clone(),
         base_url: workspace.config.site.base_url.clone(),
         nav: workspace
-            .config
-            .site
             .nav
             .items
             .iter()

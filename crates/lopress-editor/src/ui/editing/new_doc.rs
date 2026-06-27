@@ -67,6 +67,7 @@ pub fn make_new_doc_action(
             .unwrap_or_else(|| DocumentRef {
                 path: path.clone(),
                 title: kind.default_title().to_string(),
+                slug: String::new(),
                 is_draft: true,
                 has_parse_error: false,
             });

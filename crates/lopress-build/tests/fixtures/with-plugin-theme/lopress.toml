@@ -2,6 +2,3 @@
 title = "Plugin Theme Site"
 base_url = "https://example.com"
 theme = "custom-theme"
-
-[site.nav]
-items = [{ label = "Home", href = "/" }, { label = "About", href = "/about/" }]

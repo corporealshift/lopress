@@ -1,6 +1,3 @@
 [site]
 title = "Test Site"
 base_url = "https://example.com"
-
-[site.nav]
-items = [{ label = "Home", href = "/" }, { label = "About", href = "/about/" }]

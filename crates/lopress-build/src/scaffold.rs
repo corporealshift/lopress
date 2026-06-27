@@ -30,14 +30,14 @@ pub fn new_site(dir: &Path, title: &str, base_url: &str) -> Result<(), BuildErro
             r#"[site]
 title = "{title}"
 base_url = "{base_url}"
-
-[site.nav]
-items = [
-  {{ label = "Home", href = "/" }},
-  {{ label = "About", href = "/about/" }},
-]
 "#
         ),
+    )?;
+
+    // Write default nav to nav.toml.
+    std::fs::write(
+        dir.join("nav.toml"),
+        "items = [\n  { label = \"Home\", href = \"/\" },\n  { label = \"About\", href = \"/about/\" },\n]\n",
     )?;
 
     for sub in ["src/posts", "src/pages", "src/images", "plugins"] {

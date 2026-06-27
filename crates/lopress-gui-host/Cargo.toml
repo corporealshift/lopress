@@ -11,6 +11,7 @@ lopress-watch = { path = "../lopress-watch" }
 lopress-serve = { path = "../lopress-serve" }
 lopress-core = { path = "../lopress-core" }
 thiserror = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

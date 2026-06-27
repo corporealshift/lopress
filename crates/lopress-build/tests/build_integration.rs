@@ -337,3 +337,84 @@ fn plugin_theme_builds_regardless_of_template_registration_order() {
     assert!(www.join("about/index.html").exists());
     assert!(www.join("404.html").exists());
 }
+
+#[test]
+fn migration_warning_appears_when_site_nav_present() {
+    let (_tmp, root) = copy_fixture("minimal");
+    // The minimal fixture uses nav.toml; add a leftover [site.nav] block to
+    // lopress.toml to trigger the migration warning.
+    let toml_path = root.join("lopress.toml");
+    let src = fs::read_to_string(&toml_path).unwrap();
+    fs::write(
+        &toml_path,
+        format!("{src}\n\n[site.nav]\nitems = [{{ label = \"Old\", href = \"/old/\" }}]\n"),
+    )
+    .unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(!report.warnings.is_empty(), "expected migration warning");
+    assert!(
+        report.warnings[0].contains("[site.nav]"),
+        "warning should mention [site.nav]"
+    );
+}
+
+#[test]
+fn nav_toml_change_triggers_full_rebuild() {
+    let (_tmp, root) = copy_fixture("minimal");
+    let r1 = build(&root).unwrap();
+    assert!(r1.failures.is_empty());
+    assert!(r1.pages_rendered >= 1);
+
+    // Change nav.toml — the config hash must change and force a full rebuild.
+    let nav_path = root.join("nav.toml");
+    let src = fs::read_to_string(&nav_path).unwrap();
+    fs::write(&nav_path, format!("{src}\n")).unwrap();
+
+    let r2 = build(&root).unwrap();
+    assert!(r2.failures.is_empty());
+    assert_eq!(
+        r2.pages_rendered, r1.pages_rendered,
+        "nav.toml change should trigger a full rebuild"
+    );
+}
+
+#[test]
+fn nav_toml_change_lands_in_rendered_output() {
+    let (_tmp, root) = copy_fixture("minimal");
+    build(&root).unwrap();
+
+    // Replace nav with a single new link, rebuild, and confirm it renders.
+    fs::write(
+        root.join("nav.toml"),
+        "items = [{ label = \"NewLink\", href = \"/new/\" }]\n",
+    )
+    .unwrap();
+    let r2 = build(&root).unwrap();
+    assert!(r2.failures.is_empty());
+
+    // Tera HTML-escapes the href (`/` → `&#x2F;`), so assert on the unescaped
+    // label text the theme places between the anchor tags.
+    let index = fs::read_to_string(root.join("www/index.html")).unwrap();
+    assert!(
+        index.contains(">NewLink</a>"),
+        "rebuilt pages should render the new nav link, got:\n{index}"
+    );
+}
+
+#[test]
+fn empty_nav_builds_without_nav_links() {
+    let (_tmp, root) = copy_fixture("minimal");
+    fs::write(root.join("nav.toml"), "items = []\n").unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(report.failures.is_empty());
+
+    // The default theme renders nav items as `<a href="...">label</a>`; with
+    // an empty nav, the fixture's Home/About labels must not appear as links.
+    let index = fs::read_to_string(root.join("www/index.html")).unwrap();
+    assert!(
+        !index.contains(">About</a>") && !index.contains(">Home</a>"),
+        "index should not render nav links when nav is empty, got:\n{index}"
+    );
+}

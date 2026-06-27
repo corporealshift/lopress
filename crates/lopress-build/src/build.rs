@@ -17,10 +17,16 @@ pub struct BuildReport {
     pub pages_rendered: usize,
     pub pages_skipped: usize,
     pub failures: Vec<PageFailure>,
+    pub warnings: Vec<String>,
 }
 
 pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let ws = Workspace::load(workspace)?;
+
+    // Log migration warnings to stderr.
+    for warning in &ws.warnings {
+        eprintln!("warning: {warning}");
+    }
 
     // Plugins
     let registry = load_dir(
@@ -155,8 +161,6 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         title: ws.config.site.title.clone(),
         base_url: ws.config.site.base_url.clone(),
         nav: ws
-            .config
-            .site
             .nav
             .items
             .iter()
@@ -249,6 +253,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         pages_rendered: stats.pages_rendered,
         pages_skipped: stats.pages_skipped,
         failures,
+        warnings: ws.warnings,
     })
 }
 
@@ -335,7 +340,33 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), BuildError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::build;
     use lopress_plugin::{BlockDecl, LoadedPlugin, PluginManifest, PluginRegistry};
+    use tempfile::TempDir;
+
+    #[test]
+    fn build_report_contains_warnings_from_workspace() {
+        let d = TempDir::new().unwrap();
+        // Scaffold a site with [site.nav] in lopress.toml (triggers warning).
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            r#"[site]
+title = "W"
+base_url = "https://example.com"
+
+[site.nav]
+items = [{ label = "Old", href = "/old/" }]
+"#,
+        )
+        .unwrap();
+        for sub in ["src/posts", "src/pages", "src/images", "plugins"] {
+            std::fs::create_dir_all(d.path().join(sub)).unwrap();
+        }
+
+        let report = build(d.path()).unwrap();
+        assert!(!report.warnings.is_empty());
+        assert!(report.warnings[0].contains("[site.nav]"));
+    }
 
     #[test]
     fn markdown_template_field_is_accessible() {

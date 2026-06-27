@@ -104,8 +104,18 @@ pub fn hash_many(items: &mut [(String, Vec<u8>)]) -> String {
 }
 
 pub fn hash_config(workspace: &Workspace) -> Result<String, BuildError> {
-    let bytes = std::fs::read(workspace.root.join("lopress.toml"))?;
-    Ok(hash_bytes(&bytes))
+    let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+
+    let lpress_bytes = std::fs::read(workspace.root.join("lopress.toml"))?;
+    items.push(("lopress.toml".into(), lpress_bytes));
+
+    let nav_path = workspace.root.join("nav.toml");
+    if nav_path.exists() {
+        let nav_bytes = std::fs::read(&nav_path)?;
+        items.push(("nav.toml".into(), nav_bytes));
+    }
+
+    Ok(hash_many(&mut items))
 }
 
 /// Hash of every template in the resolved theme + the theme CSS.
@@ -278,5 +288,49 @@ mod tests {
         .unwrap();
         let ws2 = crate::site::Workspace::load(d.path()).unwrap();
         assert_ne!(h1, hash_config(&ws2).unwrap());
+    }
+
+    #[test]
+    fn hash_config_changes_with_nav_toml() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            "[site]\ntitle = \"A\"\nbase_url = \"https://a\"\n",
+        )
+        .unwrap();
+        let ws = crate::site::Workspace::load(d.path()).unwrap();
+        let h1 = hash_config(&ws).unwrap();
+
+        // Now write nav.toml — hash should change.
+        crate::write_nav(
+            d.path(),
+            &[crate::NavItem {
+                label: "Home".into(),
+                href: "/".into(),
+            }],
+        )
+        .unwrap();
+        let ws2 = crate::site::Workspace::load(d.path()).unwrap();
+        let h2 = hash_config(&ws2).unwrap();
+        assert_ne!(h1, h2, "hash should change when nav.toml is added");
+
+        // Changing nav.toml content changes the hash.
+        crate::write_nav(
+            d.path(),
+            &[crate::NavItem {
+                label: "About".into(),
+                href: "/about/".into(),
+            }],
+        )
+        .unwrap();
+        let ws3 = crate::site::Workspace::load(d.path()).unwrap();
+        let h3 = hash_config(&ws3).unwrap();
+        assert_ne!(h2, h3, "hash should change when nav.toml content changes");
+
+        // Deleting nav.toml changes the hash back.
+        std::fs::remove_file(d.path().join("nav.toml")).unwrap();
+        let ws4 = crate::site::Workspace::load(d.path()).unwrap();
+        let h4 = hash_config(&ws4).unwrap();
+        assert_ne!(h3, h4, "hash should change when nav.toml is deleted");
     }
 }

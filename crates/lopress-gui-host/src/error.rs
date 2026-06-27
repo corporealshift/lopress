@@ -24,4 +24,6 @@ pub enum LoadError {
 pub enum SaveError {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error("build: {0}")]
+    Build(#[from] lopress_build::BuildError),
 }

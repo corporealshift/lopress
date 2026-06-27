@@ -2792,6 +2792,7 @@ dependencies = [
  "lopress-watch",
  "tempfile",
  "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]

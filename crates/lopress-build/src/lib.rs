@@ -29,4 +29,4 @@ pub use error::{BuildError, PageFailure};
 pub use image_index::ImageIndex;
 pub use pages::{discover, post_summaries, render_all, DiscoveredPost, RenderStats};
 pub use render::render_body;
-pub use site::{SiteConfig, Workspace};
+pub use site::{write_nav, Nav, NavItem, SiteConfig, Workspace};

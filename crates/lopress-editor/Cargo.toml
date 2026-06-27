@@ -8,6 +8,7 @@ rust-version.workspace = true
 lopress-gui-host = { path = "../lopress-gui-host" }
 lopress-core = { path = "../lopress-core" }
 lopress-plugin = { path = "../lopress-plugin" }
+lopress-build = { path = "../lopress-build" }
 floem = { workspace = true }
 lapce-xi-rope = { workspace = true }
 pulldown-cmark = { workspace = true }

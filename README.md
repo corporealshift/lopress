@@ -18,6 +18,7 @@ Point lopress at a directory. Write posts in a block editor. Save. The directory
 ```
 <workspace>/
   lopress.toml       # site config: title, base_url, theme, enabled plugins
+  nav.toml           # navigation links (label + href); edited in the GUI
   src/
     posts/           # .md files, one per blog post
     pages/           # .md files for standalone pages

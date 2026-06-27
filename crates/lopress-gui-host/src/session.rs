@@ -16,12 +16,14 @@ pub struct WorkspaceSummary {
     pub name: String,
     pub posts: Vec<DocumentRef>,
     pub pages: Vec<DocumentRef>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DocumentRef {
     pub path: PathBuf,
     pub title: String,
+    pub slug: String,
     pub is_draft: bool,
     pub has_parse_error: bool,
 }
@@ -368,16 +370,64 @@ impl Session {
             Some(format!("{url}/{slug}/"))
         }
     }
+
+    /// Current nav items, read fresh from nav.toml on disk so repeated
+    /// edits in one session reflect the latest saved state. Empty when
+    /// the file doesn't exist or doesn't parse.
+    pub fn nav_items(&self) -> Vec<lopress_build::NavItem> {
+        let nav_path = self.workspace.root.join("nav.toml");
+        let Ok(src) = std::fs::read_to_string(&nav_path) else {
+            return Vec::new();
+        };
+        toml::from_str::<lopress_build::Nav>(&src)
+            .map(|nav| nav.items)
+            .unwrap_or_default()
+    }
+
+    /// Write nav items to nav.toml, then trigger a rebuild + SSE reload.
+    ///
+    /// # Errors
+    /// Returns an error if nav.toml can't be serialized or written.
+    pub fn update_nav(&self, items: Vec<lopress_build::NavItem>) -> Result<(), SaveError> {
+        lopress_build::write_nav(&self.workspace.root, &items)?;
+        self.rebuild();
+        Ok(())
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn scan_workspace(ws: &Workspace) -> WorkspaceSummary {
+    let posts = scan_dir(&ws.posts_dir());
+    let pages = scan_dir(&ws.pages_dir());
+
+    // Collect tags from post front-matter (sorted, de-duplicated).
+    let mut tags_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(ws.posts_dir()).ok().into_iter().flatten() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        if let Ok(src) = std::fs::read_to_string(&path) {
+            if let Ok(doc) = parse(&src) {
+                for tag in &doc.front_matter.tags {
+                    tags_set.insert(tag.clone());
+                }
+            }
+        }
+    }
+    let tags: Vec<String> = tags_set.into_iter().collect();
+
     WorkspaceSummary {
         root: ws.root.clone(),
         name: ws.config.site.title.clone(),
-        posts: scan_dir(&ws.posts_dir()),
-        pages: scan_dir(&ws.pages_dir()),
+        posts,
+        pages,
+        tags,
     }
 }
 
@@ -391,14 +441,24 @@ fn scan_dir(dir: &Path) -> Vec<DocumentRef> {
         .map(|e| {
             let path = e.path();
             match std::fs::read_to_string(&path).as_deref().map(parse) {
-                Ok(Ok(doc)) => DocumentRef {
-                    title: doc.front_matter.title.unwrap_or_else(|| stem(&path)),
-                    is_draft: doc.front_matter.draft,
-                    has_parse_error: false,
-                    path,
-                },
+                Ok(Ok(doc)) => {
+                    let slug = doc.front_matter.slug.unwrap_or_else(|| {
+                        path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("untitled")
+                            .to_string()
+                    });
+                    DocumentRef {
+                        title: doc.front_matter.title.unwrap_or_else(|| slug.clone()),
+                        slug,
+                        is_draft: doc.front_matter.draft,
+                        has_parse_error: false,
+                        path,
+                    }
+                }
                 _ => DocumentRef {
                     title: stem(&path),
+                    slug: stem(&path),
                     is_draft: false,
                     has_parse_error: true,
                     path,

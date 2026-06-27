@@ -70,7 +70,8 @@ A lopress workspace is a directory containing:
 
 ```
 <workspace>/
-  lopress.toml          # Site config: title, base_url, theme, plugins, nav
+  lopress.toml          # Site config: title, base_url, theme, plugins
+  nav.toml              # Navigation links (label + href); editable in the GUI
   src/
     posts/              # .md files — one per blog post
     pages/              # .md files — standalone pages
@@ -79,7 +80,12 @@ A lopress workspace is a directory containing:
   www/                  # Generated static site (gitignore-able)
 ```
 
-The `lopress.toml` is the workspace root config. `src/posts/` and `src/pages/` contain the content. `plugins/` holds user plugins. `www/` is the output directory.
+The `lopress.toml` is the workspace root config. `nav.toml` holds the site
+navigation as an `items` array of `{ label, href }` entries — it is the only
+nav source (a legacy `[site.nav]` block in `lopress.toml` is ignored, with a
+build warning) and is edited from the editor's "Site settings" panel.
+`src/posts/` and `src/pages/` contain the content. `plugins/` holds user
+plugins. `www/` is the output directory.
 
 ---
 

@@ -155,6 +155,81 @@ fn import_image_copies_file_into_src_images() {
 }
 
 #[test]
+fn workspace_summary_has_slugs_and_tags() {
+    let dir = make_workspace();
+    let p = dir.path();
+    // Page with explicit front-matter slug.
+    fs::write(
+        p.join("src/pages/about.md"),
+        "---\ntitle: About Me\nslug: about\n---\n\nHi.\n",
+    )
+    .unwrap();
+    // Page without slug — the file stem is the slug.
+    fs::write(
+        p.join("src/pages/contact.md"),
+        "---\ntitle: Contact\n---\n\nHi.\n",
+    )
+    .unwrap();
+    // Posts with overlapping tags to prove sort + de-dup.
+    fs::write(
+        p.join("src/posts/tagged.md"),
+        "---\ntitle: Tagged\ndate: 2026-04-21\ntags: [web, rust]\n---\n\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        p.join("src/posts/tagged2.md"),
+        "---\ntitle: Tagged Two\ndate: 2026-04-22\ntags: [rust]\n---\n\nBody.\n",
+    )
+    .unwrap();
+
+    let session = Session::open(p).unwrap();
+    let ws = session.workspace();
+
+    let about = ws.pages.iter().find(|d| d.title == "About Me").unwrap();
+    assert_eq!(about.slug, "about", "front-matter slug wins");
+    let contact = ws.pages.iter().find(|d| d.title == "Contact").unwrap();
+    assert_eq!(contact.slug, "contact", "file stem is the fallback slug");
+    assert_eq!(ws.tags, vec!["rust".to_string(), "web".to_string()]);
+}
+
+#[test]
+fn nav_items_reads_from_disk() {
+    let dir = make_workspace();
+    lopress_build::write_nav(
+        dir.path(),
+        &[lopress_build::NavItem {
+            label: "Home".into(),
+            href: "/".into(),
+        }],
+    )
+    .unwrap();
+
+    let session = Session::open(dir.path()).unwrap();
+    let items = session.nav_items();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "Home");
+}
+
+#[test]
+fn update_nav_writes_nav_toml() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+
+    session
+        .update_nav(vec![lopress_build::NavItem {
+            label: "New".into(),
+            href: "/new/".into(),
+        }])
+        .unwrap();
+
+    // The file was written and nav_items reflects it.
+    assert!(dir.path().join("nav.toml").exists());
+    let items = session.nav_items();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "New");
+}
+
+#[test]
 fn import_image_disambiguates_collisions() {
     let dir = make_workspace();
     let session = Session::open(dir.path()).unwrap();
