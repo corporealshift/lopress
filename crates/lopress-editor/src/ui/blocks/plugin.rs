@@ -243,11 +243,19 @@ fn attr_textarea(
     let name_for_commit = name.clone();
     let attrs_for_commit = attrs_sig;
     let on_action_for_commit = on_action;
-    let rope_for_read = rope.clone();
 
-    text_editor(rope)
+    // Read the LIVE editor document on commit, not a clone of the initial
+    // rope. `text_editor` builds its own internal `TextDocument` and edits
+    // that; the rope we passed in is never mutated, so a clone of it would
+    // always serialize the pre-edit text (empty for a fresh block) and drop
+    // whatever the user typed. Mirrors the code-block editor, which reads
+    // `editor.doc().text()`.
+    let text_ed = text_editor(rope);
+    let editor = text_ed.editor().clone();
+
+    text_ed
         .on_event(floem::event::EventListener::FocusLost, move |_| {
-            let s = rope_for_read.to_string();
+            let s = String::from(&editor.doc().text());
             attrs_for_commit.update(|m| {
                 m.insert(name_for_commit.clone(), Value::String(s));
             });
