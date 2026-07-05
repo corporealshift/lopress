@@ -119,8 +119,12 @@ pub struct SiteCtx {
 `layout.html` emits the conditional link tag:
 
 ```html
-{% if site.favicon %}<link rel="icon" href="{{ site.favicon }}">{% endif %}
+{% if site.favicon %}<link rel="icon" href="{{ site.favicon | safe }}">{% endif %}
 ```
+
+(`| safe` because Tera entity-escapes `/` on `.html` templates; the value is
+program-generated — one of three fixed strings — so this is not an injection
+surface.)
 
 This is placed in `<head>`, after the existing `<link rel="stylesheet">` line
 and before `{% block extra_head %}`.
