@@ -23,9 +23,28 @@ pub struct BuildReport {
 pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let ws = Workspace::load(workspace)?;
 
-    // Log migration warnings to stderr.
-    for warning in &ws.warnings {
+    // Log migration warnings to stderr; collected into the report below.
+    let mut warnings = ws.warnings.clone();
+    for warning in &warnings {
         eprintln!("warning: {warning}");
+    }
+
+    // Favicon sanity: more than one src/favicon.* is almost certainly a
+    // hand-editing mistake — say which one the priority order picked.
+    let favicon_variants: Vec<String> = ["svg", "png", "ico"]
+        .iter()
+        .map(|ext| format!("favicon.{ext}"))
+        .filter(|name| ws.src_dir().join(name).exists())
+        .collect();
+    if favicon_variants.len() > 1 {
+        if let Some(used) = favicon_variants.first() {
+            let msg = format!(
+                "multiple favicon files in src/ ({}); using {used}",
+                favicon_variants.join(", ")
+            );
+            eprintln!("warning: {msg}");
+            warnings.push(msg);
+        }
     }
 
     // Plugins
@@ -232,6 +251,13 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
                 copy_dir(&assets, &target)?;
             }
         }
+
+        // Favicon: copied as-is to the www root. No stale cleanup needed —
+        // any favicon change forces a full rebuild, which wiped www/ above.
+        if let Some((src_path, web_path)) = ws.favicon() {
+            let target = ws.www_dir().join(web_path.trim_start_matches('/'));
+            std::fs::copy(&src_path, &target)?;
+        }
     }
 
     // Update and persist cache
@@ -256,7 +282,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         pages_rendered: stats.pages_rendered,
         pages_skipped: stats.pages_skipped,
         failures,
-        warnings: ws.warnings,
+        warnings,
     })
 }
 
@@ -369,6 +395,62 @@ items = [{ label = "Old", href = "/old/" }]
         let report = build(d.path()).unwrap();
         assert!(!report.warnings.is_empty());
         assert!(report.warnings[0].contains("[site.nav]"));
+    }
+
+    fn favicon_site(d: &TempDir) {
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            r#"[site]
+title = "S"
+base_url = "https://example.com"
+"#,
+        )
+        .unwrap();
+        for sub in ["src/posts", "src/pages", "src/images", "plugins"] {
+            std::fs::create_dir_all(d.path().join(sub)).unwrap();
+        }
+    }
+
+    #[test]
+    fn favicon_is_copied_to_www_on_full_build() {
+        let d = TempDir::new().unwrap();
+        favicon_site(&d);
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+
+        build(d.path()).unwrap();
+        assert!(d.path().join("www/favicon.png").exists());
+    }
+
+    #[test]
+    fn removed_favicon_disappears_from_www_on_rebuild() {
+        let d = TempDir::new().unwrap();
+        favicon_site(&d);
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+        build(d.path()).unwrap();
+        assert!(d.path().join("www/favicon.png").exists());
+
+        // Removing the favicon flips favicon_hash → force_full → www/ wiped.
+        std::fs::remove_file(d.path().join("src/favicon.png")).unwrap();
+        build(d.path()).unwrap();
+        assert!(!d.path().join("www/favicon.png").exists());
+    }
+
+    #[test]
+    fn duplicate_favicons_emit_warning() {
+        let d = TempDir::new().unwrap();
+        favicon_site(&d);
+        std::fs::write(d.path().join("src/favicon.svg"), b"<svg/>").unwrap();
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+
+        let report = build(d.path()).unwrap();
+        assert!(
+            report.warnings.iter().any(|w| w.contains("favicon")),
+            "expected a duplicate-favicon warning, got: {:?}",
+            report.warnings
+        );
+        // Priority order: svg wins.
+        assert!(d.path().join("www/favicon.svg").exists());
+        assert!(!d.path().join("www/favicon.png").exists());
     }
 
     #[test]
