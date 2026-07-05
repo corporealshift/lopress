@@ -139,6 +139,21 @@ impl Workspace {
     pub fn cache_path(&self) -> PathBuf {
         self.www_dir().join(".lopress-cache.json")
     }
+
+    /// Find the favicon in `src/` by priority order (svg → png → ico).
+    ///
+    /// Returns `(source_path, web_path)` — e.g. `(…/src/favicon.png,
+    /// "/favicon.png")` — or `None` when no favicon file exists.
+    pub fn favicon(&self) -> Option<(PathBuf, String)> {
+        let src = self.src_dir();
+        for ext in ["svg", "png", "ico"] {
+            let path = src.join(format!("favicon.{ext}"));
+            if path.exists() {
+                return Some((path, format!("/favicon.{ext}")));
+            }
+        }
+        None
+    }
 }
 
 /// Serialize `items` to TOML and write atomically to `nav.toml` at `root`.
@@ -351,5 +366,63 @@ items = [{ label = "Old", href = "/old/" }]
         // Warning still fires because [site.nav] is present in lopress.toml.
         assert!(!ws.warnings.is_empty());
         assert!(ws.warnings[0].contains("[site.nav]"));
+    }
+
+    fn favicon_workspace(d: &TempDir) -> Workspace {
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            "[site]\ntitle = \"A\"\nbase_url = \"https://a\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.path().join("src")).unwrap();
+        Workspace::load(d.path()).unwrap()
+    }
+
+    #[test]
+    fn favicon_returns_svg_when_present() {
+        let d = TempDir::new().unwrap();
+        let ws = favicon_workspace(&d);
+        std::fs::write(d.path().join("src/favicon.svg"), b"<svg/>").unwrap();
+        let (path, web) = ws.favicon().unwrap();
+        assert!(path.ends_with("favicon.svg"));
+        assert_eq!(web, "/favicon.svg");
+    }
+
+    #[test]
+    fn favicon_prefers_svg_over_png() {
+        let d = TempDir::new().unwrap();
+        let ws = favicon_workspace(&d);
+        std::fs::write(d.path().join("src/favicon.svg"), b"<svg/>").unwrap();
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+        let (path, web) = ws.favicon().unwrap();
+        assert!(path.ends_with("favicon.svg"));
+        assert_eq!(web, "/favicon.svg");
+    }
+
+    #[test]
+    fn favicon_falls_back_to_png() {
+        let d = TempDir::new().unwrap();
+        let ws = favicon_workspace(&d);
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+        let (path, web) = ws.favicon().unwrap();
+        assert!(path.ends_with("favicon.png"));
+        assert_eq!(web, "/favicon.png");
+    }
+
+    #[test]
+    fn favicon_falls_back_to_ico() {
+        let d = TempDir::new().unwrap();
+        let ws = favicon_workspace(&d);
+        std::fs::write(d.path().join("src/favicon.ico"), b"ICO").unwrap();
+        let (path, web) = ws.favicon().unwrap();
+        assert!(path.ends_with("favicon.ico"));
+        assert_eq!(web, "/favicon.ico");
+    }
+
+    #[test]
+    fn favicon_returns_none_when_no_file_exists() {
+        let d = TempDir::new().unwrap();
+        let ws = favicon_workspace(&d);
+        assert!(ws.favicon().is_none());
     }
 }
