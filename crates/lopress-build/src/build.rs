@@ -46,10 +46,12 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     let cfg_hash = cache::hash_config(&ws)?;
     let theme_hash = cache::hash_theme(&theme)?;
     let plugins_hash = cache::hash_plugins(&registry)?;
+    let favicon_hash = cache::hash_favicon(&ws)?;
 
     let force_full = build_cache.config_hash != cfg_hash
         || build_cache.theme_hash != theme_hash
-        || build_cache.plugins_hash != plugins_hash;
+        || build_cache.plugins_hash != plugins_hash
+        || build_cache.favicon_hash != favicon_hash;
 
     // On a forced full rebuild: wipe page cache entries and clear www/
     if force_full {
@@ -236,6 +238,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     build_cache.config_hash = cfg_hash;
     build_cache.theme_hash = theme_hash;
     build_cache.plugins_hash = plugins_hash;
+    build_cache.favicon_hash = favicon_hash;
     build_cache.save(&ws.cache_path())?;
 
     // Count pages_written: non-draft content pages + tag archives + index
