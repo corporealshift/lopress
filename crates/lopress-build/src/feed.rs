@@ -64,6 +64,7 @@ mod tests {
             title: "S".into(),
             base_url: "https://example.com".into(),
             nav: vec![],
+            favicon: None,
             posts: vec![PostSummary {
                 title: "Hi".into(),
                 slug: "hi".into(),

@@ -134,6 +134,7 @@ pub fn render_all(
             })
             .collect(),
         posts: summaries.clone(),
+        favicon: workspace.favicon().map(|(_, web)| web),
     };
 
     let mut failures = Vec::new();

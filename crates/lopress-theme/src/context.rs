@@ -13,6 +13,8 @@ pub struct SiteCtx {
     pub base_url: String,
     pub nav: Vec<NavItem>,
     pub posts: Vec<PostSummary>,
+    /// Web path of the site favicon (e.g. `"/favicon.png"`), or `None`.
+    pub favicon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

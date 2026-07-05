@@ -36,6 +36,7 @@ mod tests {
             title: "T".into(),
             base_url: "https://example.com".into(),
             nav: vec![],
+            favicon: None,
             posts: vec![],
         }
     }

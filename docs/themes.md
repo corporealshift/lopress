@@ -73,6 +73,7 @@ Every template receives two objects, `site` and `page`
 | `site.base_url` | string | no trailing slash |
 | `site.nav` | array of `{label, href}` | from `nav.toml` |
 | `site.posts` | array of PostSummary | all non-draft posts, for archives |
+| `site.favicon` | string or null | web path like `/favicon.png`; null when the site has no favicon |
 
 **`page`** — per-page:
 

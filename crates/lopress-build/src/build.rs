@@ -191,6 +191,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
             })
             .collect(),
         posts: summaries.clone(),
+        favicon: ws.favicon().map(|(_, web)| web),
     };
 
     // Regenerate aggregate pages only when content changed or forced

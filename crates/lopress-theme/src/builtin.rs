@@ -50,6 +50,7 @@ mod tests {
             title: "S".into(),
             base_url: "https://example.com".into(),
             nav: vec![],
+            favicon: None,
             posts: vec![],
         };
         let page = PageCtx {
@@ -101,6 +102,7 @@ mod tests {
             title: "S".into(),
             base_url: "https://e.com".into(),
             nav: vec![],
+            favicon: None,
             posts: vec![summary.clone()],
         };
         let page = PageCtx {
@@ -131,5 +133,83 @@ mod tests {
         // excerpt_html is rendered via the safe filter.
         assert!(html.contains("teaser"), "index must render excerpt_html");
         assert!(html.contains("Read more"), "index must show Read more link");
+    }
+
+    #[test]
+    fn layout_emits_favicon_link_when_set() {
+        let engine = default_engine().unwrap();
+        let site = SiteCtx {
+            title: "S".into(),
+            base_url: "https://example.com".into(),
+            nav: vec![],
+            favicon: Some("/favicon.png".into()),
+            posts: vec![],
+        };
+        let page = PageCtx {
+            kind: PageKind::Post,
+            title: "Hi".into(),
+            slug: "hi".into(),
+            url: "/posts/hi/".into(),
+            canonical: "https://example.com/posts/hi/".into(),
+            description: None,
+            og_image: None,
+            date: None,
+            tags: vec![],
+            body_html: "<p>body</p>".into(),
+            posts: vec![],
+            tag: None,
+        };
+        let html = engine
+            .render(
+                "post.html",
+                &RenderContext {
+                    site: &site,
+                    page: &page,
+                },
+            )
+            .unwrap();
+        assert!(
+            html.contains(r#"<link rel="icon" href="/favicon.png">"#),
+            "favicon link tag missing from rendered head"
+        );
+    }
+
+    #[test]
+    fn layout_omits_favicon_link_when_none() {
+        let engine = default_engine().unwrap();
+        let site = SiteCtx {
+            title: "S".into(),
+            base_url: "https://example.com".into(),
+            nav: vec![],
+            favicon: None,
+            posts: vec![],
+        };
+        let page = PageCtx {
+            kind: PageKind::Post,
+            title: "Hi".into(),
+            slug: "hi".into(),
+            url: "/posts/hi/".into(),
+            canonical: "https://example.com/posts/hi/".into(),
+            description: None,
+            og_image: None,
+            date: None,
+            tags: vec![],
+            body_html: "<p>body</p>".into(),
+            posts: vec![],
+            tag: None,
+        };
+        let html = engine
+            .render(
+                "post.html",
+                &RenderContext {
+                    site: &site,
+                    page: &page,
+                },
+            )
+            .unwrap();
+        assert!(
+            !html.contains(r#"rel="icon""#),
+            "no favicon link tag expected when favicon is None"
+        );
     }
 }

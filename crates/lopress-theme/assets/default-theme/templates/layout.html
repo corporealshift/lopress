@@ -7,6 +7,7 @@
 {% if page.description %}<meta name="description" content="{{ page.description }}">{% endif %}
 <link rel="canonical" href="{{ page.canonical }}">
 <link rel="stylesheet" href="/assets/theme.css">
+{% if site.favicon %}<link rel="icon" href="{{ site.favicon | safe }}">{% endif %}
 <meta property="og:title" content="{{ page.title }}">
 {% if page.description %}<meta property="og:description" content="{{ page.description }}">{% endif %}
 {% if page.og_image %}<meta property="og:image" content="{{ page.og_image }}">{% endif %}
