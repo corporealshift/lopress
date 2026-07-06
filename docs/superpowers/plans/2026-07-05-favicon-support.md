@@ -922,6 +922,12 @@ Expected: FAIL to compile (the three methods do not exist).
             }
         };
 
+        // Read the source BEFORE evicting: the picked file may be the
+        // current favicon itself (re-pick), and evict-then-copy would
+        // delete it and then fail the copy. Read-then-write mirrors
+        // import_image.
+        let bytes = std::fs::read(src).map_err(SaveError::Io)?;
+
         // At-most-one invariant: remove any existing favicon.* first.
         for existing in ["svg", "png", "ico"] {
             let path = self.workspace.src_dir().join(format!("favicon.{existing}"));
@@ -931,7 +937,7 @@ Expected: FAIL to compile (the three methods do not exist).
         }
 
         let dst = self.workspace.src_dir().join(format!("favicon.{ext}"));
-        std::fs::copy(src, &dst).map_err(SaveError::Io)?;
+        std::fs::write(&dst, &bytes).map_err(SaveError::Io)?;
 
         self.rebuild();
         Ok(())
