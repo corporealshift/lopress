@@ -13,6 +13,8 @@ use floem::views::{
 };
 use floem::{AnyView, IntoView};
 use lopress_build::NavItem;
+use lopress_gui_host::Session;
+use std::path::PathBuf;
 
 /// A workspace page offered by the "Link to page" picker.
 #[derive(Debug, Clone)]
@@ -25,6 +27,48 @@ pub struct PageChoice {
 #[derive(Debug, Clone)]
 pub struct TagChoice {
     pub name: String,
+}
+
+// ── Favicon staging model (pure data, testable without Floem) ───────────────
+
+/// Staged favicon change for the Site settings modal.
+///
+/// The modal stages the user's choice and applies it on Save; Cancel
+/// discards. A fresh signal (starting `Unchanged`) is created each time the
+/// modal opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FaviconChange {
+    Unchanged,
+    Set(PathBuf),
+    Remove,
+}
+
+impl FaviconChange {
+    /// Apply the staged change to the session. `Ok(())` for `Unchanged`.
+    /// Errors are stringified for the modal's error line.
+    pub fn apply_to_session(&self, session: &Session) -> Result<(), String> {
+        match self {
+            Self::Set(path) => session.set_favicon(path).map_err(|e| e.to_string()),
+            Self::Remove => session.remove_favicon().map_err(|e| e.to_string()),
+            Self::Unchanged => Ok(()),
+        }
+    }
+
+    /// Label for the modal's status line: the staged filename, a removal
+    /// marker, or `None` when unchanged (caller falls back to the current
+    /// on-disk state).
+    pub fn display_label(&self) -> Option<String> {
+        match self {
+            Self::Set(path) => Some(
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("(chosen file)")
+                    .to_string(),
+            ),
+            Self::Remove => Some("(will be removed on save)".to_string()),
+            Self::Unchanged => None,
+        }
+    }
 }
 
 // ── Working model (pure data, testable without Floem) ───────────────────────
@@ -520,5 +564,35 @@ mod tests {
         assert_eq!(model.rows[0].label, "A");
         assert_eq!(model.rows[1].label, "B");
         assert_eq!(model.rows[2].label, "C");
+    }
+
+    #[test]
+    fn favicon_change_display_label_for_set_is_filename() {
+        let c = FaviconChange::Set(PathBuf::from("C:/pics/icon.png"));
+        assert_eq!(c.display_label(), Some("icon.png".to_string()));
+    }
+
+    #[test]
+    fn favicon_change_display_label_for_remove_is_marker() {
+        assert_eq!(
+            FaviconChange::Remove.display_label(),
+            Some("(will be removed on save)".to_string())
+        );
+    }
+
+    #[test]
+    fn favicon_change_display_label_for_unchanged_is_none() {
+        assert_eq!(FaviconChange::Unchanged.display_label(), None);
+    }
+
+    #[test]
+    fn favicon_change_staging_transitions() {
+        // The signal just holds the latest choice; any state may replace any other.
+        let mut c = FaviconChange::Set(PathBuf::from("a.svg"));
+        assert!(matches!(c, FaviconChange::Set(_)));
+        c = FaviconChange::Remove;
+        assert_eq!(c, FaviconChange::Remove);
+        c = FaviconChange::Unchanged;
+        assert_eq!(c, FaviconChange::Unchanged);
     }
 }
