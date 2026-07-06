@@ -328,3 +328,17 @@ fn remove_favicon_deletes_file() {
     assert!(session.favicon().is_none());
     assert!(!dir.path().join("src/favicon.svg").exists());
 }
+
+#[test]
+fn set_favicon_to_its_own_current_path_is_a_safe_noop() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.png"), b"PNG").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    let current = dir.path().join("src/favicon.png");
+    session.set_favicon(&current).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.png".to_string()));
+    assert_eq!(
+        fs::read(dir.path().join("src/favicon.png")).unwrap(),
+        b"PNG"
+    );
+}

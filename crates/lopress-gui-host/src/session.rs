@@ -424,6 +424,9 @@ impl Session {
             }
         };
 
+        // Read source bytes before eviction so self-picks are safe.
+        let bytes = std::fs::read(src).map_err(SaveError::Io)?;
+
         // At-most-one invariant: remove any existing favicon.* first.
         for existing in ["svg", "png", "ico"] {
             let path = self.workspace.src_dir().join(format!("favicon.{existing}"));
@@ -433,7 +436,7 @@ impl Session {
         }
 
         let dst = self.workspace.src_dir().join(format!("favicon.{ext}"));
-        std::fs::copy(src, &dst).map_err(SaveError::Io)?;
+        std::fs::write(&dst, &bytes).map_err(SaveError::Io)?;
 
         self.rebuild();
         Ok(())
