@@ -1,8 +1,9 @@
 # Lopress Architecture Specification
 
-> **Date:** 2026-05-28
+> **Date:** 2026-05-28 (updated 2026-07-03 for the descriptor table / everything-is-a-plugin refactor)
 > **Author:** Auto-generated from codebase audit
 > **Purpose:** Reference document describing modules, data flows, plugin architecture, and how the system works end-to-end.
+> **Staleness note:** this document is a snapshot. When a detail matters (enum variants, function signatures, JSON shapes), confirm it against the source file it names before relying on it.
 
 ---
 
@@ -181,10 +182,9 @@ struct EditorDoc {
 }
 
 struct EditorBlock {
-    id: BlockId,           // Stable identity (not persisted)
-    kind: BlockKind,       // Enum: Paragraph, Heading(u8), Code{lang}, List{ordered}, Opaque{type_name}
-    body: BlockBody,       // Enum: Inline(Vec<InlineRun>), Code(String), List(Vec<ListItem>), Opaque(Value)
-    plugin: Option<PluginMeta>,  // Plugin metadata (None for built-in paragraph/heading)
+    id: BlockId,        // Stable identity (not persisted)
+    body: BlockBody,    // Enum: Inline(Vec<InlineRun>), Code(String), List(Vec<ListItem>), Table(TableData), Opaque(Value)
+    plugin: PluginMeta, // Always present — every block (including paragraph/heading) is a plugin block
 }
 
 struct InlineRun {
@@ -192,6 +192,12 @@ struct InlineRun {
     bold: bool, italic: bool, code: bool, link: Option<String>,
 }
 ```
+
+There is no `BlockKind` enum anymore ("everything is a plugin"): a block's type
+identity is its `PluginMeta` (`block_type_name`, `editor` key, `native` claim),
+and the data facts for each built-in type live in the **block descriptor table**
+(`model/descriptor.rs`) keyed by the `editor` string (`"paragraph"`, `"heading"`,
+`"code"`, `"list"`, `"image"`, `"table"`, `"separator"`, `"more"`).
 
 ### Conversion Pipeline
 
@@ -429,7 +435,7 @@ Spawns a background thread that watches the workspace directory. On file changes
 - Serves `www/` directory.
 - On rebuild, broadcasts a reload message via SSE to connected browsers.
 - Attempts port 8080, falls back to ephemeral port.
-- CLI: `lopress serve <workspace> --port <n> --bind <addr> --no-open`.
+- There is no standalone `serve` CLI subcommand (the binary's CLI is only `lopress new` or the GUI); the preview server is started by the GUI session when a workspace opens.
 
 ### 5.8 lopress-gui-host
 
@@ -470,7 +476,9 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `state.rs` | `AppContext`, `AppState` (Welcome/Editing), `EditingState`. |
 | `actions.rs` | `BlockAction` enum + `apply()` chokepoint. |
 | `undo.rs` | `UndoStack` — stores action/inverse pairs. |
-| `model/types.rs` | `EditorDoc`, `EditorBlock`, `BlockKind`, `BlockBody`, `InlineRun`, `PluginMeta`. |
+| `model/types.rs` | `EditorDoc`, `EditorBlock`, `BlockBody`, `InlineRun`, `TableData`, `PluginMeta`. |
+| `model/descriptor.rs` | `BlockDescriptor` table — single source of truth per built-in block type (editor key, native claim, body shape, menu entries, default block). |
+| `model/inserter.rs` | Slash-menu inserter entries projected from the descriptor table + plugin registry. |
 | `model/from_core.rs` | `lopress_core::Document` → `EditorDoc`. |
 | `model/to_core.rs` | `EditorDoc` → `lopress_core::Document`. |
 | `model/sync.rs` | `InlineRun` ↔ `Rope` conversion utilities. |
@@ -485,9 +493,17 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `ui/blocks/heading.rs` | Editable heading widget. |
 | `ui/blocks/paragraph.rs` | Editable paragraph widget. |
 | `ui/blocks/opaque.rs` | Read-only opaque block display. |
+| `ui/blocks/image.rs` | Image block widget. |
+| `ui/blocks/table.rs` | Table block widget. |
+| `ui/blocks/separator.rs` | Separator block widget. |
+| `ui/blocks/read_more.rs` | Read-more marker widget. |
+| `ui/blocks/fallback.rs` | Fail-safe rendering for unrenderable blocks. |
+| `ui/blocks/env.rs` | `BlockEnv` — shared context threaded to block widgets. |
 | `ui/blocks/editor_registry.rs` | Data-driven editor dispatch from manifest `editor` key. |
 | `ui/blocks/style_span.rs` | `InlineRunStyling` — Floem `Styling` trait impl. |
 | `ui/editor_pane.rs` | Block tree canvas. |
+| `ui/link_bar.rs` | Pane-level link editing bar (survives block-pane rebuilds). |
+| `ui/nav_editor.rs` | Site-settings nav editor (`nav.toml`). |
 | `ui/toolbar.rs` | Block-type toolbar (P/H1/H2/Code/UL/OL + style toggles). |
 | `ui/slash_menu.rs` | Slash command popup (`/` in empty paragraph). |
 | `ui/inspector.rs` | Right-hand inspector panel. |
@@ -550,8 +566,10 @@ CSS and JS files that the build pipeline injects into the page `<head>`. (Parsed
 
 2. EditingState::new(session)  (lopress-editor/src/state.rs)
    → Starts from an empty PluginRegistry::default()
-   → Calls load_base_plugins() → seeds the embedded "list" and "code"
-     base plugins (non-removable, always present)
+   → Calls load_base_plugins() → seeds the eight embedded base plugins
+     (paragraph, heading, code, list, image, table, separator, more —
+     manifests in base_plugins/*/manifest.toml, embedded via include_str!;
+     non-removable, always present)
    → Layers the user plugins from session.plugin_registry() on top via
      insert(); a user plugin whose block name collides with a base block
      is rejected by insert and the error is ignored (`let _ = …`)
@@ -585,19 +603,23 @@ plugins cannot be shadowed.
 | Markdown portability | Fully portable | Prose is portable; blocks are invisible HTML comments |
 | Editor rendering | Has `PluginMeta` → plugin view | Has `PluginMeta` → plugin view |
 
-**Serialization decision tree in `to_core`:**
+**Serialization decision tree in `to_core`** (every block has a `PluginMeta`):
 
 ```
-Block has PluginMeta?
-  ├─ Yes → has native field?
-  │         ├─ Yes → native_block_to_core() (renders as native markdown)
-  │         └─ No  → plugin_block_to_core() (wraps in comment container)
-  └─ No  → match on (kind, body) → standard markdown rendering
+Block's PluginMeta has a native claim?
+  ├─ Yes → native_block_to_core() (renders as native markdown — paragraph,
+  │        heading, code, list, image, table, separator)
+  └─ No  → plugin_block_to_core() (wraps in a <!-- lopress:… --> comment container)
 ```
+
+Dispatch keys off the descriptor **editor key**, not the body shape — two types
+can share a body shape (image and separator differ, yet image is Opaque-bodied
+and separator Inline-bodied); asserting on `plugin.editor` identity is the
+reliable check in round-trip tests.
 
 ### 6.5 Plugin Loading Order
 
-1. **Base plugins** (embedded at compile time via `include_str!`): `list`, `code`
+1. **Base plugins** (embedded at compile time via `include_str!` from `base_plugins/*/manifest.toml`): `paragraph`, `heading`, `code`, `list`, `image`, `table`, `separator`, `more`
 2. **User plugins** (loaded from `plugins/` directory at runtime)
 
 User plugins that declare a block name already owned by a base plugin are silently skipped (the `insert` method returns an error, which is ignored).
@@ -614,15 +636,21 @@ The editor uses a richer block model than the core document:
 EditorDoc
   └── Vec<EditorBlock>
         ├── id: BlockId          (u64, monotonic counter)
-        ├── kind: BlockKind      (enum: Paragraph, Heading(u8), Code{lang}, List{ordered}, Opaque{type_name})
-        ├── body: BlockBody      (enum: Inline, Code, List, Opaque)
-        └── plugin: Option<PluginMeta>  (None for paragraph/heading, Some for everything else)
+        ├── body: BlockBody      (enum: Inline, Code, List, Table, Opaque)
+        └── plugin: PluginMeta   (always present — every block is a plugin block)
 ```
 
-**`BlockKind` vs `BlockBody` distinction:**
-- `BlockKind` describes the block's **type/category** (what it is semantically).
+**Type identity vs data shape:**
+- A block's **type** is its `PluginMeta` — `block_type_name`, the `editor` key
+  that selects its widget, and the optional `native` core-type claim.
 - `BlockBody` describes the **data shape** (how content is stored).
-- The two are normally in sync (a `BlockKind::Code` always has `BlockBody::Code`), but `ChangeType` actions can temporarily desync during conversion.
+- The mapping between the two is declared once in the **block descriptor table**
+  (`model/descriptor.rs`): one `BlockDescriptor` per built-in type carrying its
+  `editor` key, `native` claim, `BodyShape`, `builtin` flag, slash-menu/toolbar
+  `MenuEntry` list, and a `default_block` constructor. Menus, `ChangeType`
+  conversion, and `from_core`/`to_core` dispatch all read this table instead of
+  hardcoding per-type match arms. The widget fn-pointers live separately in
+  `ui/blocks/editor_registry.rs`, keyed by the same `editor` string.
 
 **`InlineRun`** — the atomic unit of inline text in the editor:
 ```rust
@@ -658,11 +686,17 @@ enum BlockAction {
     MergeWithPrev { block_id },
     Delete { block_id },
     Move { block_id, to_index },
-    ChangeType { block_id, new_kind },
-    OpenSlashMenu { block_id },           // UI-only, no-op in apply
-    EditAttrs { block_id, new_attrs },    // Box<serde_json::Map>
-    EditBlockBody { block_id, new_body }, // Box<BlockBody>
-    InsertAfter { anchor, new_block },    // Box<EditorBlock>
+    ChangeType { block_id, new_editor, new_attrs },  // editor key + seed attrs
+    OpenSlashMenu { block_id },                      // UI-only, no-op in apply
+    EditAttrs { block_id, new_attrs },               // Box<serde_json::Map>
+    EditBlockBody { block_id, new_body, built_in },  // Box<BlockBody> + provenance flag
+    InsertAfter { anchor, new_block },               // Box<EditorBlock>
+    EditFrontMatter { new_front_matter },            // Box<FrontMatter>
+    TableInsertRow { block_id, at },
+    TableDeleteRow { block_id, row },
+    TableInsertColumn { block_id, at },
+    TableDeleteColumn { block_id, col },
+    TableSetAlign { block_id, col, align },
 }
 ```
 
@@ -724,14 +758,15 @@ fn block_view(
 ) -> AnyView
 ```
 
-**Dispatch logic:**
-1. If `block.plugin.is_some()` → render plugin block view (header strip + attr form + body editor).
-2. Otherwise, match on `(kind, body)`:
-   - `Paragraph` + `Inline` → `paragraph::render_paragraph_editable`
-   - `Heading` + `Inline` → `heading::render_heading_editable`
-   - `Code` + `Code` → `code_editor::editable_code_view`
-   - `Opaque` + `Opaque` → `opaque::render_opaque`
-   - Mismatch → empty view
+**Dispatch logic:** every block carries a `PluginMeta`, so `block_view`
+(`ui/blocks/mod.rs`) always renders via `plugin::plugin_block_view`, which
+resolves the block's `editor` key through `ui/blocks/editor_registry.rs` to the
+concrete widget (paragraph, heading, code, list, image, table, separator,
+read-more, or the generic attr-form for site plugins). Built-in blocks
+(`builtin: true` in the descriptor) suppress the plugin chrome (header strip +
+attr form). Unrenderable blocks fall back to `ui/blocks/fallback.rs` instead of
+disappearing. All blocks then funnel through `wrap_block` for shared chrome
+(drag handle, hover/focus styling, floating toolbar).
 
 **Toolbar:** Anchored above the focused block. Shows block-type cycler (P/H1/H2/Code/UL/OL) and style toggles (B/I/C/link).
 
@@ -954,7 +989,9 @@ The preview server runs on `127.0.0.1:8080` (or ephemeral port if 8080 is taken)
 | `src/state.rs` | AppContext, AppState, EditingState |
 | `src/actions.rs` | BlockAction enum, apply() chokepoint |
 | `src/undo.rs` | UndoStack |
-| `src/model/types.rs` | EditorDoc, EditorBlock, BlockKind, BlockBody, InlineRun, PluginMeta |
+| `src/model/types.rs` | EditorDoc, EditorBlock, BlockBody, InlineRun, TableData, PluginMeta |
+| `src/model/descriptor.rs` | BlockDescriptor table (per-type source of truth) |
+| `src/model/inserter.rs` | Slash-menu inserter projection |
 | `src/model/from_core.rs` | Core → EditorDoc |
 | `src/model/to_core.rs` | EditorDoc → Core |
 | `src/model/sync.rs` | Rope ↔ InlineRun conversion |
@@ -969,9 +1006,17 @@ The preview server runs on `127.0.0.1:8080` (or ephemeral port if 8080 is taken)
 | `src/ui/blocks/heading.rs` | Editable heading |
 | `src/ui/blocks/paragraph.rs` | Editable paragraph |
 | `src/ui/blocks/opaque.rs` | Read-only opaque block |
+| `src/ui/blocks/image.rs` | Image block widget |
+| `src/ui/blocks/table.rs` | Table block widget |
+| `src/ui/blocks/separator.rs` | Separator block widget |
+| `src/ui/blocks/read_more.rs` | Read-more marker widget |
+| `src/ui/blocks/fallback.rs` | Fail-safe block rendering |
+| `src/ui/blocks/env.rs` | BlockEnv shared widget context |
 | `src/ui/blocks/editor_registry.rs` | Data-driven editor dispatch |
 | `src/ui/blocks/style_span.rs` | InlineRunStyling |
 | `src/ui/editor_pane.rs` | Block tree canvas |
+| `src/ui/link_bar.rs` | Pane-level link editing bar |
+| `src/ui/nav_editor.rs` | Nav (site settings) editor |
 | `src/ui/toolbar.rs` | Block-type toolbar |
 | `src/ui/slash_menu.rs` | Slash command popup |
 | `src/ui/inspector.rs` | Inspector panel |

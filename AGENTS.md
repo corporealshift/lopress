@@ -20,9 +20,9 @@ Format:
 pub fn bar() { ... }
 ```
 
-Review tip: grep for `#\[allow` / `#\[expect` before merging; every hit must
-have an adjacent justification. No clippy lint inspects adjacent comments, so
-this is policy, not tooling.
+This is enforced by `scripts/check-suppressions.sh` (run as part of
+`scripts/check.sh`): every `#[allow]`/`#[expect]` hit must have an adjacent
+justification comment or the gate fails.
 
 ## Prefer pattern matching over if/else on discriminants
 
@@ -127,21 +127,29 @@ for a crate that has already vetted the unsafe block.
 ## Run the gate yourself: `bash scripts/check.sh`
 
 `scripts/check.sh` is the canonical verification gate — it runs `cargo fmt
---all`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo
-test --workspace`, exiting non-zero if any fail. Run it before you stop.
+--all`, `taplo fmt --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `scripts/check-suppressions.sh` (every `#[allow]`/`#[expect]` needs
+an adjacent justification comment), and `cargo test --workspace`, exiting
+non-zero if any fail. Run it before you stop.
 
 Use **that script** (or its exact `--workspace` commands), not a per-crate
 `cargo clippy -p <crate>`. A per-crate check can pass locally while the
 workspace gate fails in another crate, which just gets you re-woken. The
-script, this doc, and the Stop hook all share the one source of truth so they
-can't drift.
+script is the single source of truth; this doc and the Stop hook follow it.
+
+**Clippy cache false-pass:** if you ran `cargo test`/`run`/`build` earlier,
+the gate's `cargo clippy` may consider crates up-to-date and report green
+without re-linting, hiding real deny-level violations. After other cargo
+commands, `touch` the `.rs` files you changed (or `cargo clean -p <crate>`)
+before trusting a green gate.
 
 ## Cargo verification runs automatically on Stop
 
-`.claude/settings.json` registers a Stop hook that runs the same three commands
-as `scripts/check.sh` (`cargo fmt --all`, `cargo clippy --workspace
---all-targets -- -D warnings`, `cargo test --workspace`) in the background
-whenever the agent stops with any `.rs` file dirty in `git status`.
+`.claude/settings.json` registers a Stop hook that runs the gate's three cargo
+commands (`cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace`) in the background whenever the agent
+stops with any `.rs` file dirty in `git status`. (The hook skips the `taplo`
+and suppression checks — CI and `scripts/check.sh` cover those.)
 No-`.rs`-change turns skip silently. Running `scripts/check.sh` yourself first
 gets you the same result before the hook fires.
 

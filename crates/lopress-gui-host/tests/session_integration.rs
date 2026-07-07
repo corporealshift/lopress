@@ -252,3 +252,93 @@ fn import_image_disambiguates_collisions() {
     let disk = dir.path().join("src").join("images").join("photo_a.png");
     assert_eq!(fs::read(&disk).unwrap(), b"\x89PNG\r\n\x1a\nbytes_a");
 }
+
+#[test]
+fn favicon_returns_none_when_absent() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+    assert!(session.favicon().is_none());
+}
+
+#[test]
+fn favicon_returns_filename_when_present() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.png"), b"PNG").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.png".to_string()));
+}
+
+#[test]
+fn favicon_prefers_svg_over_png() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.svg"), b"<svg/>").unwrap();
+    fs::write(dir.path().join("src/favicon.png"), b"PNG").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.svg".to_string()));
+}
+
+#[test]
+fn set_favicon_copies_file_to_src() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+    let picked = dir.path().join("src").join("original.png");
+    fs::write(&picked, b"\x89PNG\r\n\x1a\nfake_png").unwrap();
+    session.set_favicon(&picked).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.png".to_string()));
+    assert!(dir.path().join("src/favicon.png").exists());
+}
+
+#[test]
+fn set_favicon_evicts_other_extensions() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.png"), b"OLD").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.png".to_string()));
+
+    let picked = dir.path().join("src").join("new.ico");
+    fs::write(&picked, b"ICO").unwrap();
+    session.set_favicon(&picked).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.ico".to_string()));
+    assert!(
+        !dir.path().join("src/favicon.png").exists(),
+        "old favicon.png must be evicted (at-most-one invariant)"
+    );
+}
+
+#[test]
+fn set_favicon_rejects_invalid_extension() {
+    let dir = make_workspace();
+    let session = Session::open(dir.path()).unwrap();
+    let picked = dir.path().join("src").join("photo.jpg");
+    fs::write(&picked, b"JPEG").unwrap();
+    assert!(session.set_favicon(&picked).is_err());
+    assert!(
+        session.favicon().is_none(),
+        "rejected set must not leave a favicon"
+    );
+}
+
+#[test]
+fn remove_favicon_deletes_file() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.svg"), b"<svg/>").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.svg".to_string()));
+    session.remove_favicon().unwrap();
+    assert!(session.favicon().is_none());
+    assert!(!dir.path().join("src/favicon.svg").exists());
+}
+
+#[test]
+fn set_favicon_to_its_own_current_path_is_a_safe_noop() {
+    let dir = make_workspace();
+    fs::write(dir.path().join("src/favicon.png"), b"PNG").unwrap();
+    let session = Session::open(dir.path()).unwrap();
+    let current = dir.path().join("src/favicon.png");
+    session.set_favicon(&current).unwrap();
+    assert_eq!(session.favicon(), Some("favicon.png".to_string()));
+    assert_eq!(
+        fs::read(dir.path().join("src/favicon.png")).unwrap(),
+        b"PNG"
+    );
+}

@@ -393,6 +393,70 @@ impl Session {
         self.rebuild();
         Ok(())
     }
+
+    /// Current favicon filename (e.g. `"favicon.png"`), read fresh from disk
+    /// so repeated calls observe external edits. `None` when no favicon
+    /// file exists.
+    pub fn favicon(&self) -> Option<String> {
+        let (path, _) = self.workspace.favicon()?;
+        let name = path.file_name()?.to_str()?;
+        Some(name.to_string())
+    }
+
+    /// Set the site favicon: validate the extension, evict any existing
+    /// `src/favicon.*`, copy `src` to `src/favicon.<ext>`, then trigger a
+    /// rebuild.
+    ///
+    /// # Errors
+    /// Returns `SaveError::Io` when the extension is not ico/png/svg or on
+    /// I/O failure.
+    pub fn set_favicon(&self, src: &Path) -> Result<(), SaveError> {
+        let ext = match src.extension().and_then(|s| s.to_str()) {
+            Some(e @ ("ico" | "png" | "svg")) => e,
+            _ => {
+                return Err(SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "favicon must be .ico, .png, or .svg (got {})",
+                        src.display()
+                    ),
+                )));
+            }
+        };
+
+        // Read source bytes before eviction so self-picks are safe.
+        let bytes = std::fs::read(src).map_err(SaveError::Io)?;
+
+        // At-most-one invariant: remove any existing favicon.* first.
+        for existing in ["svg", "png", "ico"] {
+            let path = self.workspace.src_dir().join(format!("favicon.{existing}"));
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(SaveError::Io)?;
+            }
+        }
+
+        let dst = self.workspace.src_dir().join(format!("favicon.{ext}"));
+        std::fs::write(&dst, &bytes).map_err(SaveError::Io)?;
+
+        self.rebuild();
+        Ok(())
+    }
+
+    /// Remove the site favicon (delete `src/favicon.*`), then trigger a
+    /// rebuild. A no-op success when no favicon exists.
+    ///
+    /// # Errors
+    /// Returns `SaveError::Io` on I/O failure.
+    pub fn remove_favicon(&self) -> Result<(), SaveError> {
+        for ext in ["svg", "png", "ico"] {
+            let path = self.workspace.src_dir().join(format!("favicon.{ext}"));
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(SaveError::Io)?;
+            }
+        }
+        self.rebuild();
+        Ok(())
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

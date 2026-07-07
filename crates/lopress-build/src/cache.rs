@@ -18,6 +18,8 @@ pub struct BuildCache {
     #[serde(default)]
     pub plugins_hash: String,
     #[serde(default)]
+    pub favicon_hash: String,
+    #[serde(default)]
     pub pages: BTreeMap<String, PageEntry>,
 }
 
@@ -28,6 +30,7 @@ impl Default for BuildCache {
             config_hash: String::new(),
             theme_hash: String::new(),
             plugins_hash: String::new(),
+            favicon_hash: String::new(),
             pages: BTreeMap::new(),
         }
     }
@@ -201,6 +204,19 @@ pub fn hash_plugins(registry: &PluginRegistry) -> Result<String, BuildError> {
     Ok(hash_many(&mut items))
 }
 
+/// Hash the workspace's favicon so any change (add/remove/rename/content
+/// edit) invalidates the page cache — the favicon link tag appears in every
+/// page's HTML. No favicon hashes to a stable sentinel (empty bytes).
+pub fn hash_favicon(workspace: &Workspace) -> Result<String, BuildError> {
+    match workspace.favicon() {
+        Some((path, web)) => {
+            let mut items = vec![(web, std::fs::read(&path)?)];
+            Ok(hash_many(&mut items))
+        }
+        None => Ok(hash_bytes(&[])),
+    }
+}
+
 pub fn hash_file(path: &Path) -> Result<String, BuildError> {
     let bytes = std::fs::read(path)?;
     Ok(hash_bytes(&bytes))
@@ -288,6 +304,38 @@ mod tests {
         .unwrap();
         let ws2 = crate::site::Workspace::load(d.path()).unwrap();
         assert_ne!(h1, hash_config(&ws2).unwrap());
+    }
+
+    #[test]
+    fn hash_favicon_changes_with_presence_and_content() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            "[site]\ntitle = \"A\"\nbase_url = \"https://a\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.path().join("src")).unwrap();
+        let ws = crate::site::Workspace::load(d.path()).unwrap();
+
+        let h_none = hash_favicon(&ws).unwrap();
+
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG").unwrap();
+        let h_added = hash_favicon(&ws).unwrap();
+        assert_ne!(h_none, h_added, "adding a favicon must change the hash");
+
+        std::fs::write(d.path().join("src/favicon.png"), b"PNG2").unwrap();
+        let h_edited = hash_favicon(&ws).unwrap();
+        assert_ne!(
+            h_added, h_edited,
+            "editing favicon bytes must change the hash"
+        );
+
+        std::fs::remove_file(d.path().join("src/favicon.png")).unwrap();
+        let h_removed = hash_favicon(&ws).unwrap();
+        assert_eq!(
+            h_none, h_removed,
+            "no favicon must hash to the stable sentinel"
+        );
     }
 
     #[test]

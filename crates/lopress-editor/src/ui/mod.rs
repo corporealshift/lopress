@@ -20,7 +20,7 @@ use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::Position;
 use floem::text::Weight;
 use floem::unit::PxPctAuto;
-use floem::views::{dyn_container, empty, h_stack, label, stack, v_stack, Decorators};
+use floem::views::{button, dyn_container, empty, h_stack, label, stack, v_stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,7 +37,7 @@ use crate::ui::editing::save_pipeline;
 use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
 use crate::ui::inspector::inspector_view;
-use crate::ui::nav_editor::{NavModel, PageChoice, TagChoice};
+use crate::ui::nav_editor::{FaviconChange, NavModel, PageChoice, TagChoice};
 use crate::ui::sidebar::sidebar_view;
 use lopress_build::NavItem;
 use lopress_gui_host::{DocumentRef, Session, WorkspaceSummary};
@@ -149,6 +149,60 @@ pub(crate) fn root_view(
         },
     )
     .style(|s| s.width_full().height_full())
+}
+
+/// Favicon block of the Site settings modal: a status line (staged change
+/// wins over the on-disk state) plus "Choose file…" / "Remove" buttons.
+/// Buttons only stage; the modal's Save applies.
+fn favicon_section(
+    favicon_change: RwSignal<FaviconChange>,
+    current_favicon: Option<String>,
+) -> floem::AnyView {
+    let status = dyn_container(
+        move || favicon_change.get(),
+        move |change| {
+            let text = change
+                .display_label()
+                .or_else(|| current_favicon.clone())
+                .unwrap_or_else(|| "(none)".to_string());
+            label(move || format!("Favicon: {text}"))
+                .style(|s| s.font_size(12.).color(Color::rgb8(100, 100, 110)))
+                .into_any()
+        },
+    );
+
+    let choose_btn = button(label(|| "Choose file…".to_string()))
+        .action(move || {
+            let picked = rfd::FileDialog::new()
+                .add_filter("Favicon (ico, png, svg)", &["ico", "png", "svg"])
+                .pick_file();
+            let Some(path) = picked else {
+                return; // dialog cancelled
+            };
+            favicon_change.set(FaviconChange::Set(path));
+        })
+        .style(|s| s.padding_vert(4.).padding_horiz(10.).font_size(12.));
+
+    let remove_btn = button(label(|| "Remove".to_string()))
+        .action(move || favicon_change.set(FaviconChange::Remove))
+        .style(|s| {
+            s.padding_vert(4.)
+                .padding_horiz(10.)
+                .font_size(12.)
+                .color(Color::rgb8(200, 60, 60))
+        });
+
+    let controls = h_stack((choose_btn, remove_btn)).style(|s| s.gap(6.));
+
+    v_stack((status, controls))
+        .style(|s| {
+            s.gap(4.)
+                .padding(8.)
+                .border(1.)
+                .border_color(Color::rgb8(220, 220, 220))
+                .border_radius(4.)
+        })
+        .into_any()
 }
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
@@ -366,7 +420,7 @@ fn editing_view(
             if !open {
                 return empty().into_any();
             }
-            let (model, pages, tags) = {
+            let (model, pages, tags, current_favicon) = {
                 let guard = editing_for_modal.borrow();
                 let Some(state) = guard.as_ref() else {
                     return empty().into_any();
@@ -385,9 +439,17 @@ fn editing_view(
                     .iter()
                     .map(|t| TagChoice { name: t.clone() })
                     .collect();
-                (NavModel::new(state.session.nav_items()), pages, tags)
+                let current_favicon = state.session.favicon();
+                (
+                    NavModel::new(state.session.nav_items()),
+                    pages,
+                    tags,
+                    current_favicon,
+                )
             };
             let model_sig: RwSignal<NavModel> = RwSignal::new(model);
+            // Fresh on every modal open: staging always starts Unchanged.
+            let favicon_change: RwSignal<FaviconChange> = RwSignal::new(FaviconChange::Unchanged);
 
             let editing_for_save = Rc::clone(&editing_for_modal);
             let on_save = move |items: Vec<NavItem>| {
@@ -395,6 +457,15 @@ fn editing_view(
                 let Some(state) = guard.as_ref() else {
                     return;
                 };
+                // Favicon first, then nav; a favicon error keeps the modal
+                // open and skips the nav write.
+                if let Err(e) = favicon_change
+                    .get_untracked()
+                    .apply_to_session(&state.session)
+                {
+                    nav_save_error.set(Some(format!("favicon: {e}")));
+                    return;
+                }
                 match state.session.update_nav(items) {
                     Ok(()) => {
                         nav_save_error.set(None);
@@ -416,9 +487,10 @@ fn editing_view(
             );
 
             v_stack((
-                label(|| "Site settings \u{2014} navigation".to_string())
+                label(|| "Site settings".to_string())
                     .style(|s| s.font_size(15.).font_weight(Weight::SEMIBOLD)),
                 error_line,
+                favicon_section(favicon_change, current_favicon),
                 nav_editor::nav_editor_view(model_sig, pages, tags, on_save, on_cancel),
             ))
             .style(|s| {
