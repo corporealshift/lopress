@@ -63,6 +63,44 @@ fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
     f32::from(visual_lines.max(1)) * line_height
 }
 
+/// Reject an implausible wrapped visual-line count, keeping the last good one.
+///
+/// `Editor::last_vline()` reads a *cached* text layout that can lag the current
+/// viewport by a relayout generation: during the transient where the viewport
+/// width has already updated but floem's separate wrap-sync effect has not yet
+/// re-wrapped the text, `last_vline` is computed against the momentarily
+/// collapsed layout and reports roughly one visual line per character. Feeding
+/// that bogus height back into layout (it changes the viewport, which re-runs
+/// the height memo) is what stops an exact wrap boundary from ever reaching a
+/// fixed point — the window then hangs in an unbounded relayout loop.
+///
+/// floem clamps the wrap width to `MIN_WRAPPED_WIDTH` (100px), so a *real*
+/// layout can never place fewer than ~10 characters on a visual line. A count
+/// is implausible once it needs fewer than `MIN_CHARS_PER_VLINE` characters per
+/// wrapped line beyond the hard-line count — a deliberately loose bound, well
+/// under what 100px fits. Such a count is the stale collapsed artifact, not a
+/// genuine wrap: reject it and keep the previous value; the next settled pass
+/// replaces it with the correct count. Because the bogus count is never
+/// committed as height, it can never drive the relayout that re-triggers the
+/// collapsed reading, which is what breaks the exact-width hang loop.
+///
+/// The bound `raw <= hard_lines + char_len / MIN_CHARS_PER_VLINE` is applied in
+/// multiplied form to avoid lossy integer division (and its clippy lint), with
+/// saturating arithmetic so a pathological count can't overflow.
+fn accept_visual_lines(raw: usize, prev: Option<&u16>, hard_lines: usize, char_len: usize) -> u16 {
+    /// Minimum characters a real wrapped visual line holds (100px / ~big glyph);
+    /// anything below this is the collapsed-layout artifact.
+    const MIN_CHARS_PER_VLINE: usize = 4;
+    let lhs = MIN_CHARS_PER_VLINE.saturating_mul(raw);
+    let rhs = MIN_CHARS_PER_VLINE
+        .saturating_mul(hard_lines)
+        .saturating_add(char_len);
+    if lhs > rhs {
+        return prev.copied().unwrap_or(1);
+    }
+    u16::try_from(raw).unwrap_or(u16::MAX)
+}
+
 /// Build a `BlockEditorState` for an inline block, initialised from `runs`.
 /// Creates the `TextDocument`, `InlineRunStyling`, and `Editor` in scope `cx`.
 pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> BlockEditorState {
@@ -389,33 +427,50 @@ pub fn mount_block_editor(
     // height. We deliberately compute that count inside a `Memo` rather than
     // reading it directly in the `style` closure below.
     //
-    // Why: floem's `EditorView::compute_layout` writes `editor.viewport` (and
-    // so recomputes `screen_lines`) from the *height* this very closure sets
-    // via `size_full()`. A previous version subscribed the height closure to
-    // `screen_lines`, which closed a layout feedback loop — set height →
-    // viewport changes → `screen_lines` fires → height recomputes. At an exact
-    // wrap boundary the width-derived line count never reaches a fixed point,
-    // so layout re-runs forever and the window hangs (blank, unresponsive).
+    // Why a `Memo`: floem's `EditorView::compute_layout` writes
+    // `editor.viewport` from the *height* this closure sets via `size_full()`,
+    // so any reader that both drives the height and re-runs on viewport changes
+    // closes a layout feedback loop. `Memo` only notifies on a *changed value*,
+    // and the value we return (the total line *count*) is invariant under our
+    // own height writes, so those writes don't propagate — the loop stays open.
     //
-    // The `Memo` breaks the loop: it re-runs on every viewport change (so a
-    // genuine *width* change still reflows) but, because it returns the line
-    // *count* and `Memo` only notifies on a changed value, our own height
-    // writes — which leave the count untouched — no longer re-trigger the
-    // closure. `text_sig` covers reflow from edits that don't change width.
+    // Two further subtleties, both learned the hard way (see the block-height
+    // memories): the reading must be taken against the *current* wrap width, and
+    // it must self-correct if taken too early. We subscribe to `screen_lines`
+    // (not `viewport`) so we re-run after floem has synced the wrap width, and
+    // `accept_visual_lines` rejects any stale collapsed reading that still slips
+    // through. `text_sig` covers reflow from edits that don't change width.
     let visual_lines = create_memo(move |prev: Option<&u16>| {
-        text_sig.with(|_| {});
+        // Reading the rope length also subscribes the memo to text edits, so it
+        // reflows on changes that don't alter the width.
+        let char_len = text_sig.with(|r| r.len());
         editor_sig.with_untracked(|ed| {
-            // The editor wraps text at its viewport width. During initial and
-            // relayout passes the viewport is momentarily 0-width, where every
-            // character wraps onto its own line and `last_vline` reports a bogus
-            // huge count — which would balloon the block to one-char-per-line
-            // height. Ignore readings taken at a collapsed width and keep the
-            // last good value; this memo re-runs (it reads `viewport`) once a
-            // real width is assigned, yielding the correct count.
-            if ed.viewport.get().width() < 1.0 {
+            // Subscribe to `screen_lines`, NOT `viewport` directly. floem syncs
+            // the wrap width to the viewport in one effect and then recomputes
+            // `screen_lines` in a second, downstream effect (see the viewport
+            // effect in floem `editor/mod.rs`). Re-running on `screen_lines`
+            // therefore reads `last_vline` *after* the wrap has been synced to
+            // the current width — avoiding the effect-ordering race where a
+            // viewport-subscribed reader sees the fresh width but the stale,
+            // still-collapsed wrap, and so reports one visual line per
+            // character. `screen_lines` still fires on genuine width changes
+            // (resize) and, importantly, fires again once the wrap settles, so
+            // a momentarily-collapsed block self-corrects instead of sticking.
+            ed.screen_lines.get();
+            // The width guard is read UNTRACKED so our own height writes (which
+            // change only the viewport *height*) can never re-trigger this memo
+            // — that self-trigger is the feedback loop that hangs the window at
+            // an exact wrap boundary.
+            if ed.viewport.with_untracked(|v| v.width()) < 1.0 {
                 return prev.copied().unwrap_or(1);
             }
-            u16::try_from(ed.last_vline().0 + 1).unwrap_or(u16::MAX)
+            // Belt-and-suspenders against the stale collapsed reading (it can
+            // still slip through a `screen_lines` update that lands before the
+            // layout rebuild): `accept_visual_lines` rejects the one-char-per-
+            // line count and keeps the last good value — see its doc.
+            let raw = ed.last_vline().0 + 1;
+            let hard_lines = ed.last_line() + 1;
+            accept_visual_lines(raw, prev, hard_lines, char_len)
         })
     });
     stack((view,)).style(move |s| {
@@ -765,7 +820,7 @@ fn commit_and_jump_next(
 
 #[cfg(test)]
 mod tests {
-    use super::block_height_px;
+    use super::{accept_visual_lines, block_height_px};
 
     #[test]
     fn block_height_scales_with_visual_lines() {
@@ -776,5 +831,43 @@ mod tests {
     #[test]
     fn block_height_clamps_empty_to_one_line() {
         assert!((block_height_px(0, 20.0) - 20.0).abs() < f32::EPSILON);
+    }
+
+    // The stale-layout artifact: a single hard line of N characters reported as
+    // ~N visual lines (one char per line). These are the exact readings the
+    // live diagnostic logged at a full viewport width (650px) before the fix.
+    #[test]
+    fn rejects_stale_one_char_per_line_reading() {
+        // 80-char single line reported as 80 visual lines → keep prev.
+        assert_eq!(accept_visual_lines(80, Some(&1), 1, 80), 1);
+        // 43-char sentence reported as 43 visual lines → keep prev.
+        assert_eq!(accept_visual_lines(43, Some(&2), 1, 43), 2);
+    }
+
+    #[test]
+    fn accepts_genuine_wrap() {
+        // 80 chars that legitimately wrap to 2 lines at a real width.
+        assert_eq!(accept_visual_lines(2, Some(&1), 1, 80), 2);
+        // A long single word wrapping to 3 lines is plausible, not stale.
+        assert_eq!(accept_visual_lines(3, Some(&1), 1, 200), 3);
+    }
+
+    #[test]
+    fn accepts_many_hard_lines() {
+        // 50 short hard lines (Shift+Enter) is legitimate even though each
+        // holds ~1 char: the hard-line count floors the plausible bound.
+        assert_eq!(accept_visual_lines(50, Some(&1), 50, 99), 50);
+    }
+
+    #[test]
+    fn stale_reject_falls_back_to_one_without_prev() {
+        // No previous good value yet → clamp to a single line rather than the
+        // ballooned stale count.
+        assert_eq!(accept_visual_lines(80, None, 1, 80), 1);
+    }
+
+    #[test]
+    fn empty_block_is_one_line() {
+        assert_eq!(accept_visual_lines(1, None, 1, 0), 1);
     }
 }

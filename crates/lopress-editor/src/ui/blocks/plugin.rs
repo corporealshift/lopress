@@ -220,14 +220,15 @@ fn attr_text(
         .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))
 }
 
-/// Multi-line text input for `ui = "textarea"`. Commits on FocusLost,
-/// exactly like `attr_text` but uses Floem's `text_editor` for multi-line.
+/// Multi-line text input for `ui = "textarea"`. Commits the live document on
+/// blur, using Floem's `text_editor` for multi-line editing.
 fn attr_textarea(
     name: String,
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
 ) -> impl IntoView {
+    use floem::reactive::create_effect;
     use floem::views::text_editor;
     use lapce_xi_rope::Rope;
 
@@ -240,14 +241,39 @@ fn attr_textarea(
             .unwrap_or_default()
     });
     let rope = Rope::from(initial.as_str());
+
+    let text_ed = text_editor(rope);
+    let editor = text_ed.editor().clone();
+
+    // Commit on blur. `text_editor` focuses an INNER editor view, so a
+    // `FocusLost` listener on this outer view never fires — floem delivers
+    // focus events only to the focused view, with no bubbling to ancestors
+    // (unlike `text_input`, which IS the focusable view, so `attr_text` can
+    // listen for `FocusLost` directly). Instead we subscribe to the editor's
+    // `editor_view_focus_lost` trigger, which the inner view notifies on blur,
+    // and read the LIVE document text then. Reading the document (not a clone
+    // of the initial rope, which `text_editor` never mutates) is what actually
+    // captures the typed text. Committing only on blur — not per keystroke —
+    // avoids rebuilding the block and recreating this editor on every char.
+    let focus_lost = editor.editor_view_focus_lost;
+    let editor_for_commit = editor.clone();
     let name_for_commit = name.clone();
     let attrs_for_commit = attrs_sig;
     let on_action_for_commit = on_action;
-    let rope_for_read = rope.clone();
-
-    text_editor(rope)
-        .on_event(floem::event::EventListener::FocusLost, move |_| {
-            let s = rope_for_read.to_string();
+    create_effect(move |prev: Option<()>| {
+        focus_lost.track();
+        // The effect runs once at creation; skip that and only react to real
+        // focus-loss notifications.
+        if prev.is_none() {
+            return;
+        }
+        // `TextDocument::text()` reads untracked, so this doesn't subscribe the
+        // effect to per-keystroke changes — only `focus_lost` drives re-runs.
+        let s = String::from(&editor_for_commit.doc().text());
+        let changed = attrs_for_commit.with_untracked(|m| {
+            m.get(&name_for_commit).and_then(Value::as_str) != Some(s.as_str())
+        });
+        if changed {
             attrs_for_commit.update(|m| {
                 m.insert(name_for_commit.clone(), Value::String(s));
             });
@@ -256,14 +282,15 @@ fn attr_textarea(
                 block_id,
                 new_attrs: Box::new(new_attrs),
             });
-            floem::event::EventPropagation::Continue
-        })
-        .style(|s| {
-            s.font_size(12.)
-                .padding_horiz(4.)
-                .min_width(160.)
-                .min_height(60.)
-        })
+        }
+    });
+
+    text_ed.style(|s| {
+        s.font_size(12.)
+            .padding_horiz(4.)
+            .min_width(160.)
+            .min_height(60.)
+    })
 }
 
 fn attr_checkbox(
