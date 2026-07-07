@@ -25,11 +25,23 @@ The lopress editor ships a **debug-only HTTP control server** so Claude can see 
 ## Prerequisites
 
 1. **Run from the repo root with plain `cargo run`.** The binary is the root `lopress` crate (it calls `lopress_editor::run()`). Do **not** use `cargo run -p lopress-editor` — that's a library with no bin target and fails with `error: a bin target must be available for cargo run`. Do **not** use `--release` (the server is `#[cfg(debug_assertions)]` and gets compiled out).
-2. **Launch it as a persistent background process, separate from probing it.** The GUI event loop never returns, so a foreground `cargo run` blocks forever. Start it detached (e.g. Claude Code's `run_in_background`), then probe from later calls. Do **not** cram `cargo run & sleep 5; curl` into one command — the cold first build takes **minutes**, and `sleep 5` (or `timeout 10 cargo run`) fires the probe mid-compile and then kills the editor when the command ends.
+2. **Launch it as a persistent background process, separate from probing it.** The GUI event loop never returns, so a foreground `cargo run` blocks forever. Start it detached with your agent's background-process tool (Claude Code: `run_in_background`; pi: `bg_run`), then probe from later calls. Do **not** cram `cargo run & sleep 5; curl` into one command — the cold first build takes **minutes**, and `sleep 5` (or `timeout 10 cargo run`) fires the probe mid-compile and then kills the editor when the command ends.
 3. **Wait for the server by polling `/ping` until it returns `ok`** — don't sleep a fixed few seconds. The first debug build compiles the whole workspace before the window appears and `[ctrl] listening on http://127.0.0.1:7878` prints.
 4. **The window must be visible and not minimized.** `/ping` and `/state` answer on an independent HTTP thread, but `/open`, `/action`, and `/close` are serviced by the floem UI thread's event loop, which **stalls when the window is hidden or minimized** — those endpoints then return `504 "editor did not respond"` while `/ping` still says `ok`. Launch a normal visible window; never `Start-Process -WindowStyle Hidden`. See [Opening a workspace and documents](#opening-a-workspace-and-documents-the-first-open) for the open flow.
 5. The window title must be `lopress` — `/screenshot`, `/input`, `/click` find it by that exact title.
 6. Open a document (see below). Until then `/state` reports `{"doc_open":false,...}` and `/action` returns `409 no_document`.
+
+## Safety: only drive scratch workspaces
+
+**`/action` mutations and the editor's autosave persist to disk.** Never open the user's real blog or a committed test fixture — a stray action or autosave will silently overwrite it (this has corrupted a real site before). Scaffold a disposable site instead:
+
+```powershell
+$site = "$env:TEMP\lopress-scratch"
+Remove-Item -Recurse -Force $site -ErrorAction SilentlyContinue
+cargo run --quiet -- new $site     # scaffolds lopress.toml + src/posts/ + a sample post, then exits
+```
+
+Use `lopress new` — do **not** hand-roll a `lopress.toml` (a minimal hand-written config can make `/open` fail with `404 not_found` because `Session::open` needs a complete site, including a theme). Then `/open` the absolute path to a doc inside `$site`, e.g. `"$env:TEMP\lopress-scratch\src\posts\hello.md"`. Inspect the rendered HTML in `$site\www\` after a rebuild.
 
 ## Quick reference
 
@@ -38,13 +50,27 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | Endpoint | Method | Purpose | Returns |
 |---|---|---|---|
 | `/ping` | GET | Liveness check | `ok` |
-| `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}]}` |
+| `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}]}` — see kind values below |
 | `/screenshot` | GET | PNG of the window | `image/png` bytes; `503` if window not found |
 | `/action` | POST | Apply a `CtrlAction` to the doc | `200 {"status":"dispatched"}` / `409 no_document` / `422 block_not_found` / `400 parse error` |
 | `/open` | POST | Open a doc by path. Body `{ "path": "..." }`. Absolute or workspace-relative. | `200 {"status":"opened"}` / `404 {"status":"not_found"}` / `409 {"status":"no_workspace"}` |
 | `/close` | POST | Close the current doc and return to the welcome view. | `200 {"status":"closed"}` / `409 {"status":"no_workspace"}` |
 | `/input` | POST | Inject text or a key chord | `ok` / `400` |
 | `/click` | POST | Click at client-area coords | `ok` / `400` |
+
+## GET /state — reading document state
+
+`/state` returns `{doc_open, path, blocks:[{id, kind, text, lang?}]}`. The `kind` string depends on the block's body shape (note the mixed casing — it is exactly this):
+
+| Body | `kind` value | `text` |
+|---|---|---|
+| Inline (paragraph, heading, separator, read-more) | the lowercase editor key: `"paragraph"`, `"heading"`, `"separator"`, `"more"` — plugin blocks with an inline body and no built-in editor also report `"paragraph"` | concatenated run text |
+| Code | `"Code"` (plus a `lang` field) | the code text |
+| List | `"List"` | items joined with `\n` |
+| Table | `"Table"` | cells flattened to text |
+| Opaque (image, unknown/plugin types) | `"Opaque(<type>)"`, e.g. `"Opaque(lopress:video)"`, `"Opaque(image)"` | `""` (always empty — Opaque content is not exposed; verify via `/screenshot` or the saved `.md`) |
+
+`/state` does **not** distinguish heading levels or expose plugin attrs — read the persisted `.md` for those.
 
 ## POST /action — document mutations
 
@@ -55,20 +81,35 @@ Body is a JSON `CtrlAction` with a `"type"` discriminant. `block_id` is the raw 
 {"type":"MergeWithPrev","block_id":3}
 {"type":"Delete","block_id":2}
 {"type":"Move","block_id":2,"to_index":0}
-{"type":"ChangeType","block_id":2,"new_kind":{"type":"Heading","level":2}}
+{"type":"ChangeType","block_id":2,"new_editor":"heading","new_attrs":{"level":2}}
+{"type":"InsertAfter","block_id":2,"new_block":"Separator"}
+{"type":"InsertAfter","block_id":2,"new_block":{"Table":{"rows":2,"cols":3}}}
 {"type":"EditInline","block_id":2,"new_runs":[{"text":"Hi","bold":true,"italic":false,"code":false,"link":null}]}
 {"type":"EditCode","block_id":4,"new_text":"fn main() {}"}
 {"type":"EditAttrs","block_id":4,"new_attrs":{"lang":"rust"}}
+{"type":"TableInsertRow","block_id":9,"at":1}
+{"type":"TableDeleteRow","block_id":9,"row":1}
+{"type":"TableInsertColumn","block_id":9,"at":0}
+{"type":"TableDeleteColumn","block_id":9,"col":0}
+{"type":"TableSetAlign","block_id":9,"col":0,"align":"Center"}
 ```
 
-`new_kind` types: `Paragraph`, `Heading {level}`, `Code {lang}`, `List {ordered}`.
+- `ChangeType` takes a `new_editor` key — one of the built-in editor keys `"paragraph"`, `"heading"`, `"code"`, `"list"`, `"image"`, `"table"`, `"separator"`, `"more"` — plus optional `new_attrs` to seed (`{"level":2}` for heading, `{"lang":"rust"}` for code, `{"ordered":true}` for list). **The old `{"new_kind":{"type":"Heading","level":2}}` form no longer exists and returns `400 parse error`.**
+- `InsertAfter` can inject only `"Separator"` or `{"Table":{rows,cols}}`. There is no generic block-injection action; insert other types by `Split`-ing an existing block and `ChangeType`-ing the new one, or via the slash menu with `/input`.
+- `TableSetAlign` `align` values: `"None"`, `"Left"`, `"Center"`, `"Right"` (capitalized).
 
 `/action` blocks until the editor reports an outcome and answers with JSON: `200 {"status":"dispatched"}` when the action reached a real block and was routed to the editor; `422 {"status":"block_not_found","block_id":N}` when the id does not exist in the open document; `409 {"status":"no_document"}` when no document is open. (`200`/dispatched does not guarantee the document changed — a no-op action such as `Move` to the same position still dispatches.) On Windows, `Invoke-RestMethod` throws on `4xx` codes — that thrown error is the signal the action did not apply; previously such cases were silently dropped with a `200 ok`.
 
 PowerShell example:
 ```powershell
-$body = '{"type":"ChangeType","block_id":2,"new_kind":{"type":"Heading","level":2}}'
+$body = '{"type":"ChangeType","block_id":2,"new_editor":"heading","new_attrs":{"level":2}}'
 Invoke-RestMethod -Uri http://127.0.0.1:7878/action -Method Post -Body $body
+```
+
+To capture the status code and body of a *failing* call (`Invoke-RestMethod` throws and hides them):
+```powershell
+try { Invoke-WebRequest -Uri http://127.0.0.1:7878/action -Method Post -Body $body }
+catch { $_.Exception.Response.StatusCode.value__; $_.ErrorDetails.Message }
 ```
 
 ## Opening a workspace and documents (the first open)
@@ -129,12 +170,48 @@ Modifiers: `ctrl`, `shift`, `alt`. Keys: `enter`, `backspace`, `delete`, `tab`, 
 
 Input goes through `SendInput` (the real Windows input pipeline), so winit sees correct key text and modifier state. `/input` first brings the lopress window to the foreground; if it cannot, it returns `400` rather than injecting keystrokes into another app.
 
+**Practical gotchas:**
+- **Windows' foreground lock makes `/input` flaky** — the OS may refuse to foreground the window, so keystrokes get rejected or land oddly. `/click` into the target block first (it also places the caret), then `/input`. Retry once on a `400`.
+- **The slash menu opens via the key path, not the text path**: use `{"type":"keys","keys":"/"}` in an empty paragraph. `{"type":"text","text":"/"}` inserts a literal `/` without triggering the menu.
+
 ## Screenshot workflow
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:7878/screenshot -OutFile shot.png
 ```
-Then `Read` the PNG to view it. Capturing briefly raises the window to topmost (~100 ms) to force DWM to composite the wgpu surface — expect a momentary z-order flicker.
+Then open the PNG with your file-reading tool and actually look at it — an unopened screenshot verifies nothing. Capturing briefly raises the window to topmost (~100 ms) to force DWM to composite the wgpu surface — expect a momentary z-order flicker.
+
+## Launch and cleanup recipe
+
+The full lifecycle, end to end (agent-neutral; substitute your background tool):
+
+```powershell
+# 1. Scratch site (see Safety section)
+$site = "$env:TEMP\lopress-scratch"
+Remove-Item -Recurse -Force $site -ErrorAction SilentlyContinue
+cargo run --quiet -- new $site
+
+# 2. Launch detached from the repo root (Claude: run_in_background; pi: bg_run).
+#    Plain `cargo run` — never --release, never -p lopress-editor.
+
+# 3. Poll /ping until it answers ok (cold build takes minutes):
+$deadline = (Get-Date).AddMinutes(10)
+do {
+  try { $ok = (Invoke-RestMethod http://127.0.0.1:7878/ping) -eq 'ok' } catch { $ok = $false }
+  if (-not $ok) { Start-Sleep -Seconds 5 }
+} until ($ok -or (Get-Date) -gt $deadline)
+
+# 4. Bootstrap the workspace with an ABSOLUTE first /open
+#    (ConvertTo-Json escapes the Windows backslashes correctly):
+$body = @{ path = "$site\src\posts\hello.md" } | ConvertTo-Json
+Invoke-RestMethod -Uri http://127.0.0.1:7878/open -Method Post -Body $body
+
+# 5. ... drive /state, /action, /screenshot, /input ...
+
+# 6. Cleanup: kill the background editor process (Claude: TaskStop/KillShell; pi: bg_kill),
+#    then remove the scratch site:
+Remove-Item -Recurse -Force $site -ErrorAction SilentlyContinue
+```
 
 ## Standard debugging loop
 
@@ -184,3 +261,7 @@ When an endpoint behaves unexpectedly, run these in order:
 - **Checking `/state` after `/input` typing** — buffered edits show in `/screenshot`, not `/state`, until committed.
 - **Typing into an unfocused block** — `/click` the target block first; `/input` types wherever the caret is.
 - **Forgetting the editor blocks the foreground** — `/screenshot`, `/click`, and `/input` briefly reorder/activate the window; that flicker is expected.
+- **Driving a real site or committed fixture** — `/action` and autosave write to disk. Always use a `lopress new` scratch site (see Safety section).
+- **Using the old `new_kind` ChangeType payload** — it was replaced by `new_editor` + `new_attrs`; the old form is a `400 parse error`.
+- **Trusting `dispatched` as "it worked"** — `200 dispatched` only means the action reached a real block. Re-fetch `/state` (or screenshot) and confirm the end-state.
+- **Expecting Opaque/plugin content in `/state`** — Opaque blocks report `kind:"Opaque(<type>)"` with empty `text`; verify their content via `/screenshot` and the persisted `.md`.

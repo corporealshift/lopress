@@ -70,7 +70,7 @@ load error.
 | `category` | string | `"Blocks"` | Inserter grouping bucket, e.g. `"Text"`, `"Media"`, `"Design"`. |
 | `css` | array of strings | `[]` | CSS files this block contributes to the page `<head>`. **Parsed and exposed today; build-side injection is not yet wired** — treat as forward-looking. |
 | `js` | array of strings | `[]` | JS files this block contributes. Same status as `css`. |
-| `editor` | string | none | *(Base plugins only.)* Selects the built-in editor widget for the block (`"list"`, `"code"`, `"image"`, `"more"`). Leave unset for site plugins — they get the generic attr-form editor. |
+| `editor` | string | none | *(Base plugins only.)* Selects the built-in editor widget for the block (`"paragraph"`, `"heading"`, `"code"`, `"list"`, `"image"`, `"table"`, `"separator"`, `"more"`). Leave unset for site plugins — they get the generic attr-form editor. |
 | `builtin` | bool | `false` | *(Base plugins only.)* Marks a block shipped inside the core binary; the editor suppresses its chrome (header strip + attr form). **Do not set this in a site plugin.** |
 | `native` | string | none | *(Base plugins only.)* Claims a native `lopress_core` block type (e.g. `"list"`), so the block serializes as bare markdown instead of a comment container. Exclusive — one plugin per core type. **Advanced; not for typical site plugins.** |
 
@@ -399,9 +399,10 @@ enabled = ["callout", "button"]   # by plugin `name`; empty/absent = load all
 ## Theme plugins
 
 A plugin with `theme = true` supplies the site's theme instead of blocks: the Tera
-template set (`layout.html`, `post.html`, `index.html`, `page.html`, `tag.html`) and a
-stylesheet. A default theme ships with the binary, so fresh sites render without
-installing anything. (Theme authoring is documented separately.)
+template set (`layout.html`, `post.html`, `index.html`, `page.html`, `tag.html`,
+`404.html`) and a stylesheet. A default theme ships with the binary, so fresh sites
+render without installing anything. See [themes.md](themes.md) for the full theme
+authoring guide (layout, template context, Tera gotchas).
 
 ---
 
