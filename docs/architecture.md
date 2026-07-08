@@ -552,8 +552,8 @@ The block IS a native markdown construct. When serialized, it uses the native ma
 **Capability #2 — Renderer (`renderer` field):**
 A WASM renderer for blocks whose output can't be expressed as a template. (Planned, not yet implemented.)
 
-**Capability #3 — Assets (`css` + `js` fields):**
-CSS and JS files that the build pipeline injects into the page `<head>`. (Parsed and exposed; injection is a follow-up task.)
+**Capability #3 — Assets (top-level `[assets]` table, plus per-block `css`/`js`):**
+CSS and JS files the build injects into every rendered page — `<link>` before `</head>`, `<script defer>` before `</body>`. Declared paths (relative to the plugin root) map to their copied web path under `/assets/<plugin-name>/`. Only enabled plugins inject; order within a plugin is preserved. Implemented in `lopress-build/src/assets.rs`.
 
 ### 6.3 Registry Lifecycle
 

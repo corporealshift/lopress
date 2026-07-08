@@ -17,6 +17,6 @@ pub mod registry;
 pub use error::PluginError;
 pub use loader::load_dir;
 pub use manifest::{
-    parse_manifest, parse_manifest_str, AttrDecl, AttrType, BlockDecl, PluginManifest,
+    parse_manifest, parse_manifest_str, AttrDecl, AttrType, BlockDecl, PluginAssets, PluginManifest,
 };
 pub use registry::{LoadedPlugin, PluginRegistry};

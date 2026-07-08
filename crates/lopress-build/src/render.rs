@@ -604,6 +604,7 @@ mod tests {
                     description: None,
                     category: None,
                 }],
+                assets: Default::default(),
             },
         })
         .unwrap();
@@ -653,6 +654,7 @@ mod tests {
                     description: None,
                     category: None,
                 }],
+                assets: Default::default(),
             },
         })
         .unwrap();
@@ -705,6 +707,7 @@ mod tests {
                     description: None,
                     category: None,
                 }],
+                assets: Default::default(),
             },
         })
         .unwrap();

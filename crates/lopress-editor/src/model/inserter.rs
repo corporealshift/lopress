@@ -160,6 +160,7 @@ mod tests {
                 version: "0.1.0".to_string(),
                 theme: false,
                 blocks,
+                assets: Default::default(),
             },
         }
     }

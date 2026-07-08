@@ -116,6 +116,7 @@ pub fn render_all(
     cache: &mut crate::cache::BuildCache,
     force_full: bool,
     image_index: &ImageIndex,
+    asset_tags: &crate::assets::AssetTags,
 ) -> Result<RenderStats, BuildError> {
     let www = workspace.www_dir();
     std::fs::create_dir_all(&www)?;
@@ -195,6 +196,7 @@ pub fn render_all(
                 theme,
                 tera_shared,
                 image_index,
+                asset_tags,
             ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
@@ -269,6 +271,7 @@ pub fn render_all(
                 theme,
                 tera_shared,
                 image_index,
+                asset_tags,
             ) {
                 Ok(()) => {
                     if let Some(ref old) = old {
@@ -378,6 +381,10 @@ pub fn prune_orphans(
     Ok(changed)
 }
 
+// Threads the full render environment (output dir, site ctx, plugin
+// registry, theme engine, shared Tera, image index, asset tags); bundling
+// these into a struct would add indirection without cutting real coupling.
+#[allow(clippy::too_many_arguments)]
 pub fn render_one_post(
     www: &Path,
     site: &SiteCtx,
@@ -386,6 +393,7 @@ pub fn render_one_post(
     theme: &ThemeEngine,
     tera_shared: &tera::Tera,
     image_index: &ImageIndex,
+    asset_tags: &crate::assets::AssetTags,
 ) -> Result<(), BuildError> {
     let body_html = render_body(&post.doc, registry, tera_shared, image_index)?;
     let slug = &post.slug;
@@ -411,9 +419,14 @@ pub fn render_one_post(
         tag: None,
     };
     let html = theme.render("post.html", &RenderContext { site, page: &page })?;
+    let html = crate::assets::inject(&html, asset_tags);
     write_page(www, &format!("posts/{slug}"), &html)
 }
 
+// Threads the full render environment (output dir, site ctx, plugin
+// registry, theme engine, shared Tera, image index, asset tags); bundling
+// these into a struct would add indirection without cutting real coupling.
+#[allow(clippy::too_many_arguments)]
 pub fn render_one_page(
     www: &Path,
     site: &SiteCtx,
@@ -422,6 +435,7 @@ pub fn render_one_page(
     theme: &ThemeEngine,
     tera_shared: &tera::Tera,
     image_index: &ImageIndex,
+    asset_tags: &crate::assets::AssetTags,
 ) -> Result<(), BuildError> {
     let body_html = render_body(&p.doc, registry, tera_shared, image_index)?;
     let slug = &p.slug;
@@ -447,10 +461,16 @@ pub fn render_one_page(
         tag: None,
     };
     let html = theme.render("page.html", &RenderContext { site, page: &page })?;
+    let html = crate::assets::inject(&html, asset_tags);
     write_page(www, slug, &html)
 }
 
-pub fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(), BuildError> {
+pub fn render_index(
+    www: &Path,
+    site: &SiteCtx,
+    theme: &ThemeEngine,
+    asset_tags: &crate::assets::AssetTags,
+) -> Result<(), BuildError> {
     let page = PageCtx {
         kind: PageKind::Index,
         title: site.title.clone(),
@@ -466,6 +486,7 @@ pub fn render_index(www: &Path, site: &SiteCtx, theme: &ThemeEngine) -> Result<(
         tag: None,
     };
     let html = theme.render("index.html", &RenderContext { site, page: &page })?;
+    let html = crate::assets::inject(&html, asset_tags);
     std::fs::write(www.join("index.html"), html)?;
     Ok(())
 }
@@ -476,6 +497,7 @@ pub fn render_tag(
     tag: &str,
     posts: &[PostSummary],
     theme: &ThemeEngine,
+    asset_tags: &crate::assets::AssetTags,
 ) -> Result<(), BuildError> {
     let url = format!("/tags/{tag}/");
     let page = PageCtx {
@@ -493,6 +515,7 @@ pub fn render_tag(
         tag: Some(tag.to_string()),
     };
     let html = theme.render("tag.html", &RenderContext { site, page: &page })?;
+    let html = crate::assets::inject(&html, asset_tags);
     write_page(www, &format!("tags/{tag}"), &html)
 }
 

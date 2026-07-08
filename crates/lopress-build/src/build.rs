@@ -60,6 +60,9 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
     // Theme
     let theme = resolve(&registry, &ws.config.site.theme)?;
 
+    // Asset tags for every enabled plugin, injected into each rendered page.
+    let asset_tags = crate::assets::plugin_asset_tags(&registry);
+
     // Load cache and compute global hashes
     let mut build_cache = BuildCache::load(&ws.cache_path())?;
     let cfg_hash = cache::hash_config(&ws)?;
@@ -172,6 +175,7 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         &mut build_cache,
         force_full,
         &image_index,
+        &asset_tags,
     )?;
     failures.extend(stats.failures.iter().cloned());
 
@@ -212,9 +216,9 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         let tag_urls: Vec<String> = tag_urls_for(&summaries);
         sitemap::write(&ws.www_dir(), &site_ctx, &page_urls, &tag_urls)?;
         robots::write(&ws.www_dir(), &ws.config)?;
-        not_found::write(&ws.www_dir(), &site_ctx, &theme.engine)?;
+        not_found::write(&ws.www_dir(), &site_ctx, &theme.engine, &asset_tags)?;
 
-        if let Err(e) = pages::render_index(&ws.www_dir(), &site_ctx, &theme.engine) {
+        if let Err(e) = pages::render_index(&ws.www_dir(), &site_ctx, &theme.engine, &asset_tags) {
             failures.push(PageFailure {
                 path: ws.www_dir().join("index.html"),
                 message: e.to_string(),
@@ -231,9 +235,14 @@ pub fn build(workspace: &Path) -> Result<BuildReport, BuildError> {
         }
 
         for (tag, tag_posts) in &tag_map {
-            if let Err(e) =
-                pages::render_tag(&ws.www_dir(), &site_ctx, tag, tag_posts, &theme.engine)
-            {
+            if let Err(e) = pages::render_tag(
+                &ws.www_dir(),
+                &site_ctx,
+                tag,
+                tag_posts,
+                &theme.engine,
+                &asset_tags,
+            ) {
                 failures.push(PageFailure {
                     path: ws.www_dir().join(format!("tags/{tag}/index.html")),
                     message: e.to_string(),
@@ -454,6 +463,69 @@ base_url = "https://example.com"
         assert!(!d.path().join("www/favicon.png").exists());
     }
 
+    /// Scaffold a site with a block-less `code` asset plugin and one post.
+    /// `enabled` is written verbatim into `[plugins]` (empty string = omit,
+    /// which loads every plugin).
+    fn asset_plugin_site(d: &TempDir, enabled: &str) {
+        std::fs::write(
+            d.path().join("lopress.toml"),
+            format!("[site]\ntitle = \"S\"\nbase_url = \"https://example.com\"\n{enabled}"),
+        )
+        .unwrap();
+        for sub in [
+            "src/posts",
+            "src/pages",
+            "src/images",
+            "plugins/code/assets",
+        ] {
+            std::fs::create_dir_all(d.path().join(sub)).unwrap();
+        }
+        std::fs::write(
+            d.path().join("plugins/code/plugin.toml"),
+            "name = \"code\"\nversion = \"0.1.0\"\n\n[assets]\ncss = [\"assets/code.css\"]\njs = [\"assets/highlight.min.js\", \"assets/code.js\"]\n",
+        )
+        .unwrap();
+        for f in ["code.css", "highlight.min.js", "code.js"] {
+            std::fs::write(d.path().join("plugins/code/assets").join(f), b"/**/").unwrap();
+        }
+        std::fs::write(
+            d.path().join("src/posts/hello.md"),
+            "---\ntitle: Hello\n---\n# Hi\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn plugin_assets_injected_into_rendered_pages() {
+        let d = TempDir::new().unwrap();
+        asset_plugin_site(&d, "");
+        build(d.path()).unwrap();
+
+        let css = r#"<link rel="stylesheet" href="/assets/code/code.css">"#;
+        // Order preserved within the plugin: highlight before code.
+        let js = "<script defer src=\"/assets/code/highlight.min.js\"></script>\n<script defer src=\"/assets/code/code.js\"></script>";
+
+        for page in ["index.html", "posts/hello/index.html", "404.html"] {
+            let html = std::fs::read_to_string(d.path().join("www").join(page)).unwrap();
+            assert!(html.contains(css), "{page} missing css link:\n{html}");
+            assert!(html.contains(js), "{page} missing ordered js:\n{html}");
+        }
+    }
+
+    #[test]
+    fn disabled_plugin_assets_not_injected() {
+        let d = TempDir::new().unwrap();
+        // Enable only a non-existent plugin, so `code` is loaded-but-excluded.
+        asset_plugin_site(&d, "\n[plugins]\nenabled = [\"nonexistent\"]\n");
+        build(d.path()).unwrap();
+
+        let html = std::fs::read_to_string(d.path().join("www/index.html")).unwrap();
+        assert!(
+            !html.contains("/assets/code/"),
+            "disabled plugin must not inject:\n{html}"
+        );
+    }
+
     #[test]
     fn markdown_template_field_is_accessible() {
         // Minimal test: the struct compiles with the new field and it's
@@ -479,6 +551,7 @@ base_url = "https://example.com"
                     description: None,
                     category: None,
                 }],
+                assets: Default::default(),
             },
         })
         .unwrap();

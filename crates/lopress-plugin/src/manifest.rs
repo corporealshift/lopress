@@ -11,6 +11,22 @@ pub struct PluginManifest {
     pub theme: bool,
     #[serde(default)]
     pub blocks: Vec<BlockDecl>,
+    /// Capability #3 — Assets. Top-level CSS/JS the plugin contributes to
+    /// every rendered page. This is the mechanism block-less asset plugins
+    /// (syntax highlighting, toc, lightbox) use; block plugins may declare it
+    /// too (e.g. `series`). Paths are relative to the plugin root.
+    #[serde(default)]
+    pub assets: PluginAssets,
+}
+
+/// Top-level `[assets]` table: CSS/JS a plugin injects into every page.
+/// Paths are relative to the plugin root (e.g. `assets/code.css`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PluginAssets {
+    #[serde(default)]
+    pub css: Vec<String>,
+    #[serde(default)]
+    pub js: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -34,12 +50,13 @@ pub struct BlockDecl {
     /// exclusive claim (see `PluginRegistry`). Absent → comment-container form.
     #[serde(default)]
     pub native: Option<String>,
-    /// Capability #3 — Assets. CSS files this block contributes to the page
-    /// `<head>`. Parsed and exposed; build-side injection is a follow-up.
+    /// Capability #3 — Assets. CSS files this block contributes, unioned with
+    /// the plugin's top-level `[assets]` and injected into every page. Most
+    /// plugins should declare assets at the top level (`PluginAssets`) instead.
     #[serde(default)]
     pub css: Vec<String>,
-    /// Capability #3 — Assets. JS files this block contributes to the page
-    /// `<head>`. Parsed and exposed; build-side injection is a follow-up.
+    /// Capability #3 — Assets. JS files this block contributes. Same handling
+    /// as `css`.
     #[serde(default)]
     pub js: Vec<String>,
     /// Tera markdown-template path, relative to the plugin root.
@@ -427,6 +444,67 @@ template = "blocks/video.html"
         assert!(b.title.is_none());
         assert!(b.description.is_none());
         assert!(b.category.is_none());
+    }
+
+    #[test]
+    fn parses_top_level_assets_table() {
+        // Mirrors the real `code` asset-plugin manifest: block-less, declares
+        // css + ordered js at the top level.
+        let src = r#"
+name = "code"
+version = "0.1.0"
+
+[assets]
+css = ["assets/code.css"]
+js  = ["assets/highlight.min.js", "assets/code.js"]
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert!(m.blocks.is_empty());
+        assert_eq!(m.assets.css, vec!["assets/code.css".to_string()]);
+        assert_eq!(
+            m.assets.js,
+            vec![
+                "assets/highlight.min.js".to_string(),
+                "assets/code.js".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_block_plugin_with_top_level_assets() {
+        // The real `series` plugin has BOTH a block and a top-level [assets]
+        // table — both must survive parsing.
+        let src = r#"
+name = "series"
+version = "0.1.0"
+
+[[blocks]]
+name = "lopress:series"
+template = "blocks/series.html"
+
+[assets]
+css = ["assets/series.css"]
+js  = ["assets/series.js"]
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert_eq!(m.blocks.len(), 1);
+        assert_eq!(m.assets.css, vec!["assets/series.css".to_string()]);
+        assert_eq!(m.assets.js, vec!["assets/series.js".to_string()]);
+    }
+
+    #[test]
+    fn top_level_assets_default_to_empty() {
+        let src = r#"
+name = "video"
+version = "0.1.0"
+
+[[blocks]]
+name     = "lopress:video"
+template = "blocks/video.html"
+"#;
+        let m = parse_manifest_str(src).unwrap();
+        assert!(m.assets.css.is_empty());
+        assert!(m.assets.js.is_empty());
     }
 
     #[test]
