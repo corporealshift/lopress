@@ -40,6 +40,7 @@ theme   = false         # optional — see "Theme plugins" below (default false)
 | `version` | string | — *(required)* | Plugin version. Informational today. |
 | `theme` | bool | `false` | When `true`, the plugin supplies the site theme (template set + stylesheet) instead of blocks. |
 | `blocks` | array of tables | `[]` | Block-type declarations. Each is a `[[blocks]]` table. |
+| `assets` | table | `{}` | Top-level CSS/JS the plugin injects into every rendered page. See [Assets](#assets--assets). |
 
 ---
 
@@ -68,8 +69,8 @@ load error.
 | `title` | string | derived | Label shown in the editor's block inserter (slash menu). When absent, derived from `name` (strip `lopress:`, title-case → `"lopress:author-bio"` becomes `"Author bio"`). |
 | `description` | string | none | Secondary description line for the inserter entry. |
 | `category` | string | `"Blocks"` | Inserter grouping bucket, e.g. `"Text"`, `"Media"`, `"Design"`. |
-| `css` | array of strings | `[]` | CSS files this block contributes to the page `<head>`. **Parsed and exposed today; build-side injection is not yet wired** — treat as forward-looking. |
-| `js` | array of strings | `[]` | JS files this block contributes. Same status as `css`. |
+| `css` | array of strings | `[]` | CSS files this block contributes to the page `<head>`. Injected on every page (unioned with the plugin's top-level `[assets]`). Prefer the top-level [`[assets]`](#assets--assets) table unless assets are truly block-specific. |
+| `js` | array of strings | `[]` | JS files this block contributes. Same behavior as `css`. |
 | `editor` | string | none | *(Base plugins only.)* Selects the built-in editor widget for the block (`"paragraph"`, `"heading"`, `"code"`, `"list"`, `"image"`, `"table"`, `"separator"`, `"more"`). Leave unset for site plugins — they get the generic attr-form editor. |
 | `builtin` | bool | `false` | *(Base plugins only.)* Marks a block shipped inside the core binary; the editor suppresses its chrome (header strip + attr form). **Do not set this in a site plugin.** |
 | `native` | string | none | *(Base plugins only.)* Claims a native `lopress_core` block type (e.g. `"list"`), so the block serializes as bare markdown instead of a comment container. Exclusive — one plugin per core type. **Advanced; not for typical site plugins.** |
@@ -78,6 +79,52 @@ load error.
 > is a comment-container block — i.e. it has `template` *or* `markdown_template`, and is
 > **not** `builtin` and does **not** claim a `native` type. Base/native blocks have their
 > own dedicated slash entries.
+
+---
+
+## Assets — `[assets]`
+
+A top-level `[assets]` table declares CSS/JS the plugin injects into **every**
+rendered page. This is how block-less "reading enhancement" plugins (syntax
+highlighting, table-of-contents, lightbox) ship without any theme edits — drop
+the plugin in, enable it, and the tags appear. A block plugin may declare it
+too (e.g. a `series` block whose box needs its own stylesheet).
+
+```toml
+name = "code"
+version = "0.1.0"
+
+[assets]
+css = ["assets/code.css"]
+js  = ["assets/highlight.min.js", "assets/code.js"]
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `css` | array of strings | `[]` | Stylesheet paths (relative to the plugin root). Emitted as `<link rel="stylesheet">` before `</head>`. |
+| `js` | array of strings | `[]` | Script paths (relative to the plugin root). Emitted as `<script defer>` before `</body>`. |
+
+**Path mapping.** Every plugin's `assets/` directory is copied to
+`www/assets/<plugin-name>/` at build time. A declared path is mapped to its
+web URL by stripping the leading `assets/` segment: `assets/code.css` →
+`/assets/code/code.css`. Keep asset files under `assets/` so they get copied.
+
+**Behavior.**
+- **Enabled plugins only.** A plugin excluded by `[plugins].enabled` injects
+  nothing.
+- **Order preserved within a plugin.** `highlight.min.js` before `code.js`
+  stays that way — declaration order is the load order.
+- **Every page.** Posts, pages, index, tag archives, and 404 all receive the
+  tags. Injection is page-level, not block-level: a plugin's assets load on
+  every page regardless of whether a given page uses its block.
+- **Merges with per-block `css`/`js`.** The injected set for a plugin is the
+  top-level `[assets]` unioned with every block's `css`/`js`, deduplicated.
+- **Cache.** Asset and manifest changes flow through the plugin build hash, so
+  editing a `[assets]` declaration re-renders every page.
+
+The theme needs no changes — lopress writes the tags directly into the rendered
+HTML. (If a theme's `layout.html` lacks a `</head>` or `</body>`, the tags are
+appended so assets still load.)
 
 ---
 
