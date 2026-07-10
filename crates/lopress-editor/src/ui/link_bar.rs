@@ -112,7 +112,7 @@ pub fn link_bar_view(
                         // target, so a pre-filled URL shows only its first ~20
                         // chars even though the box fills the bar. A percentage
                         // width makes the clip track the real (flex-grown) width.
-                        .style(|s| s.flex_grow(1.0).width_full().font_size(13.)),
+                        .style(|s| s.flex_grow(1.0f32).width_full().font_size(13.)),
                     button(label(|| "Apply".to_string()))
                         .on_event_stop(EventListener::PointerDown, move |_| apply()),
                     button(label(|| "Remove".to_string()))

@@ -165,10 +165,10 @@ pub fn editable_list_view(
             h_stack((
                 text(prefix).style(|s| s.width(24.).font_size(15.)),
                 floem::views::stack((
-                    editor.style(|s| s.flex_grow(1.0).width_full()),
+                    editor.style(|s| s.flex_grow(1.0f32).width_full()),
                     placeholder_overlay,
                 ))
-                .style(|s| s.flex_grow(1.0)),
+                .style(|s| s.flex_grow(1.0f32)),
             ))
             .style(|s| s.padding_vert(2.).width_full())
             .into_any()
