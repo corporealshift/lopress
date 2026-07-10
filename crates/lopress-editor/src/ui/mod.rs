@@ -246,8 +246,28 @@ fn editing_view(
 
     let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
 
+    // ── Save pipeline ────────────────────────────────────────────────────
+    // Created before the doc-switch closures below: they flush pending edits
+    // through it before replacing `current_doc`.
+    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
+
+    // Pane-stable slot holding the focused block editor's commit closure;
+    // registered on focus by `mount_block_editor`, consumed by the doc-switch
+    // flush below. See `ActiveCommitSlot`.
+    let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
+    let flush_signals = save_pipeline::FlushSignals {
+        active_commit,
+        dirty_sig: save.dirty_sig,
+        save_error_sig: save.save_error_sig,
+    };
+
     let editing_for_open = Rc::clone(&editing);
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
+        // Flush the focused editor's buffer and persist unsaved edits before
+        // the switch discards them; abort when the dirty doc can't be saved.
+        if !save_pipeline::flush_pending_edits(flush_signals, &editing_for_open, current_doc) {
+            return;
+        }
         let mut guard = editing_for_open.borrow_mut();
         let Some(state) = guard.as_mut() else {
             return;
@@ -263,6 +283,7 @@ fn editing_view(
         workspace_signal,
         current_doc,
         current_path,
+        flush_signals,
         new_doc::DocKind::Post,
     );
     let on_new_page = new_doc::make_new_doc_action(
@@ -270,6 +291,7 @@ fn editing_view(
         workspace_signal,
         current_doc,
         current_path,
+        flush_signals,
         new_doc::DocKind::Page,
     );
 
@@ -300,9 +322,6 @@ fn editing_view(
     // button or the bar's own input.
     let link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>> = RwSignal::new(None);
     let dnd = DndState::new();
-
-    // ── Save pipeline ────────────────────────────────────────────────────
-    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
 
     // ── Action sink + undo/redo closures ───────────────────────────────
     let on_action = action_sink::build_action_sink(
@@ -380,6 +399,7 @@ fn editing_view(
         on_insert_image_for_pane,
         inserter_items_for_pane,
         link_edit,
+        active_commit,
     )
     .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
 
