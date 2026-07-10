@@ -491,10 +491,7 @@ fn consume_inline(parser: &mut Parser<'_>, end: TagEnd) -> (String, Option<Block
             Event::SoftBreak => text.push('\n'),
             Event::HardBreak => text.push('\n'),
             Event::Start(Tag::Image {
-                dest_url,
-                title,
-                id: _,
-                ..
+                dest_url, title, ..
             }) => {
                 let src = dest_url.to_string();
                 let caption = title.to_string();
