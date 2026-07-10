@@ -45,6 +45,22 @@ pub struct FocusPublisher {
     pub editor_and_spans: RwSignal<Option<EditorHandles>>,
 }
 
+/// Pane-stable slot holding the focused block editor's commit closure.
+///
+/// `mount_block_editor` registers a disposal-guarded commit here on
+/// FocusGained. Doc-switch paths (sidebar row click, "+ New post/page")
+/// invoke it before replacing `current_doc`, flushing typed-but-uncommitted
+/// text that would otherwise be silently dropped: sidebar rows are not
+/// focusable, so clicking them never blurs the editor, and the FocusLost
+/// commit either never fires or fires after the switch and is rejected by
+/// its own stale-block check.
+///
+/// The slot is *not* cleared on FocusLost — a redundant flush is a no-op
+/// (`apply_edit_block_body` drops identical bodies), and not clearing avoids
+/// depending on FocusLost/FocusGained ordering. Staleness across a column
+/// rebuild is handled by the guard inside the registered closure.
+pub type ActiveCommitSlot = RwSignal<Option<CommitClosure>>;
+
 /// All reactive state owned by one inline block's native editor.
 #[derive(Clone, Copy)]
 pub struct BlockEditorState {
@@ -242,6 +258,20 @@ pub fn mount_block_editor(
     let commit_for_key = _commit;
     let commit_on_focus_lost = Rc::clone(&commit_for_key);
 
+    // Disposal-guarded commit registered into the pane-stable `active_commit`
+    // slot on FocusGained. The guard matters because the slot outlives column
+    // rebuilds: if this editor's scope was disposed without a FocusLost (the
+    // rebuild dropped it while focused), the captured signals are dead and
+    // reading them would panic — bail instead; there is no buffer to flush.
+    let active_commit = env.active_commit;
+    let commit_for_switch = Rc::clone(&commit_for_key);
+    let guarded_commit: CommitClosure = Rc::new(move || {
+        if editor_sig.try_with_untracked(|ed| ed.is_none()) {
+            return;
+        }
+        commit_for_switch();
+    });
+
     // Capture env fields into owned/copy types so the closures outlive `env`.
     let focus_target = env.focus_target;
     let focus_pub = env.focus_pub;
@@ -305,6 +335,7 @@ pub fn mount_block_editor(
         .on_event_cont(EventListener::FocusGained, move |_| {
             focused.set(true);
             editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());
+            active_commit.set(Some(Rc::clone(&guarded_commit)));
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
             focused.set(false);

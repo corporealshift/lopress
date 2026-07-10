@@ -7,8 +7,9 @@
 
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
+use crate::ui::blocks::inline_editor::ActiveCommitSlot;
 use floem::action::debounce_action;
-use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use lopress_gui_host::{BuildStatus, ServeStatus};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -113,5 +114,71 @@ pub fn start_save_pipeline(
         save_error_sig,
         build_status_sig,
         serve_status_sig,
+    }
+}
+
+/// Copyable bundle of the signals a doc-switch flush needs. Built once in
+/// `editing_view` from the save pipeline + the pane-stable commit slot, and
+/// captured by every closure that replaces `current_doc` (sidebar open,
+/// "+ New post/page").
+#[derive(Clone, Copy)]
+pub struct FlushSignals {
+    pub active_commit: ActiveCommitSlot,
+    pub dirty_sig: RwSignal<bool>,
+    pub save_error_sig: RwSignal<Option<String>>,
+}
+
+/// Flush pending edits before a doc-switch path replaces `current_doc`.
+///
+/// Two loss windows close here. First, the focused editor's
+/// typed-but-uncommitted buffer: sidebar rows aren't focusable, so clicking
+/// one never blurs the editor and the FocusLost commit never fires — run the
+/// registered `active_commit` instead. Second, committed-but-unsaved edits:
+/// the debounced save reads `current_doc` at fire time, which after a switch
+/// is already the *new* doc, so anything dirty must be saved synchronously
+/// now.
+///
+/// Returns `false` when a dirty document could not be saved — callers must
+/// abort the switch, otherwise the unsaved edits are discarded. The error is
+/// left in `save_error_sig` for the footer to display.
+pub fn flush_pending_edits(
+    signals: FlushSignals,
+    editing: &Rc<RefCell<Option<EditingState>>>,
+    current_doc: RwSignal<Option<EditorDoc>>,
+) -> bool {
+    let FlushSignals {
+        active_commit,
+        dirty_sig,
+        save_error_sig,
+    } = signals;
+    if let Some(commit) = active_commit.get_untracked() {
+        // Marks the doc dirty via the action sink when the buffer differs
+        // from the model; a no-change commit is dropped by `apply`.
+        commit();
+    }
+    if !dirty_sig.get_untracked() {
+        return true;
+    }
+    let result = current_doc.with_untracked(|d| {
+        let doc = d.as_ref()?;
+        let guard = editing.borrow();
+        let state = guard.as_ref()?;
+        Some(state.save_doc(doc))
+    });
+    match result {
+        // No doc open (or no session): nothing to lose.
+        None => true,
+        Some(Ok(())) => {
+            dirty_sig.set(false);
+            save_error_sig.set(None);
+            if let Some(state) = editing.borrow().as_ref() {
+                state.session.rebuild();
+            }
+            true
+        }
+        Some(Err(msg)) => {
+            save_error_sig.set(Some(msg));
+            false
+        }
     }
 }
