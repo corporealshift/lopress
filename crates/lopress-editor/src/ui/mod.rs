@@ -246,19 +246,27 @@ fn editing_view(
 
     let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
 
-    // ── Save pipeline ────────────────────────────────────────────────────
-    // Created before the doc-switch closures below: they flush pending edits
-    // through it before replacing `current_doc`.
-    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
-
     // Pane-stable slot holding the focused block editor's commit closure;
     // registered on focus by `mount_block_editor`, consumed by the doc-switch
     // flush below. See `ActiveCommitSlot`.
     let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
+
+    // ── Save pipeline ────────────────────────────────────────────────────
+    // `workspace_signal` is created before the pipeline so it can be passed
+    // in for rename follow-up (sidebar + highlight must track renames).
+    let save = save_pipeline::start_save_pipeline(
+        Rc::clone(&editing),
+        current_doc,
+        current_path,
+        workspace_signal,
+    );
+
     let flush_signals = save_pipeline::FlushSignals {
         active_commit,
         dirty_sig: save.dirty_sig,
         save_error_sig: save.save_error_sig,
+        current_path,
+        workspace_signal,
     };
 
     let editing_for_open = Rc::clone(&editing);
@@ -548,7 +556,7 @@ fn editing_view(
                 Some(d) => d,
                 None => return,
             };
-            if let Some(state) = editing_for_close.borrow().as_ref() {
+            if let Some(state) = editing_for_close.borrow_mut().as_mut() {
                 let _ = state.save_doc(&doc);
             }
         })

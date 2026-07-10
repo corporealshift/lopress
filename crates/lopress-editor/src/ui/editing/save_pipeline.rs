@@ -10,8 +10,9 @@ use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActiveCommitSlot;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use lopress_gui_host::{BuildStatus, ServeStatus};
+use lopress_gui_host::{BuildStatus, ServeStatus, WorkspaceSummary};
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -28,11 +29,16 @@ pub struct SavePipeline {
 /// Create the save-pipeline signals, start the debounce timer, and kick off
 /// the build/serve status polls.
 ///
+/// `current_path` and `workspace_signal` are used to follow a slug-driven
+/// rename after a successful save.
+///
 /// Returns a `SavePipeline` that `editing_view` passes to the footer and
 /// uses for the `on_action` mark_dirty callback.
 pub fn start_save_pipeline(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    current_path: RwSignal<Option<PathBuf>>,
+    workspace_signal: RwSignal<WorkspaceSummary>,
 ) -> SavePipeline {
     // ── Save-debounce signals ────────────────────────────────────────
     // `dirty_counter` bumps on every legitimate edit; `debounce_action`
@@ -82,11 +88,13 @@ pub fn start_save_pipeline(
         let dc = dirty_counter;
         let ds = dirty_sig;
         let ses = save_error_sig;
+        let cp = current_path;
+        let ws = workspace_signal;
         debounce_action(dc, Duration::from_millis(500), move || {
             let result = current_doc.with_untracked(|d| {
                 let doc = d.as_ref()?;
-                let guard = editing_for_save.borrow();
-                let state = guard.as_ref()?;
+                let mut guard = editing_for_save.borrow_mut();
+                let state = guard.as_mut()?;
                 Some(state.save_doc(doc))
             });
             let result = match result {
@@ -94,9 +102,15 @@ pub fn start_save_pipeline(
                 None => return,
             };
             match result {
-                Ok(()) => {
+                Ok(rename) => {
                     ds.set(false);
                     ses.set(None);
+                    if let Some(new_path) = rename {
+                        cp.set(Some(new_path));
+                        if let Some(state) = editing_for_save.borrow().as_ref() {
+                            ws.set(state.session.rescan());
+                        }
+                    }
                     if let Some(state) = editing_for_save.borrow().as_ref() {
                         state.session.rebuild();
                     }
@@ -126,6 +140,8 @@ pub struct FlushSignals {
     pub active_commit: ActiveCommitSlot,
     pub dirty_sig: RwSignal<bool>,
     pub save_error_sig: RwSignal<Option<String>>,
+    pub current_path: RwSignal<Option<PathBuf>>,
+    pub workspace_signal: RwSignal<WorkspaceSummary>,
 }
 
 /// Flush pending edits before a doc-switch path replaces `current_doc`.
@@ -150,6 +166,8 @@ pub fn flush_pending_edits(
         active_commit,
         dirty_sig,
         save_error_sig,
+        current_path,
+        workspace_signal,
     } = signals;
     if let Some(commit) = active_commit.get_untracked() {
         // Marks the doc dirty via the action sink when the buffer differs
@@ -161,16 +179,22 @@ pub fn flush_pending_edits(
     }
     let result = current_doc.with_untracked(|d| {
         let doc = d.as_ref()?;
-        let guard = editing.borrow();
-        let state = guard.as_ref()?;
+        let mut guard = editing.borrow_mut();
+        let state = guard.as_mut()?;
         Some(state.save_doc(doc))
     });
     match result {
         // No doc open (or no session): nothing to lose.
         None => true,
-        Some(Ok(())) => {
+        Some(Ok(rename)) => {
             dirty_sig.set(false);
             save_error_sig.set(None);
+            if let Some(new_path) = rename {
+                current_path.set(Some(new_path));
+                if let Some(state) = editing.borrow().as_ref() {
+                    workspace_signal.set(state.session.rescan());
+                }
+            }
             if let Some(state) = editing.borrow().as_ref() {
                 state.session.rebuild();
             }
