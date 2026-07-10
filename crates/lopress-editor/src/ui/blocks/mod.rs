@@ -93,9 +93,9 @@ fn wrap_block(
     // Hover gutter with the drag handle, left of the body.
     let hover: RwSignal<bool> = RwSignal::new(false);
     let handle = drag_handle(block_id, dnd, hover)
-        .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.).items_center());
+        .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.0f32).items_center());
 
-    let row = h_stack((handle, body.style(|s| s.flex_grow(1.0))))
+    let row = h_stack((handle, body.style(|s| s.flex_grow(1.0f32))))
         .style(move |s| {
             let s = s.width_full().border_radius(4.);
             if hover.get() {

@@ -179,7 +179,7 @@ fn attr_row(
     if let Some(help) = help_row {
         field_col.push(help.into_any());
     }
-    let field = v_stack_from_iter(field_col).style(|s| s.flex_grow(1.).min_width(0.));
+    let field = v_stack_from_iter(field_col).style(|s| s.flex_grow(1.0f32).min_width(0.));
     h_stack_from_iter(vec![lbl.into_any(), field.into_any()])
         .style(|s| s.gap(8.).items_start().width_full())
         .into_any()

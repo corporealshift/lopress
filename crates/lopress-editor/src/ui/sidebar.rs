@@ -65,7 +65,7 @@ pub fn sidebar_view(
                 .into_any()
         },
     )
-    .style(|s| s.width_full().flex_grow(1.));
+    .style(|s| s.width_full().flex_grow(1.0f32));
 
     let on_new_post_btn = on_new_post.clone();
     let new_post_btn = button(label(|| "+ New post".to_string()))
@@ -84,7 +84,7 @@ pub fn sidebar_view(
     let footer = v_stack((new_post_btn, new_page_btn, site_settings_btn))
         .style(|s| s.gap(4.).padding(8.).border_top(1.).border_color(BORDER));
 
-    v_stack((scroll(lists).style(|s| s.flex_grow(1.)), footer)).style(|s| {
+    v_stack((scroll(lists).style(|s| s.flex_grow(1.0f32)), footer)).style(|s| {
         s.flex_col()
             .width(SIDEBAR_WIDTH)
             .height_full()
@@ -131,7 +131,7 @@ fn group(
 
 fn row(item: DocumentRef, active: bool, on_open: Rc<dyn Fn(DocumentRef)>) -> AnyView {
     let title = item.title.clone();
-    let title_view = label(move || title.clone()).style(|s| s.flex_grow(1.).font_size(13.));
+    let title_view = label(move || title.clone()).style(|s| s.flex_grow(1.0f32).font_size(13.));
 
     let mut elements: Vec<AnyView> = vec![title_view.into_any()];
     if item.is_draft {
