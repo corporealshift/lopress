@@ -2785,6 +2785,7 @@ dependencies = [
 name = "lopress-gui-host"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "lopress-build",
  "lopress-core",
  "lopress-plugin",

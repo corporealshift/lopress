@@ -167,6 +167,7 @@ fn open_document_by_path(
         path: target.clone(),
         title: String::new(),
         slug: String::new(),
+        date: None,
         is_draft: false,
         has_parse_error: false,
     };
