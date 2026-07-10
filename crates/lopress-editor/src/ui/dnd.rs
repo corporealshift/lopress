@@ -13,13 +13,13 @@
 //! post-removal insert position.
 
 use crate::actions::BlockAction;
-use crate::model::types::BlockId;
+use crate::model::types::{BlockId, EditorBlock, InlineRun};
 use crate::ui::blocks::inline_editor::ActionSink;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::style::CursorStyle;
-use floem::views::{empty, label, Decorators};
+use floem::views::{label, stack, Decorators};
 use floem::IntoView;
 
 /// Pane-level reactive state shared by drag handles and gap drop zones.
@@ -55,6 +55,8 @@ pub const HANDLE_WIDTH: f32 = 20.0;
 const HANDLE_COLOR: Color = Color::rgb8(170, 170, 175);
 const HANDLE_COLOR_ACTIVE: Color = Color::rgb8(80, 80, 90);
 const INDICATOR_COLOR: Color = Color::rgb8(70, 130, 230);
+const INSERT_FG: Color = Color::rgb8(90, 100, 120);
+const INSERT_BG: Color = Color::rgb8(235, 238, 245);
 
 /// The drag handle shown in the left gutter of each block. Visible only when
 /// `hover` is true (block is hovered) or this block is currently being
@@ -90,12 +92,56 @@ pub fn drag_handle(block_id: BlockId, dnd: DndState, hover: RwSignal<bool>) -> i
 }
 
 /// A gap drop-target between two blocks (or before the first / after the
-/// last). The strip is normally invisible-but-hit-testable (8 logical px
-/// tall). During a drag, when the pointer hovers it, a 2 px indicator line
-/// appears across the editor column. On `Drop`, emits `BlockAction::Move`
-/// with the gap index.
-pub fn gap_drop_zone(gap_index: usize, dnd: DndState, on_action: ActionSink) -> impl IntoView {
-    empty()
+/// last). The strip is normally invisible-but-hit-testable. During a drag,
+/// when the pointer hovers it, a 2 px indicator line appears across the
+/// editor column. On `Drop`, emits `BlockAction::Move` with the gap index.
+///
+/// When `insert_anchor` is `Some(block_id)` (the block directly above this
+/// gap), the strip doubles as an insert affordance (issue #42): hovering it
+/// shows a centered "+", and a click inserts an empty paragraph after the
+/// anchor — the action sink then focuses the new block. Gap 0 has no block
+/// above it and passes `None`, staying a pure drop target.
+pub fn gap_drop_zone(
+    gap_index: usize,
+    dnd: DndState,
+    on_action: ActionSink,
+    insert_anchor: Option<BlockId>,
+) -> impl IntoView {
+    let hovered: RwSignal<bool> = RwSignal::new(false);
+    let insert_enabled = insert_anchor.is_some();
+    let on_action_for_insert = on_action.clone();
+
+    let plus = label(move || "+".to_string()).style(move |s| {
+        // Visible only while the pointer rests on the gap and no drag is in
+        // flight (the drop indicator owns the gap during drags).
+        let visible = insert_enabled && hovered.get() && dnd.dragging.get().is_none();
+        let s = s
+            .font_size(12.)
+            .margin_horiz(floem::unit::PxPctAuto::Auto)
+            .padding_horiz(6.);
+        if visible {
+            s.color(INSERT_FG).background(INSERT_BG).border_radius(7.)
+        } else {
+            s.color(Color::TRANSPARENT)
+        }
+    });
+
+    stack((plus,))
+        .on_event(EventListener::PointerEnter, move |_| {
+            hovered.set(true);
+            EventPropagation::Continue
+        })
+        .on_event(EventListener::PointerLeave, move |_| {
+            hovered.set(false);
+            EventPropagation::Continue
+        })
+        .on_click_stop(move |_| {
+            let Some(anchor) = insert_anchor else { return };
+            on_action_for_insert(BlockAction::InsertAfter {
+                anchor,
+                new_block: Box::new(EditorBlock::paragraph(vec![InlineRun::plain("")])),
+            });
+        })
         .on_event(EventListener::DragOver, move |_| {
             // Only update when we're actually in a drag and the value would
             // change — DragOver fires on every pointer move while hovered.
@@ -126,15 +172,51 @@ pub fn gap_drop_zone(gap_index: usize, dnd: DndState, on_action: ActionSink) -> 
         })
         .style(move |s| {
             let active = dnd.dragging.get().is_some() && dnd.hover_gap.get() == Some(gap_index);
-            let s = s.width_full().height(8.);
+            // 16 px (up from 8) so the hover "+" fits without a layout jump.
+            let s = s.width_full().height(16.).items_center().justify_center();
+            let s = if insert_enabled {
+                s.cursor(CursorStyle::Pointer)
+            } else {
+                s
+            };
             if active {
                 // Draw the 2 px indicator as a top border, vertically
-                // centered by a 3 px top margin.
-                s.margin_top(3.)
+                // centered by a 7 px top margin.
+                s.margin_top(7.)
                     .border_top(2.)
                     .border_color(INDICATOR_COLOR)
             } else {
                 s
             }
+        })
+}
+
+/// The always-visible "+ Add block" affordance below the last block
+/// (issue #42). `anchor` is the last block's id; a missing anchor appends
+/// to the end of the document (see `apply_insert_after`), so this stays
+/// correct even if the anchor was just deleted.
+pub fn append_block_button(anchor: BlockId, on_action: ActionSink) -> impl IntoView {
+    // A `stack` container, not a bare label — clicks land on containers.
+    let text = label(|| "+ Add block".to_string()).style(|s| s.font_size(12.).color(INSERT_FG));
+    stack((text,))
+        .on_click_stop(move |_| {
+            on_action(BlockAction::InsertAfter {
+                anchor,
+                new_block: Box::new(EditorBlock::paragraph(vec![InlineRun::plain("")])),
+            });
+        })
+        .style(|s| {
+            // No margin: floem 0.2 offsets a margined view's paint but not
+            // its hit-test box, leaving the button click-dead where it
+            // renders. The 16 px gap row above provides the spacing.
+            s.width_full()
+                .padding_vert(6.)
+                .border(1.)
+                .border_color(Color::rgb8(225, 225, 230))
+                .border_radius(6.)
+                .cursor(CursorStyle::Pointer)
+                .items_center()
+                .justify_center()
+                .hover(|s| s.background(INSERT_BG))
         })
 }
