@@ -60,7 +60,7 @@ pub fn footer_view(
         save_label.style(|s| s.padding_horiz(10.)),
         sep(),
         word_label.style(|s| s.padding_horiz(10.)),
-        empty().style(|s| s.flex_grow(1.)),
+        empty().style(|s| s.flex_grow(1.0f32)),
         url_view.style(|s| s.padding_horiz(10.)),
     ))
     .style(|s| {

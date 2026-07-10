@@ -409,7 +409,7 @@ fn editing_view(
         link_edit,
         active_commit,
     )
-    .style(|s| s.flex_grow(1.0).height_full().min_height(0.));
+    .style(|s| s.flex_grow(1.0f32).height_full().min_height(0.));
 
     let inspector = inspector_view(current_doc, current_path, on_action.clone());
 
@@ -435,7 +435,7 @@ fn editing_view(
     // `min_height(0)` lets these flex items shrink below their content height
     // so the editor pane's `scroll` gets a bounded viewport (see editor_pane).
     let columns = h_stack((sidebar, editor, inspector))
-        .style(|s| s.width_full().flex_grow(1.0).min_height(0.));
+        .style(|s| s.width_full().flex_grow(1.0f32).min_height(0.));
 
     // ── Nav editor modal overlay ─────────────────────────────────────────
     // Absolutely positioned over the whole editing view; `empty` when closed.

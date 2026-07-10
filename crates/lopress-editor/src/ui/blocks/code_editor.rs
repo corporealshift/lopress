@@ -350,7 +350,7 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
                 })
         });
 
-    let header = h_stack((empty().style(|s| s.flex_grow(1.0)), lang_input));
+    let header = h_stack((empty().style(|s| s.flex_grow(1.0f32)), lang_input));
 
     // Body: wrap the mounted editor in a stack that hides the gutter and
     // applies monospace font + padding. Height tracks the visual line count.
