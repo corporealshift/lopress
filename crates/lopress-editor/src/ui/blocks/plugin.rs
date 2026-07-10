@@ -115,7 +115,9 @@ fn build_attr_form(
         ));
     }
     v_stack_from_iter(rows)
-        .style(|s| s.gap(2.).padding_horiz(2.))
+        // `width_full` is load-bearing: rows resolve their percentage width
+        // against this container; without it they collapse to min-content.
+        .style(|s| s.gap(2.).padding_horiz(2.).width_full())
         .into_any()
 }
 
@@ -131,6 +133,9 @@ fn attr_row(
         s.min_width(80.)
             .color(Color::rgb8(110, 100, 130))
             .font_size(12.)
+            // Rows are items_start-aligned (help text may sit under the
+            // input); nudge the label down to line up with the input text.
+            .padding_top(3.)
     });
 
     let help_text = decl.help.clone();
@@ -139,6 +144,7 @@ fn attr_row(
             s.font_size(10.)
                 .color(Color::rgb8(140, 130, 160))
                 .padding_top(1.)
+                .padding_horiz(4.)
         })
     });
 
@@ -164,14 +170,19 @@ fn attr_row(
         _ => attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), false).into_any(),
     };
 
-    let row: AnyView = if let Some(help) = help_row {
-        v_stack((lbl.into_any(), help, input)).into_any()
-    } else {
-        h_stack_from_iter(vec![lbl.into_any(), input])
-            .style(|s| s.gap(8.).items_center())
-            .into_any()
-    };
-    row
+    // One layout for every row: fixed label column left, growing field
+    // column right (input on top, help text underneath). Previously a row
+    // WITH help switched to a v_stack that pushed the input below the
+    // label at full form width, while rows WITHOUT help kept a ~160px
+    // input that clipped longer values (issue #45).
+    let mut field_col: Vec<AnyView> = vec![input];
+    if let Some(help) = help_row {
+        field_col.push(help.into_any());
+    }
+    let field = v_stack_from_iter(field_col).style(|s| s.flex_grow(1.).min_width(0.));
+    h_stack_from_iter(vec![lbl.into_any(), field.into_any()])
+        .style(|s| s.gap(8.).items_start().width_full())
+        .into_any()
 }
 
 fn attr_text(
@@ -217,7 +228,10 @@ fn attr_text(
             });
             floem::event::EventPropagation::Continue
         })
-        .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))
+        // `width_full` (not a min_width): floem's text_input clips visible
+        // text to a couple dozen chars unless it has an explicit width, even
+        // when its box is stretched by flex.
+        .style(|s| s.font_size(12.).padding_horiz(4.).width_full())
 }
 
 /// Multi-line text input for `ui = "textarea"`. Commits the live document on
@@ -285,11 +299,18 @@ fn attr_textarea(
         }
     });
 
-    text_ed.style(|s| {
+    // No gutter (line numbers read as stray content in a form field) and a
+    // text_input-like border so the textarea presents as a form field.
+    text_ed.editor_style(|s| s.hide_gutter(true)).style(|s| {
         s.font_size(12.)
             .padding_horiz(4.)
-            .min_width(160.)
+            .padding_vert(2.)
+            .width_full()
             .min_height(60.)
+            .border(1.)
+            .border_color(Color::rgb8(200, 200, 210))
+            .border_radius(4.)
+            .background(Color::WHITE)
     })
 }
 
