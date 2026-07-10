@@ -303,7 +303,7 @@ pub fn nav_editor_view(
             )
             .style(|s| s.min_height(150.).max_height(300.)),
         )
-        .style(|s| s.flex_grow(1.)),
+        .style(|s| s.flex_grow(1.0f32)),
         footer,
     ))
     .style(|s| s.gap(8.).padding(16.).width(480.))

@@ -46,7 +46,7 @@ pub fn inspector_view(
             None => empty().into_any(),
         },
     )
-    .style(|s| s.width_full().flex_grow(1.));
+    .style(|s| s.width_full().flex_grow(1.0f32));
 
     scroll(body).style(|s| {
         s.width(PANE_WIDTH)
@@ -258,7 +258,7 @@ fn form(
                 };
                 h_stack((
                     label(|| "\u{26a0} Title differs from H1".to_string())
-                        .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0)),
+                        .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0f32)),
                     button(label(|| "Sync from H1".to_string()))
                         .action(on_sync)
                         .style(|s| s.font_size(11.).padding_horiz(6.).padding_vert(2.)),

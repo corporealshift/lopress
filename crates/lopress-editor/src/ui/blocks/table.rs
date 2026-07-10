@@ -195,7 +195,7 @@ pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
                         .min_height(40.)
                         .items_center()
                         .min_width(80.)
-                        .flex_grow(1.0);
+                        .flex_grow(1.0f32);
                     if is_header {
                         s.background(HEADER_BG)
                             .font_weight(floem::text::Weight::SEMIBOLD)
