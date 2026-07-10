@@ -81,9 +81,12 @@ impl EditingState {
             .map(|r| r.path.clone())
             .ok_or_else(|| "no document open".to_string())?;
 
-        // Compute the desired filename from front-matter slug.
-        let slug = self.current_ref.as_ref().map(|r| r.slug.as_str());
-        let rename_target = slug_rename_target(&old_path, slug);
+        // Compute the desired filename from the slug of the doc being saved
+        // — inspector edits land in its front matter. (`current_ref.slug` is
+        // a scan-time snapshot: it goes stale the moment the user edits the
+        // slug field, and its filename-stem fallback would mask new slugs.)
+        let core = doc_to_core(doc);
+        let rename_target = slug_rename_target(&old_path, core.front_matter.slug.as_deref());
 
         let (new_path, did_rename) = match rename_target {
             Some(target) => {
@@ -112,7 +115,6 @@ impl EditingState {
             None => (old_path.clone(), false),
         };
 
-        let core = doc_to_core(doc);
         let loaded = LoadedDocument {
             path: new_path.clone(),
             front_matter: core.front_matter,
