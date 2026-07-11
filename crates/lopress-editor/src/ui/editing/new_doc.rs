@@ -27,7 +27,8 @@ impl DocKind {
 
 /// Build the closure the sidebar invokes for "+ New post" / "+ New page".
 ///
-/// The closure: picks a fresh `untitled-N.md` filename, writes the stub
+/// The closure: flushes pending edits on the currently open doc (it's about
+/// to be replaced), picks a fresh `untitled-N.md` filename, writes the stub
 /// markdown, rescans the workspace, then opens the new doc through
 /// `EditingState::open_document` so the editor pane and current_path signal
 /// stay in sync with the sidebar.
@@ -36,9 +37,19 @@ pub fn make_new_doc_action(
     workspace_signal: RwSignal<WorkspaceSummary>,
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
+    flush_signals: crate::ui::editing::save_pipeline::FlushSignals,
     kind: DocKind,
 ) -> Rc<dyn Fn()> {
     Rc::new(move || {
+        // Flush the focused editor's buffer and persist unsaved edits before
+        // the switch discards them; abort when the dirty doc can't be saved.
+        if !crate::ui::editing::save_pipeline::flush_pending_edits(
+            flush_signals,
+            &editing,
+            current_doc,
+        ) {
+            return;
+        }
         let mut guard = editing.borrow_mut();
         let Some(state) = guard.as_mut() else {
             return;
@@ -68,6 +79,7 @@ pub fn make_new_doc_action(
                 path: path.clone(),
                 title: kind.default_title().to_string(),
                 slug: String::new(),
+                date: None,
                 is_draft: true,
                 has_parse_error: false,
             });

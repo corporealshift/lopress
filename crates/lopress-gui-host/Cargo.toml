@@ -9,6 +9,7 @@ lopress-build = { path = "../lopress-build" }
 lopress-plugin = { path = "../lopress-plugin" }
 lopress-watch = { path = "../lopress-watch" }
 lopress-serve = { path = "../lopress-serve" }
+chrono = { workspace = true }
 lopress-core = { path = "../lopress-core" }
 thiserror = { workspace = true }
 toml = { workspace = true }
