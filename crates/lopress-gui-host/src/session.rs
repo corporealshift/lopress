@@ -24,6 +24,7 @@ pub struct DocumentRef {
     pub path: PathBuf,
     pub title: String,
     pub slug: String,
+    pub date: Option<chrono::NaiveDate>,
     pub is_draft: bool,
     pub has_parse_error: bool,
 }
@@ -462,8 +463,13 @@ impl Session {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn scan_workspace(ws: &Workspace) -> WorkspaceSummary {
-    let posts = scan_dir(&ws.posts_dir());
+    let mut posts = scan_dir(&ws.posts_dir());
     let pages = scan_dir(&ws.pages_dir());
+
+    // Sort posts newest-first to match the built site (post_summaries in
+    // lopress-build/src/pages.rs).  None sorts after Some, so undated/broken
+    // posts sink to the bottom.
+    sort_posts(&mut posts);
 
     // Collect tags from post front-matter (sorted, de-duplicated).
     let mut tags_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -515,6 +521,7 @@ fn scan_dir(dir: &Path) -> Vec<DocumentRef> {
                     DocumentRef {
                         title: doc.front_matter.title.unwrap_or_else(|| slug.clone()),
                         slug,
+                        date: doc.front_matter.date,
                         is_draft: doc.front_matter.draft,
                         has_parse_error: false,
                         path,
@@ -523,6 +530,7 @@ fn scan_dir(dir: &Path) -> Vec<DocumentRef> {
                 _ => DocumentRef {
                     title: stem(&path),
                     slug: stem(&path),
+                    date: None,
                     is_draft: false,
                     has_parse_error: true,
                     path,
@@ -541,6 +549,14 @@ fn stem(path: &Path) -> String {
         .to_string()
 }
 
+/// Sort posts newest-first, then by slug ascending as a tiebreaker.
+///
+/// Matches the sort in `lopress_build::post_summaries` so the sidebar
+/// order matches the rendered site.
+pub fn sort_posts(posts: &mut [DocumentRef]) {
+    posts.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.slug.cmp(&b.slug)));
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let Some(parent) = path.parent() else {
         return Err(std::io::Error::new(
@@ -555,4 +571,99 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    /// Verify that `sort_posts` orders newest-first, with undated posts
+    /// sinking to the bottom, and uses slug as a tiebreaker.
+    #[test]
+    fn sort_posts_newest_first() {
+        let mut posts = vec![
+            DocumentRef {
+                path: PathBuf::from("a.md"),
+                title: "Alpha".into(),
+                slug: "alpha".into(),
+                date: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+                is_draft: false,
+                has_parse_error: false,
+            },
+            DocumentRef {
+                path: PathBuf::from("c.md"),
+                title: "Charlie".into(),
+                slug: "charlie".into(),
+                date: None,
+                is_draft: false,
+                has_parse_error: false,
+            },
+            DocumentRef {
+                path: PathBuf::from("b.md"),
+                title: "Bravo".into(),
+                slug: "bravo".into(),
+                date: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+                is_draft: false,
+                has_parse_error: false,
+            },
+        ];
+        sort_posts(&mut posts);
+        assert_eq!(posts[0].slug, "bravo"); // 2026-03-01
+        assert_eq!(posts[1].slug, "alpha"); // 2026-01-01
+        assert_eq!(posts[2].slug, "charlie"); // None
+    }
+
+    /// Same-date posts are ordered by slug ascending.
+    #[test]
+    fn sort_posts_slug_tiebreaker() {
+        let mut posts = vec![
+            DocumentRef {
+                path: PathBuf::from("b.md"),
+                title: "B".into(),
+                slug: "beta".into(),
+                date: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+                is_draft: false,
+                has_parse_error: false,
+            },
+            DocumentRef {
+                path: PathBuf::from("a.md"),
+                title: "A".into(),
+                slug: "alpha".into(),
+                date: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+                is_draft: false,
+                has_parse_error: false,
+            },
+        ];
+        sort_posts(&mut posts);
+        assert_eq!(posts[0].slug, "alpha");
+        assert_eq!(posts[1].slug, "beta");
+    }
+
+    /// `scan_dir` populates the `date` field from front-matter.
+    #[test]
+    fn scan_dir_populates_date() {
+        let dir = tempfile::tempdir().unwrap();
+        // Post with a date.
+        std::fs::write(
+            dir.path().join("dated.md"),
+            "---\ntitle: Dated\ndate: 2026-05-15\n---\nbody\n",
+        )
+        .unwrap();
+        // Post without a date.
+        std::fs::write(
+            dir.path().join("undated.md"),
+            "---\ntitle: Undated\n---\nbody\n",
+        )
+        .unwrap();
+        let refs = scan_dir(dir.path());
+        assert_eq!(refs.len(), 2);
+        let dated = refs.iter().find(|r| r.slug == "dated").unwrap();
+        let undated = refs.iter().find(|r| r.slug == "undated").unwrap();
+        assert_eq!(
+            dated.date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 15).unwrap())
+        );
+        assert!(undated.date.is_none());
+    }
 }

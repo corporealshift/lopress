@@ -79,6 +79,7 @@ pub fn make_new_doc_action(
                 path: path.clone(),
                 title: kind.default_title().to_string(),
                 slug: String::new(),
+                date: None,
                 is_draft: true,
                 has_parse_error: false,
             });
