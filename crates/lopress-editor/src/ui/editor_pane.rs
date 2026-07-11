@@ -5,7 +5,7 @@ use crate::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use crate::ui::blocks::block_view;
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{ActionSink, ActiveCommitSlot, FocusPublisher};
-use crate::ui::dnd::{gap_drop_zone, DndState};
+use crate::ui::dnd::{append_block_button, gap_drop_zone, DndState};
 use crate::ui::slash_menu::{slash_menu, SlashChoice};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{
@@ -227,15 +227,23 @@ fn block_column(
         link_edit,
         active_commit,
     };
-    let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 1);
+    let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 2);
     if doc.blocks.is_empty() {
         rows.push(add_block_button(on_action.clone()));
     } else {
+        // Each gap i sits above block i; its hover-insert affordance appends
+        // after block i-1, so gap 0 (no block above) stays a pure drop target.
+        let mut prev_id: Option<BlockId> = None;
         for (i, b) in doc.blocks.iter().enumerate() {
-            rows.push(gap_drop_zone(i, dnd, on_action.clone()).into_any());
+            rows.push(gap_drop_zone(i, dnd, on_action.clone(), prev_id).into_any());
             rows.push(block_view(b, dnd, &env));
+            prev_id = Some(b.id);
         }
-        rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone()).into_any());
+        rows.push(gap_drop_zone(doc.blocks.len(), dnd, on_action.clone(), prev_id).into_any());
+        if let Some(last_id) = prev_id {
+            // Always-visible "+ Add block" below the last block (issue #42).
+            rows.push(append_block_button(last_id, on_action.clone()).into_any());
+        }
     }
     v_stack_from_iter(rows)
         .style(|s| {
