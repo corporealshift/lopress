@@ -5,8 +5,9 @@ use crate::model::to_core::doc_to_core;
 use crate::model::types::EditorDoc;
 use crate::settings::Settings;
 use lopress_core::perf;
-use lopress_core::Document;
+use lopress_core::{Document, FrontMatter};
 use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
+use std::path::PathBuf;
 use lopress_plugin::PluginRegistry;
 
 /// Top-level application state, discriminated by which screen is active.
@@ -87,6 +88,29 @@ impl EditingState {
             last_save_error: None,
         };
         self.session.save(&loaded).map_err(|e| e.to_string())
+    }
+
+    /// Rename the open document's file so its stem matches `front_matter`'s
+    /// effective slug. Returns the new path when a rename happened, `None`
+    /// when the filename already matched (or no doc is open).
+    ///
+    /// Updates `self.current_ref.path` on a successful rename; callers are
+    /// responsible for reflecting the new path in the UI signals and
+    /// re-scanning the workspace.
+    pub fn sync_filename(&mut self, front_matter: &FrontMatter) -> Result<Option<PathBuf>, String> {
+        let Some(current) = self.current_ref.as_ref().map(|r| r.path.clone()) else {
+            return Ok(None);
+        };
+        match crate::ui::editing::filename_sync::rename_to_slug(front_matter, &current) {
+            Ok(Some(new_path)) => {
+                if let Some(r) = self.current_ref.as_mut() {
+                    r.path = new_path.clone();
+                }
+                Ok(Some(new_path))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     /// Load and parse the document at `doc_ref.path`, replacing `current_doc`.
