@@ -47,6 +47,8 @@ pub fn make_new_doc_action(
             flush_signals,
             &editing,
             current_doc,
+            current_path,
+            workspace_signal,
         ) {
             return;
         }

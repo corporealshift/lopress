@@ -10,8 +10,9 @@ use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActiveCommitSlot;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use lopress_gui_host::{BuildStatus, ServeStatus};
+use lopress_gui_host::{BuildStatus, ServeStatus, WorkspaceSummary};
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -33,6 +34,8 @@ pub struct SavePipeline {
 pub fn start_save_pipeline(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    current_path: RwSignal<Option<PathBuf>>,
+    workspace_signal: RwSignal<WorkspaceSummary>,
 ) -> SavePipeline {
     // ── Save-debounce signals ────────────────────────────────────────
     // `dirty_counter` bumps on every legitimate edit; `debounce_action`
@@ -82,6 +85,8 @@ pub fn start_save_pipeline(
         let dc = dirty_counter;
         let ds = dirty_sig;
         let ses = save_error_sig;
+        let cp = current_path;
+        let ws = workspace_signal;
         debounce_action(dc, Duration::from_millis(500), move || {
             let result = current_doc.with_untracked(|d| {
                 let doc = d.as_ref()?;
@@ -97,6 +102,12 @@ pub fn start_save_pipeline(
                 Ok(()) => {
                     ds.set(false);
                     ses.set(None);
+                    crate::ui::editing::filename_sync::sync_filename_and_update(
+                        &editing_for_save,
+                        current_doc,
+                        cp,
+                        ws,
+                    );
                     if let Some(state) = editing_for_save.borrow().as_ref() {
                         state.session.rebuild();
                     }
@@ -145,6 +156,8 @@ pub fn flush_pending_edits(
     signals: FlushSignals,
     editing: &Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
+    current_path: RwSignal<Option<PathBuf>>,
+    workspace_signal: RwSignal<WorkspaceSummary>,
 ) -> bool {
     let FlushSignals {
         active_commit,
@@ -171,6 +184,12 @@ pub fn flush_pending_edits(
         Some(Ok(())) => {
             dirty_sig.set(false);
             save_error_sig.set(None);
+            crate::ui::editing::filename_sync::sync_filename_and_update(
+                editing,
+                current_doc,
+                current_path,
+                workspace_signal,
+            );
             if let Some(state) = editing.borrow().as_ref() {
                 state.session.rebuild();
             }

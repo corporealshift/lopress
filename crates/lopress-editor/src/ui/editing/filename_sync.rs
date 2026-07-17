@@ -4,8 +4,14 @@
 //! non-empty, else `slugify(front_matter.title)`. The filename stem is kept
 //! equal to it. Front matter is never mutated — only the file moves.
 
+use crate::model::types::EditorDoc;
+use crate::state::EditingState;
+use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
 use lopress_core::{slugify, FrontMatter};
+use lopress_gui_host::WorkspaceSummary;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// The slug a document's filename should track, or empty when neither the
 /// slug field nor the title yields anything usable.
@@ -69,6 +75,41 @@ pub fn rename_to_slug(fm: &FrontMatter, current: &Path) -> std::io::Result<Optio
     };
     std::fs::rename(current, &target)?;
     Ok(Some(target))
+}
+
+/// After a successful save, rename the open document's file to match its slug
+/// and, when a rename happened, push the new path into `current_path` and
+/// re-scan so the sidebar row and inspector placeholder follow. A no-op when
+/// nothing needs renaming; a rename failure is logged, not fatal (the content
+/// is already safely saved under the old name).
+pub fn sync_filename_and_update(
+    editing: &Rc<RefCell<Option<EditingState>>>,
+    current_doc: RwSignal<Option<EditorDoc>>,
+    current_path: RwSignal<Option<PathBuf>>,
+    workspace_signal: RwSignal<WorkspaceSummary>,
+) {
+    let Some(fm) = current_doc.with_untracked(|d| d.as_ref().map(|doc| doc.front_matter.clone()))
+    else {
+        return;
+    };
+    let outcome = {
+        let mut guard = editing.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        match state.sync_filename(&fm) {
+            Ok(Some(new_path)) => Some((new_path, state.session.rescan())),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("filename sync failed: {e}");
+                None
+            }
+        }
+    };
+    if let Some((new_path, summary)) = outcome {
+        current_path.set(Some(new_path));
+        workspace_signal.set(summary);
+    }
 }
 
 #[cfg(test)]
