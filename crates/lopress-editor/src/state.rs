@@ -7,8 +7,8 @@ use crate::settings::Settings;
 use lopress_core::perf;
 use lopress_core::{Document, FrontMatter};
 use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
-use std::path::PathBuf;
 use lopress_plugin::PluginRegistry;
+use std::path::PathBuf;
 
 /// Top-level application state, discriminated by which screen is active.
 pub enum AppState {
