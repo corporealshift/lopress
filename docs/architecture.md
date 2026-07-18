@@ -790,10 +790,23 @@ save_doc(&doc)
     ├── session.save(loaded_doc) → serialize + atomic write
     ├── dirty_sig = false
     ├── save_error_sig = None
+    ├── sync_filename_and_update() → rename .md to match slug, update current_path + sidebar
     └── session.rebuild() → background rebuild + SSE broadcast
 ```
 
 **Key optimization:** The save closure performs the `RefCell::borrow()` of editing state inside `with_untracked`, passing `&doc` directly instead of cloning the full `EditorDoc`. This eliminates one full-text allocation per save.
+
+**Filename sync:** After a successful save (both the debounced autosave here and
+the `flush_pending_edits` on doc-switch), `ui/editing/filename_sync.rs` renames
+the `.md` so its stem tracks the document's *effective slug* —
+`slugify(front_matter.slug)` if set, else `slugify(front_matter.title)`. Front
+matter itself is never rewritten; only the file moves. Collisions get a `-2`,
+`-3`, … suffix (the file's own path counts as available, so it never collides
+with itself), and an empty effective slug is left alone. The rename runs before
+`session.rebuild()` so the build sees the new name, and it updates `current_path`
+plus the workspace summary so the sidebar row and inspector follow. New documents
+are created straight from the slugified default title (`new-post.md` /
+`new-page.md`) rather than `untitled-N.md`.
 
 ---
 
@@ -1028,6 +1041,7 @@ The preview server runs on `127.0.0.1:8080` (or ephemeral port if 8080 is taken)
 | `src/ui/editing/action_sink.rs` | ActionSink builder |
 | `src/ui/editing/undo_redo.rs` | Undo/redo builders |
 | `src/ui/editing/save_pipeline.rs` | Debounced save pipeline |
+| `src/ui/editing/filename_sync.rs` | Rename .md to match slug on save |
 | `src/ui/editing/pane_key.rs` | Pane rebuild key |
 | `src/ui/editing/focus.rs` | Focus management |
 | `src/ui/editing/new_doc.rs` | New doc action builder |
