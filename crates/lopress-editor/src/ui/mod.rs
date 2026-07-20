@@ -249,7 +249,12 @@ fn editing_view(
     // ── Save pipeline ────────────────────────────────────────────────────
     // Created before the doc-switch closures below: they flush pending edits
     // through it before replacing `current_doc`.
-    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), current_doc);
+    let save = save_pipeline::start_save_pipeline(
+        Rc::clone(&editing),
+        current_doc,
+        current_path,
+        workspace_signal,
+    );
 
     // Pane-stable slot holding the focused block editor's commit closure;
     // registered on focus by `mount_block_editor`, consumed by the doc-switch
@@ -265,7 +270,13 @@ fn editing_view(
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
         // Flush the focused editor's buffer and persist unsaved edits before
         // the switch discards them; abort when the dirty doc can't be saved.
-        if !save_pipeline::flush_pending_edits(flush_signals, &editing_for_open, current_doc) {
+        if !save_pipeline::flush_pending_edits(
+            flush_signals,
+            &editing_for_open,
+            current_doc,
+            current_path,
+            workspace_signal,
+        ) {
             return;
         }
         let mut guard = editing_for_open.borrow_mut();

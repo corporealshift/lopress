@@ -2,7 +2,7 @@
 
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
-use crate::ui::sidebar::{new_doc_stub, unique_untitled_path};
+use crate::ui::sidebar::{new_doc_stub, unique_doc_path};
 use floem::reactive::{RwSignal, SignalUpdate};
 use lopress_gui_host::{DocumentRef, WorkspaceSummary};
 use std::cell::RefCell;
@@ -28,8 +28,9 @@ impl DocKind {
 /// Build the closure the sidebar invokes for "+ New post" / "+ New page".
 ///
 /// The closure: flushes pending edits on the currently open doc (it's about
-/// to be replaced), picks a fresh `untitled-N.md` filename, writes the stub
-/// markdown, rescans the workspace, then opens the new doc through
+/// to be replaced), picks a slug-based filename from the default title (e.g.
+/// `new-post.md`), writes the stub markdown, rescans the workspace, then opens
+/// the new doc through
 /// `EditingState::open_document` so the editor pane and current_path signal
 /// stay in sync with the sidebar.
 pub fn make_new_doc_action(
@@ -47,6 +48,8 @@ pub fn make_new_doc_action(
             flush_signals,
             &editing,
             current_doc,
+            current_path,
+            workspace_signal,
         ) {
             return;
         }
@@ -62,7 +65,7 @@ pub fn make_new_doc_action(
             eprintln!("failed to create {}: {e}", dir.display());
             return;
         }
-        let path = unique_untitled_path(&dir);
+        let path = unique_doc_path(&dir, &lopress_core::slugify(kind.default_title()));
         if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
             eprintln!("failed to write {}: {e}", path.display());
             return;

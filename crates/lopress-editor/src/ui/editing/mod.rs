@@ -7,6 +7,7 @@
 pub mod action_sink;
 #[cfg(debug_assertions)]
 pub mod ctrl_wire;
+pub mod filename_sync;
 pub mod focus;
 pub mod new_doc;
 pub mod pane_key;

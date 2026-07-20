@@ -175,21 +175,12 @@ fn pill(text: &'static str, bg: Color, fg: Color) -> impl IntoView {
 
 // ── New-document stub generation ──────────────────────────────────────────
 
-/// Pick a unique `untitled-N.md` filename inside `dir`.
-pub fn unique_untitled_path(dir: &Path) -> PathBuf {
-    let base = "untitled";
-    let mut n: u32 = 1;
-    loop {
-        let candidate = dir.join(format!("{base}-{n}.md"));
-        if !candidate.exists() {
-            return candidate;
-        }
-        n += 1;
-        if n > 9999 {
-            // Defensive: never loop forever.
-            return dir.join(format!("{base}-{n}.md"));
-        }
-    }
+/// Pick a unique `{base}.md` filename inside `dir`, where `base` is an
+/// already-slugified stem (e.g. the slugified default title). Falls back to
+/// `"untitled"` if `base` is empty.
+pub fn unique_doc_path(dir: &Path, base: &str) -> PathBuf {
+    let base = if base.is_empty() { "untitled" } else { base };
+    crate::ui::editing::filename_sync::unique_stem(dir, base, None, &|p: &Path| p.exists())
 }
 
 /// Default stub markdown for a new post or page.
