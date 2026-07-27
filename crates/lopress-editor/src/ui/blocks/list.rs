@@ -185,7 +185,6 @@ pub fn editable_list_view(
 /// from every item's live buffer on demand.
 #[allow(
     clippy::too_many_arguments,
-    clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
@@ -203,7 +202,6 @@ fn list_item_editor(
     let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
-    let text_sig = state.text_sig;
 
     // Register this item's editor with the shared handles so every
     // structural callback can read all items' live buffers.
@@ -264,15 +262,13 @@ fn list_item_editor(
         });
     }
 
-    // Per-item height styling: hide the editor gutter (the bullet prefix
-    // serves that role) and size to the visual line count.
-    let line_height = editor_sig.with_untracked(|ed| ed.line_height(0));
-    let view = stack((view,)).style(move |s| {
-        let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f32;
-        s.class(GutterClass, |s| s.hide())
-            .width_full()
-            .height(lines * line_height)
-    });
+    // Hide the editor gutter (the bullet prefix serves that role). The height
+    // is deliberately NOT set here: `mount_block_editor` already sizes the
+    // inner editor to its wrapped visual-line count. Imposing a second,
+    // hard-newline-count height on this outer wrapper clipped soft-wrapped
+    // items to one line — the wrapped remainder then painted outside the row's
+    // box and fell outside its hit-test region (issue #52).
+    let view = stack((view,)).style(|s| s.class(GutterClass, |s| s.hide()).width_full());
     (view.into_any(), editor_sig)
 }
 
