@@ -9,6 +9,7 @@
 )]
 
 pub mod actions;
+mod app_icon;
 #[cfg(debug_assertions)]
 pub(crate) mod ctrl;
 pub mod model;
@@ -52,6 +53,10 @@ pub fn run() -> Result<(), AppError> {
         .title("lopress")
         .size(Size::new(ws.width, ws.height))
         .position(Point::new(ws.x, ws.y));
+    let win_cfg = match app_icon::window_icon() {
+        Some(icon) => win_cfg.window_icon(icon),
+        None => win_cfg,
+    };
 
     let ctx = AppContext::new(settings);
 
