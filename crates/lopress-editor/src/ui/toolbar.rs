@@ -14,11 +14,13 @@ use crate::actions::BlockAction;
 use crate::model::descriptor;
 use crate::model::style_span::InlineFlag;
 use crate::model::types::{BlockId, EditorBlock};
-use crate::ui::blocks::inline_editor::{ActionSink, FocusPublisher};
+use crate::ui::blocks::inline_editor::{
+    ActionSink, FocusPublisher, SelectionRestore, SelectionRestoreSlot,
+};
 use crate::ui::link_bar::LinkEdit;
 use floem::event::EventListener;
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet, SignalWith};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::{button, h_stack_from_iter, label, Decorators};
 use floem::{AnyView, IntoView};
@@ -57,6 +59,7 @@ pub fn block_toolbar_for(
     focus_pub: FocusPublisher,
     on_action: ActionSink,
     link_edit: RwSignal<Option<LinkEdit>>,
+    restore_selection: SelectionRestoreSlot,
 ) -> impl IntoView {
     let entries: Vec<(&'static str, fn() -> EditorBlock)> =
         descriptor::toolbar_menu_entries().to_vec();
@@ -81,7 +84,7 @@ pub fn block_toolbar_for(
                 // we skip the pre-commit — the body shape already matches what
                 // ChangeType expects.
                 if is_inline {
-                    if let Some((editor_sig, spans_sig, _)) =
+                    if let Some((editor_sig, spans_sig, _, _)) =
                         focus_pub.editor_and_spans.get_untracked()
                     {
                         let text = editor_sig.with_untracked(|ed| String::from(&ed.doc().text()));
@@ -123,7 +126,9 @@ pub fn block_toolbar_for(
         ("</>", InlineFlag::Code),
         ("Link", InlineFlag::Link),
     ] {
-        buttons.push(toggle_button(lbl, flag, focus_pub, block_id, link_edit).into_any());
+        buttons.push(
+            toggle_button(lbl, flag, focus_pub, block_id, link_edit, restore_selection).into_any(),
+        );
     }
 
     buttons.push(separator().into_any());
@@ -178,6 +183,7 @@ fn toggle_button(
     focus_pub: FocusPublisher,
     block_id: BlockId,
     link_edit: RwSignal<Option<LinkEdit>>,
+    restore_selection: SelectionRestoreSlot,
 ) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
@@ -193,7 +199,7 @@ fn toggle_button(
 
     button(lbl_view)
         .on_event_stop(EventListener::PointerDown, move |_| {
-            if let Some((editor_sig, spans_sig, style_rev)) =
+            if let Some((editor_sig, spans_sig, style_rev, editor_block)) =
                 focus_pub.editor_and_spans.get_untracked()
             {
                 // The Link button opens the pane-level URL bar (which survives
@@ -203,10 +209,18 @@ fn toggle_button(
                     crate::ui::blocks::inline_editor::open_link_editor(
                         editor_sig, spans_sig, block_id, link_edit,
                     );
-                } else {
+                } else if let Some((start, end)) =
                     crate::ui::blocks::inline_editor::apply_style_toggle(
                         editor_sig, spans_sig, style_rev, flag,
-                    );
+                    )
+                {
+                    // This click blurs the editor and its commit rebuilds the
+                    // column; have the rebuilt editor take the selection back.
+                    restore_selection.set(Some(SelectionRestore {
+                        block_id: editor_block,
+                        start,
+                        end,
+                    }));
                 }
             }
         })
@@ -218,7 +232,7 @@ fn toggle_button(
 fn flag_active(focus_pub: FocusPublisher, flag: InlineFlag) -> bool {
     use floem::views::editor::core::cursor::CursorMode;
     // Reactive read so the label updates when selection or spans change
-    let Some((editor_sig, spans_sig, _)) = focus_pub.editor_and_spans.get() else {
+    let Some((editor_sig, spans_sig, _, _)) = focus_pub.editor_and_spans.get() else {
         return false;
     };
     let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {

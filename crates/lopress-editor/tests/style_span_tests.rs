@@ -89,6 +89,32 @@ fn test_toggle_coalesces_after_clear() {
     assert_eq!(spans, vec![plain(0, 10)]);
 }
 
+// ── toggle_inline on text no span covers yet (issue #55) ──
+
+#[test]
+fn toggle_bolds_text_typed_past_the_last_span() {
+    // "Alpha beta" came from the model; " gamma" was typed after it, so no
+    // span covers bytes 10..16.
+    let mut spans = vec![plain(0, 10)];
+    toggle_inline(&mut spans, 11, 16, InlineFlag::Bold);
+    assert_eq!(spans, vec![plain(0, 11), bold(11, 16)]);
+}
+
+#[test]
+fn toggle_bolds_text_in_a_paragraph_with_no_spans() {
+    // A freshly created paragraph has no spans at all.
+    let mut spans = vec![];
+    toggle_inline(&mut spans, 0, 5, InlineFlag::Bold);
+    assert_eq!(spans, vec![bold(0, 5)]);
+}
+
+#[test]
+fn toggle_bolds_across_a_gap_between_spans() {
+    let mut spans = vec![plain(0, 4), plain(8, 12)];
+    toggle_inline(&mut spans, 2, 10, InlineFlag::Bold);
+    assert_eq!(spans, vec![plain(0, 2), bold(2, 10), plain(10, 12)]);
+}
+
 // ── transform_spans: styles follow their text through edits (issue #57) ──
 
 use lapce_xi_rope::{Delta, Interval, Rope};

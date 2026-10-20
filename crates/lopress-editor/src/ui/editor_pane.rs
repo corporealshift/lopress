@@ -4,7 +4,9 @@ use crate::actions::BlockAction;
 use crate::model::types::{BlockId, EditorBlock, EditorDoc, InlineRun};
 use crate::ui::blocks::block_view;
 use crate::ui::blocks::env::BlockEnv;
-use crate::ui::blocks::inline_editor::{ActionSink, ActiveCommitSlot, FocusPublisher};
+use crate::ui::blocks::inline_editor::{
+    ActionSink, ActiveCommitSlot, FocusPublisher, SelectionRestoreSlot,
+};
 use crate::ui::dnd::{append_block_button, gap_drop_zone, DndState};
 use crate::ui::slash_menu::{slash_menu, SlashChoice};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -40,6 +42,7 @@ pub fn editor_pane(
     inserter_items: Rc<[crate::model::inserter::PluginInserterItem]>,
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
     active_commit: ActiveCommitSlot,
+    restore_selection: SelectionRestoreSlot,
 ) -> impl IntoView {
     // The block column is rebuilt on every document mutation: Floem's
     // `create_updater` (behind `dyn_container`) fires on every
@@ -72,6 +75,7 @@ pub fn editor_pane(
                 Rc::clone(&on_redo),
                 link_edit,
                 active_commit,
+                restore_selection,
             ),
             None => empty().into_any(),
         },
@@ -206,6 +210,7 @@ fn block_column(
     on_redo: Rc<dyn Fn()>,
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
     active_commit: ActiveCommitSlot,
+    restore_selection: SelectionRestoreSlot,
 ) -> AnyView {
     // `focus_pub` is created per rebuild and shared by this column's block
     // editors (which publish their editor signals into it on focus) and the
@@ -226,6 +231,7 @@ fn block_column(
         on_redo,
         link_edit,
         active_commit,
+        restore_selection,
     };
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 2);
     if doc.blocks.is_empty() {

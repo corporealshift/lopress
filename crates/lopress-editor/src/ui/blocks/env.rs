@@ -2,7 +2,9 @@
 //! Created once per column rebuild; cloned freely (all fields are Copy signals or Rc).
 
 use crate::model::types::{BlockId, EditorDoc};
-use crate::ui::blocks::inline_editor::{ActionSink, ActiveCommitSlot, FocusPublisher};
+use crate::ui::blocks::inline_editor::{
+    ActionSink, ActiveCommitSlot, FocusPublisher, SelectionRestoreSlot,
+};
 use crate::ui::link_bar::LinkEdit;
 use floem::reactive::RwSignal;
 use std::rc::Rc;
@@ -28,4 +30,7 @@ pub struct BlockEnv {
     /// `link_edit`, it lives in `editing_view` (not the rebuilt column) so
     /// the flush survives focus-loss rebuilds. See `ActiveCommitSlot`.
     pub active_commit: ActiveCommitSlot, // Copy
+    /// Pane-stable selection for a block editor to re-take after the
+    /// focus-loss rebuild a toolbar style click causes. See `SelectionRestore`.
+    pub restore_selection: SelectionRestoreSlot, // Copy
 }

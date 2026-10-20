@@ -12,7 +12,8 @@ use floem::reactive::{
     create_effect, create_memo, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
 };
 use floem::views::editor::command::CommandExecuted;
-use floem::views::editor::core::cursor::CursorAffinity;
+use floem::views::editor::core::cursor::{CursorAffinity, CursorMode};
+use floem::views::editor::core::selection::Selection;
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
@@ -33,9 +34,33 @@ const CARET_COLOR: floem::peniko::Color = floem::peniko::Color::rgb8(40, 40, 40)
 /// through the `actions::apply` chokepoint.
 pub type ActionSink = Rc<dyn Fn(BlockAction)>;
 
-/// The focused block's editor signal, style-span signal, and style-revision
-/// counter — published so the toolbar can reach the active editor.
-pub type EditorHandles = (RwSignal<Editor>, RwSignal<Vec<StyleSpan>>, RwSignal<u64>);
+/// The focused block's editor signal, style-span signal, style-revision
+/// counter, and the editor's own block id (a list *item*'s id, not the
+/// list's) — published so the toolbar can reach the active editor.
+pub type EditorHandles = (
+    RwSignal<Editor>,
+    RwSignal<Vec<StyleSpan>>,
+    RwSignal<u64>,
+    BlockId,
+);
+
+/// A selection for a block editor to take back when it is next built.
+///
+/// Clicking a toolbar style button blurs the editor (floem clears focus on
+/// any pointer-down outside it), and the focus-loss commit rebuilds the block
+/// column, so the caret and selection are lost (#55). The toolbar records the
+/// selection here; the rebuilt editor for `block_id` re-focuses and
+/// re-selects when it mounts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionRestore {
+    pub block_id: BlockId,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Pane-stable slot for a pending [`SelectionRestore`]. Lives with
+/// `focus_target` and `link_edit`, outside the rebuilt column.
+pub type SelectionRestoreSlot = RwSignal<Option<SelectionRestore>>;
 
 /// Pane-level slot that the focused block publishes to so the toolbar
 /// can reach the focused block's editor and style-span signals.
@@ -352,8 +377,6 @@ pub fn mount_block_editor(
                 // so the visual selection background does not linger when
                 // the user clicks into a sibling editor (e.g. another
                 // item in the same list).
-                use floem::views::editor::core::cursor::CursorMode;
-                use floem::views::editor::core::selection::Selection;
                 ed.cursor.update(|c| {
                     let offset = c.offset();
                     c.mode = CursorMode::Insert(Selection::caret(offset));
@@ -438,9 +461,36 @@ pub fn mount_block_editor(
             focus_pub.block.set(Some(publish_block_id));
             focus_pub
                 .editor_and_spans
-                .set(Some((editor_sig, spans_sig, style_rev)));
+                .set(Some((editor_sig, spans_sig, style_rev, block_id)));
         }
     });
+
+    // A toolbar style click blurred this block and the commit rebuilt it
+    // (see `SelectionRestore`): take focus back with the styled selection.
+    // Read once at mount, untracked: the editor being replaced must not
+    // consume the request before this one exists.
+    let restore = env.restore_selection;
+    if let Some(r) = restore.get_untracked().filter(|r| r.block_id == block_id) {
+        restore.set(None);
+        floem::action::exec_after(std::time::Duration::ZERO, move |_| {
+            // Another rebuild may have disposed this editor meanwhile.
+            if editor_sig.try_with_untracked(|ed| ed.is_none()) {
+                return;
+            }
+            editor_sig.with_untracked(|ed| {
+                ed.cursor.update(|c| {
+                    c.mode = CursorMode::Insert(Selection::region(r.start, r.end));
+                });
+            });
+            view_id.request_focus();
+            // Programmatic focus doesn't set `ed.active`, so publish directly
+            // or the toolbar stays hidden.
+            focus_pub.block.set(Some(publish_block_id));
+            focus_pub
+                .editor_and_spans
+                .set(Some((editor_sig, spans_sig, style_rev, block_id)));
+        });
+    }
 
     // When `focus_target` is set to this block, programmatically focus the
     // native editor content view via the ViewId Floem stores on the editor.
@@ -745,7 +795,6 @@ pub(crate) fn open_link_editor(
     block_id: BlockId,
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
 ) {
-    use floem::views::editor::core::cursor::CursorMode;
     let (start, end) = editor_sig.with_untracked(|ed| {
         ed.cursor.with_untracked(|c| match &c.mode {
             CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
@@ -773,14 +822,13 @@ pub(crate) fn open_link_editor(
 
 /// Read the current selection byte range from the editor and apply a style
 /// toggle to the spans. Also bumps `style_rev` to invalidate the layout cache.
+/// Returns the styled byte range, or `None` for a collapsed selection.
 pub fn apply_style_toggle(
     editor_sig: RwSignal<Editor>,
     spans_sig: RwSignal<Vec<StyleSpan>>,
     style_rev: RwSignal<u64>,
     flag: InlineFlag,
-) {
-    use floem::views::editor::core::cursor::CursorMode;
-
+) -> Option<(usize, usize)> {
     let (sel_start, sel_end) = editor_sig.with_untracked(|ed| {
         ed.cursor.with_untracked(|c| match &c.mode {
             CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
@@ -796,10 +844,11 @@ pub fn apply_style_toggle(
         })
     });
     if sel_start >= sel_end {
-        return;
+        return None;
     }
     spans_sig.update(|s| toggle_inline(s, sel_start, sel_end, flag));
     style_rev.update(|r| *r = r.wrapping_add(1));
+    Some((sel_start, sel_end))
 }
 
 fn commit_from_editor(

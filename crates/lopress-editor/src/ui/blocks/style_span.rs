@@ -10,7 +10,6 @@ use lapce_xi_rope::Rope;
 use crate::model::style_span::StyleSpan;
 
 const LINK_COLOR: Color = Color::rgb8(0x22, 0x7C, 0xBB);
-const MONO_FAMILY: &str = "monospace";
 
 /// Implements Floem's `Styling` trait to apply `Vec<StyleSpan>` attributes
 /// (bold/italic/code/link) to the native editor's text layout.
@@ -60,8 +59,10 @@ impl Styling for InlineRunStyling {
             .sum();
         let line_len: usize = full_text.split('\n').nth(line).map(str::len).unwrap_or(0);
         let line_end = line_start + line_len;
-        // Allocated once per apply_attr_styles call, not once per span.
-        let mono_family = [FamilyOwned::Name(MONO_FAMILY.into())];
+        // The generic monospace family. `FamilyOwned::Name("monospace")` would
+        // ask for a font literally named "monospace", which doesn't exist, so
+        // inline code fell back to the body font (#55).
+        let mono_family = [FamilyOwned::Monospace];
 
         for span in &spans {
             // Skip spans that don't overlap this logical line.
