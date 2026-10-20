@@ -90,6 +90,27 @@ pub fn coalesce_spans(spans: &mut Vec<StyleSpan>) {
     }
 }
 
+/// Cover every byte in `[0, end)` that no span covers with a plain span.
+///
+/// Text typed where no span reaches (past the last span, or into a paragraph
+/// that had none) is unstyled but uncovered, so a toggle would have nothing to
+/// flip (#55).
+fn fill_gaps(spans: &mut Vec<StyleSpan>, end: usize) {
+    let mut filled = Vec::with_capacity(spans.len() + 1);
+    let mut cursor = 0;
+    for span in spans.drain(..) {
+        if span.start > cursor {
+            filled.push(StyleSpan::plain(cursor, span.start));
+        }
+        cursor = cursor.max(span.end);
+        filled.push(span);
+    }
+    if end > cursor {
+        filled.push(StyleSpan::plain(cursor, end));
+    }
+    *spans = filled;
+}
+
 /// Move span boundaries through a text edit so styles stay attached to the
 /// text they were applied to, rather than to fixed byte offsets.
 ///
@@ -122,9 +143,10 @@ pub fn toggle_inline(
     sel_end: usize,
     flag: InlineFlag,
 ) {
-    if sel_start >= sel_end || spans.is_empty() {
+    if sel_start >= sel_end {
         return;
     }
+    fill_gaps(spans, sel_end);
     let all_set = spans
         .iter()
         .filter(|s| s.start < sel_end && s.end > sel_start)

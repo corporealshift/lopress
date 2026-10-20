@@ -332,6 +332,11 @@ fn editing_view(
     // rebuild that a focus-loss commit triggers when the user clicks the Link
     // button or the bar's own input.
     let link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>> = RwSignal::new(None);
+    // Pane-stable like `link_edit`: a toolbar style click records the
+    // selection here so the block editor rebuilt by the focus-loss commit can
+    // re-focus and re-select. See `SelectionRestore`.
+    let restore_selection: crate::ui::blocks::inline_editor::SelectionRestoreSlot =
+        RwSignal::new(None);
     let dnd = DndState::new();
 
     // ── Action sink + undo/redo closures ───────────────────────────────
@@ -411,6 +416,7 @@ fn editing_view(
         inserter_items_for_pane,
         link_edit,
         active_commit,
+        restore_selection,
     )
     .style(|s| s.flex_grow(1.0f32).height_full().min_height(0.));
 
