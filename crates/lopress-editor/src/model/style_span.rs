@@ -1,3 +1,5 @@
+use lapce_xi_rope::{RopeDelta, Transformer};
+
 /// Byte-offset span with inline style flags. `start` is inclusive, `end`
 /// exclusive, both measured in UTF-8 bytes from the block's rope start.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +88,29 @@ pub fn coalesce_spans(spans: &mut Vec<StyleSpan>) {
             i += 1;
         }
     }
+}
+
+/// Move span boundaries through a text edit so styles stay attached to the
+/// text they were applied to, rather than to fixed byte offsets.
+///
+/// Text inserted exactly on a boundary joins the span to its left. Links never
+/// grow at their edges: an insert at a link's end joins the span to its right
+/// instead, and an insert at its start with no plain span to the left becomes
+/// an unstyled gap. Spans a deletion empties are dropped.
+pub fn transform_spans(spans: &mut Vec<StyleSpan>, delta: &RopeDelta) {
+    let mut t = Transformer::new(delta);
+    // The previous span's pre-edit end, and whether it absorbs inserts there.
+    let mut prev: Option<(usize, bool)> = None;
+    for span in spans.iter_mut() {
+        let left_absorbs = matches!(prev, Some((end, absorbs)) if end == span.start && absorbs);
+        let end_absorbs = span.link.is_none();
+        prev = Some((span.end, end_absorbs));
+        // `after = true` places the coordinate after an insert at the same
+        // offset, leaving the inserted text outside this span.
+        span.start = t.transform(span.start, left_absorbs || span.link.is_some());
+        span.end = t.transform(span.end, end_absorbs);
+    }
+    spans.retain(|s| s.start < s.end);
 }
 
 /// Toggle `flag` across `[sel_start, sel_end)` (byte offsets).

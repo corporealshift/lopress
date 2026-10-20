@@ -2,7 +2,7 @@
 
 use crate::actions::BlockAction;
 use crate::model::descriptor;
-use crate::model::style_span::{toggle_inline, InlineFlag, StyleSpan};
+use crate::model::style_span::{toggle_inline, transform_spans, InlineFlag, StyleSpan};
 use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
@@ -142,6 +142,13 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
 
     let text_sig_for_update = text_sig;
     doc.add_on_update(move |upd| {
+        // Carry style spans through the edit so they stay on their text
+        // instead of their old byte offsets (#57).
+        let mut deltas = upd.deltas().peekable();
+        if deltas.peek().is_some() {
+            spans_sig.update(|spans| deltas.for_each(|d| transform_spans(spans, d)));
+            style_rev.update(|r| *r = r.wrapping_add(1));
+        }
         if let Some(ed) = upd.editor {
             let new_rope = ed.doc().text(); // cheap Arc bump, no full-text copy
             text_sig_for_update.set(new_rope);
