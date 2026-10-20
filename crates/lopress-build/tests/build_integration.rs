@@ -270,6 +270,34 @@ fn home_page_shows_excerpt_with_read_more_link() {
 }
 
 #[test]
+fn tag_page_shows_excerpt_with_read_more_link() {
+    let (_tmp, root) = copy_fixture("minimal");
+    let post = root.join("src/posts/hello.md");
+    fs::write(
+        &post,
+        "---\ntitle: P\ndate: 2026-06-01\ntags: [rust]\n---\nteaser para\n\n<!-- lopress:more -->\n<!-- /lopress:more -->\n\nhidden para\n",
+    )
+    .unwrap();
+    let report = build(&root).unwrap();
+    let failures = &report.failures;
+    assert!(failures.is_empty(), "failures: {failures:?}");
+
+    let tag_html = fs::read_to_string(root.join("www/tags/rust/index.html")).unwrap();
+    assert!(
+        tag_html.contains("teaser para"),
+        "tag page must show the excerpt"
+    );
+    assert!(
+        tag_html.contains("Read more"),
+        "tag page must link to the full post"
+    );
+    assert!(
+        !tag_html.contains("hidden para"),
+        "tag page must not show content after the marker"
+    );
+}
+
+#[test]
 fn captioned_image_renders_figcaption() {
     use image::{Rgb, RgbImage};
 
