@@ -13,13 +13,23 @@
 
 use crate::actions::BlockAction;
 use crate::model::descriptor;
+use crate::model::markdown_wrap::toggle_markdown_wrap;
 use crate::model::types::{BlockBody, BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
-use crate::ui::blocks::inline_editor::ActionSink;
+use crate::ui::blocks::inline_editor::{accept_visual_lines, block_height_px, ActionSink};
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
+use floem::keyboard::{Key, Modifiers};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
+use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::core::cursor::CursorMode;
+use floem::views::editor::core::editor::EditType;
+use floem::views::editor::core::selection::Selection;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::editor::keypress::key::KeyInput;
+use floem::views::editor::keypress::press::KeyPress;
+use floem::views::editor::Editor;
 use floem::views::{
     checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators,
 };
@@ -235,15 +245,17 @@ fn attr_text(
 }
 
 /// Multi-line text input for `ui = "textarea"`. Commits the live document on
-/// blur, using Floem's `text_editor` for multi-line editing.
+/// blur, using Floem's `text_editor` for multi-line editing. Grows to fit its
+/// wrapped content, and Ctrl+B / Ctrl+I / Ctrl+E toggle markdown emphasis
+/// around the selection (#54).
 fn attr_textarea(
     name: String,
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
 ) -> impl IntoView {
-    use floem::reactive::create_effect;
-    use floem::views::text_editor;
+    use floem::reactive::{create_effect, create_memo};
+    use floem::views::text_editor_keys;
     use lapce_xi_rope::Rope;
 
     let initial: String = attrs_sig.with_untracked(|m| {
@@ -256,7 +268,13 @@ fn attr_textarea(
     });
     let rope = Rope::from(initial.as_str());
 
-    let text_ed = text_editor(rope);
+    let text_ed = text_editor_keys(rope, |editor_sig, kp, ms| {
+        if let Some(marker) = markdown_shortcut(kp, ms) {
+            toggle_marker(editor_sig, marker);
+            return CommandExecuted::Yes;
+        }
+        default_key_handler(editor_sig)(kp, ms)
+    });
     let editor = text_ed.editor().clone();
 
     // Commit on blur. `text_editor` focuses an INNER editor view, so a
@@ -299,19 +317,92 @@ fn attr_textarea(
         }
     });
 
-    // No gutter (line numbers read as stray content in a form field) and a
-    // text_input-like border so the textarea presents as a form field.
-    text_ed.editor_style(|s| s.hide_gutter(true)).style(|s| {
-        s.font_size(12.)
-            .padding_horiz(4.)
-            .padding_vert(2.)
-            .width_full()
-            .min_height(60.)
-            .border(1.)
-            .border_color(Color::rgb8(200, 200, 210))
-            .border_radius(4.)
-            .background(Color::WHITE)
-    })
+    // Grow to fit the wrapped content, so the field never has an inner scroll
+    // (whose offset reset during the post-edit relayout, jumping the view to
+    // the top while typing on the last line). Same guards as the paragraph
+    // editor's height memo in `mount_block_editor`: re-run on `screen_lines`
+    // rather than `viewport`, read the width guard untracked so our own height
+    // writes can't re-trigger it, and reject stale collapsed counts.
+    let doc_rev = text_ed.doc().cache_rev();
+    let ed_for_height = editor.clone();
+    let visual_lines = create_memo(move |prev: Option<&u16>| {
+        doc_rev.get();
+        ed_for_height.screen_lines.get();
+        if ed_for_height.viewport.with_untracked(|v| v.width()) < 1.0 {
+            return prev.copied().unwrap_or(1);
+        }
+        let char_len = ed_for_height.doc().text().len();
+        let raw = ed_for_height.last_vline().0 + 1;
+        let hard_lines = ed_for_height.last_line() + 1;
+        accept_visual_lines(raw, prev, hard_lines, char_len)
+    });
+    /// An empty field still reads as a multi-line box.
+    const MIN_LINES: u16 = 2;
+    /// Vertical padding and border, plus slack so rounding never leaves a
+    /// sub-pixel overflow for the inner scroll to move.
+    const CHROME_PX: f32 = 2.0 * 2.0 + 2.0 * 1.0 + 2.0;
+
+    // No gutter (line numbers read as stray content in a form field), no
+    // scrolling past the last line (it would leave a scrollable overhang), and
+    // a text_input-like border so the textarea presents as a form field.
+    let ed_for_style = editor.clone();
+    text_ed
+        .editor_style(|s| s.hide_gutter(true).scroll_beyond_last_line(false))
+        .style(move |s| {
+            let line_height = ed_for_style.line_height(0);
+            let lines = visual_lines.get().max(MIN_LINES);
+            s.font_size(12.)
+                .padding_horiz(4.)
+                .padding_vert(2.)
+                .width_full()
+                .height(block_height_px(lines, line_height) + CHROME_PX)
+                .border(1.)
+                .border_color(Color::rgb8(200, 200, 210))
+                .border_radius(4.)
+                .background(Color::WHITE)
+        })
+}
+
+/// The markdown marker a Ctrl+B / Ctrl+I / Ctrl+E chord toggles (the paragraph
+/// editor's bold / italic / code keys), or `None` for any other key.
+fn markdown_shortcut(kp: &KeyPress, ms: Modifiers) -> Option<&'static str> {
+    if !ms.control() || ms.alt() || ms.shift() {
+        return None;
+    }
+    let KeyInput::Keyboard(Key::Character(c), _) = &kp.key else {
+        return None;
+    };
+    match c.as_str() {
+        "b" | "B" => Some("**"),
+        "i" | "I" => Some("_"),
+        "e" | "E" => Some("`"),
+        _ => None,
+    }
+}
+
+/// Toggle `marker` around the editor's selection and keep the same text
+/// selected afterwards. See `markdown_wrap::toggle_markdown_wrap`.
+fn toggle_marker(editor_sig: RwSignal<Editor>, marker: &str) {
+    editor_sig.with_untracked(|ed| {
+        let (start, end) = ed.cursor.with_untracked(|c| match &c.mode {
+            CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
+            CursorMode::Normal(offset) => (*offset, *offset),
+            CursorMode::Visual { start, end, .. } => ((*start).min(*end), (*start).max(*end)),
+        });
+        let text = String::from(&ed.doc().text());
+        let Some(edit) = toggle_markdown_wrap(&text, start, end, marker) else {
+            return;
+        };
+        ed.doc().edit_single(
+            Selection::region(edit.range.start, edit.range.end),
+            &edit.replacement,
+            EditType::InsertChars,
+        );
+        ed.cursor.update(|c| {
+            c.mode =
+                CursorMode::Insert(Selection::region(edit.selection.start, edit.selection.end));
+        });
+    });
 }
 
 fn attr_checkbox(

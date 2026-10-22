@@ -100,7 +100,7 @@ pub struct BlockEditorState {
 
 /// Pixel height of a block given its wrapped visual-line count. Clamps to at
 /// least one line so an empty block still has height.
-fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
+pub(crate) fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
     f32::from(visual_lines.max(1)) * line_height
 }
 
@@ -128,7 +128,12 @@ fn block_height_px(visual_lines: u16, line_height: f32) -> f32 {
 /// The bound `raw <= hard_lines + char_len / MIN_CHARS_PER_VLINE` is applied in
 /// multiplied form to avoid lossy integer division (and its clippy lint), with
 /// saturating arithmetic so a pathological count can't overflow.
-fn accept_visual_lines(raw: usize, prev: Option<&u16>, hard_lines: usize, char_len: usize) -> u16 {
+pub(crate) fn accept_visual_lines(
+    raw: usize,
+    prev: Option<&u16>,
+    hard_lines: usize,
+    char_len: usize,
+) -> u16 {
     /// Minimum characters a real wrapped visual line holds (100px / ~big glyph);
     /// anything below this is the collapsed-layout artifact.
     const MIN_CHARS_PER_VLINE: usize = 4;
