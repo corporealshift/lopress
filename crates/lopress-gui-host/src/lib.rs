@@ -11,6 +11,7 @@
 
 pub mod document;
 pub mod error;
+pub mod notes;
 pub mod session;
 
 pub use document::LoadedDocument;

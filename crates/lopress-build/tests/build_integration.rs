@@ -469,3 +469,39 @@ fn empty_nav_builds_without_nav_links() {
         "index should not render nav links when nav is empty, got:\n{index}"
     );
 }
+
+#[test]
+fn notes_never_reach_the_built_site() {
+    const MARKER: &[u8] = b"NOTES-MUST-NOT-PUBLISH";
+    let (_tmp, root) = copy_fixture("minimal");
+    let notes_dir = root.join("notes/posts");
+    fs::create_dir_all(&notes_dir).unwrap();
+    fs::write(notes_dir.join("hello.md"), MARKER).unwrap();
+
+    let report = build(&root).unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "failures: {failures:?}",
+        failures = report.failures
+    );
+
+    let www = root.join("www");
+    let files: Vec<_> = walkdir::WalkDir::new(&www)
+        .into_iter()
+        .map(|e| e.unwrap())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+    assert!(!files.is_empty(), "the build should have written files");
+    for file in files {
+        let rel = file.path().strip_prefix(&www).unwrap();
+        assert!(
+            !rel.to_string_lossy().contains("notes"),
+            "notes path in output: {rel:?}"
+        );
+        let bytes = fs::read(file.path()).unwrap();
+        assert!(
+            !bytes.windows(MARKER.len()).any(|w| w == MARKER),
+            "notes text in {rel:?}"
+        );
+    }
+}
