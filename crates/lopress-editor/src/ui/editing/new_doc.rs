@@ -53,43 +53,47 @@ pub fn make_new_doc_action(
         ) {
             return;
         }
-        let mut guard = editing.borrow_mut();
-        let Some(state) = guard.as_mut() else {
-            return;
-        };
-        let dir = match kind {
-            DocKind::Post => state.session.posts_dir(),
-            DocKind::Page => state.session.pages_dir(),
-        };
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            eprintln!("failed to create {}: {e}", dir.display());
-            return;
-        }
-        let path = unique_doc_path(&dir, &lopress_core::slugify(kind.default_title()));
-        if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
-            eprintln!("failed to write {}: {e}", path.display());
-            return;
-        }
+        {
+            let mut guard = editing.borrow_mut();
+            let Some(state) = guard.as_mut() else {
+                return;
+            };
+            let dir = match kind {
+                DocKind::Post => state.session.posts_dir(),
+                DocKind::Page => state.session.pages_dir(),
+            };
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("failed to create {}: {e}", dir.display());
+                return;
+            }
+            let path = unique_doc_path(&dir, &lopress_core::slugify(kind.default_title()));
+            if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
+                eprintln!("failed to write {}: {e}", path.display());
+                return;
+            }
 
-        let summary = state.session.rescan();
-        let doc_ref = summary
-            .posts
-            .iter()
-            .chain(summary.pages.iter())
-            .find(|d| d.path == path)
-            .cloned()
-            .unwrap_or_else(|| DocumentRef {
-                path: path.clone(),
-                title: kind.default_title().to_string(),
-                slug: String::new(),
-                date: None,
-                is_draft: true,
-                has_parse_error: false,
-            });
+            let summary = state.session.rescan();
+            let doc_ref = summary
+                .posts
+                .iter()
+                .chain(summary.pages.iter())
+                .find(|d| d.path == path)
+                .cloned()
+                .unwrap_or_else(|| DocumentRef {
+                    path: path.clone(),
+                    title: kind.default_title().to_string(),
+                    slug: String::new(),
+                    date: None,
+                    is_draft: true,
+                    has_parse_error: false,
+                });
 
-        state.open_document(&doc_ref);
-        current_doc.set(state.current_doc.clone());
-        current_path.set(Some(doc_ref.path));
-        workspace_signal.set(summary);
+            state.open_document(&doc_ref);
+            current_doc.set(state.current_doc.clone());
+            current_path.set(Some(doc_ref.path));
+            workspace_signal.set(summary);
+        }
+        // After the guard drops: `reload_notes` borrows `editing`.
+        crate::ui::editing::notes::reload_notes(flush_signals.notes, &editing);
     })
 }

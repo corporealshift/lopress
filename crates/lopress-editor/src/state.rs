@@ -98,6 +98,27 @@ impl EditingState {
         self.session.save(&loaded).map_err(|e| e.to_string())
     }
 
+    /// Read the open document's notes. No open document reads as empty.
+    pub fn load_notes(&self) -> Result<String, String> {
+        match &self.current_ref {
+            Some(r) => self.session.load_notes(&r.path).map_err(|e| e.to_string()),
+            None => Ok(String::new()),
+        }
+    }
+
+    /// Save notes for the open document. The path comes from `current_ref` at
+    /// call time, so a save always follows a rename.
+    pub fn save_notes(&self, text: &str) -> Result<(), String> {
+        let path = self
+            .current_ref
+            .as_ref()
+            .map(|r| r.path.as_path())
+            .ok_or_else(|| "no document open".to_string())?;
+        self.session
+            .save_notes(path, text)
+            .map_err(|e| e.to_string())
+    }
+
     /// Rename the open document's file so its stem matches `front_matter`'s
     /// effective slug. Returns the new path when a rename happened, `None`
     /// when the filename already matched (or no doc is open).

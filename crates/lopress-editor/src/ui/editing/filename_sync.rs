@@ -6,6 +6,7 @@
 
 use crate::model::types::EditorDoc;
 use crate::state::{EditingState, FilenameSync};
+use crate::ui::editing::notes::NotesState;
 use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
 use lopress_core::{slugify, FrontMatter};
 use lopress_gui_host::WorkspaceSummary;
@@ -91,6 +92,7 @@ pub fn sync_filename_and_update(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
     workspace_signal: RwSignal<WorkspaceSummary>,
+    notes: NotesState,
 ) {
     let Some(fm) = current_doc.with_untracked(|d| d.as_ref().map(|doc| doc.front_matter.clone()))
     else {
@@ -107,7 +109,7 @@ pub fn sync_filename_and_update(
                 notes_warning,
             })) => {
                 if let Some(warning) = notes_warning {
-                    eprintln!("{warning}");
+                    notes.save_error.set(Some(warning));
                 }
                 Some((new_path, state.session.rescan()))
             }

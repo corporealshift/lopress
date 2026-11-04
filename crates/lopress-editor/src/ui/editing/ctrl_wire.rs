@@ -9,11 +9,12 @@
 use crate::actions::BlockAction;
 use crate::ctrl::{
     CtrlActionEnvelope, CtrlActionResult, CtrlCloseEnvelope, CtrlCloseResult, CtrlHandle,
-    CtrlOpenEnvelope, CtrlOpenResult,
+    CtrlOpenEnvelope, CtrlOpenResult, NotesSnapshot,
 };
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActionSink;
+use crate::ui::editing::notes::{reload_notes, NotesState};
 use crate::ui::StateTag;
 use floem::ext_event::create_signal_from_channel;
 use floem::reactive::{create_effect, ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -35,12 +36,24 @@ pub(crate) fn wire_ctrl_root(
     current_path: RwSignal<Option<PathBuf>>,
     editing: Rc<RefCell<Option<EditingState>>>,
     state_tag: RwSignal<StateTag>,
+    notes: NotesState,
 ) -> ReadSignal<Option<CtrlActionEnvelope>> {
     // Snapshot effect: serialise current doc + path into the handle on change.
     let snap = ctrl_handle.snapshot.clone();
     create_effect(move |_| {
+        let notes_snapshot = NotesSnapshot {
+            open: notes.open.get(),
+            dirty: notes.dirty.get(),
+            text: notes.text.get(),
+            load_error: notes.load_error.get(),
+            save_error: notes.save_error.get(),
+        };
         let json = current_doc.with(|maybe| {
-            crate::ctrl::serialize_state(maybe.as_ref(), current_path.get_untracked().as_deref())
+            crate::ctrl::serialize_state(
+                maybe.as_ref(),
+                current_path.get_untracked().as_deref(),
+                &notes_snapshot,
+            )
         });
         *snap.lock().unwrap_or_else(|e| e.into_inner()) = json;
     });
@@ -56,6 +69,7 @@ pub(crate) fn wire_ctrl_root(
                 current_doc,
                 current_path,
                 state_tag,
+                notes,
             );
             let _ = reply_tx.send(result);
         }
@@ -70,6 +84,7 @@ pub(crate) fn wire_ctrl_root(
                 *editing_for_close.borrow_mut() = None;
                 current_doc.set(None);
                 current_path.set(None);
+                reload_notes(notes, &editing_for_close);
                 state_tag.set(StateTag::Welcome);
                 CtrlCloseResult::Closed
             } else {
@@ -129,6 +144,7 @@ fn open_document_by_path(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
     state_tag: RwSignal<StateTag>,
+    notes: NotesState,
 ) -> CtrlOpenResult {
     let raw = PathBuf::from(path_str);
     // Absolute → used as-is. Relative → resolved against the open workspace
@@ -186,6 +202,7 @@ fn open_document_by_path(
     // sees a populated doc when it mounts.
     current_doc.set(doc);
     current_path.set(Some(target));
+    reload_notes(notes, editing);
     state_tag.set(StateTag::Editing);
     CtrlOpenResult::Opened
 }

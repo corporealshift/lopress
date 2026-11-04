@@ -10,6 +10,7 @@ pub mod ctrl_wire;
 pub mod filename_sync;
 pub mod focus;
 pub mod new_doc;
+pub mod notes;
 pub mod pane_key;
 pub mod save_pipeline;
 pub mod undo_redo;
