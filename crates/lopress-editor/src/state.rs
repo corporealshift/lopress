@@ -8,7 +8,7 @@ use lopress_core::perf;
 use lopress_core::{Document, FrontMatter};
 use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
 use lopress_plugin::PluginRegistry;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Top-level application state, discriminated by which screen is active.
 pub enum AppState {
@@ -21,6 +21,14 @@ pub enum AppState {
 pub struct WelcomeState {
     /// Error message to display above the action buttons, if any.
     pub error: Option<String>,
+}
+
+/// A completed rename of the open document.
+pub struct FilenameSync {
+    pub new_path: PathBuf,
+    /// Set when the post moved but its notes could not. Not an `Err`: the
+    /// post's rename has already happened, and `current_ref` must follow it.
+    pub notes_warning: Option<String>,
 }
 
 /// State for the Editing screen.
@@ -97,16 +105,31 @@ impl EditingState {
     /// Updates `self.current_ref.path` on a successful rename; callers are
     /// responsible for reflecting the new path in the UI signals and
     /// re-scanning the workspace.
-    pub fn sync_filename(&mut self, front_matter: &FrontMatter) -> Result<Option<PathBuf>, String> {
+    pub fn sync_filename(
+        &mut self,
+        front_matter: &FrontMatter,
+    ) -> Result<Option<FilenameSync>, String> {
         let Some(current) = self.current_ref.as_ref().map(|r| r.path.clone()) else {
             return Ok(None);
         };
-        match crate::ui::editing::filename_sync::rename_to_slug(front_matter, &current) {
+        // A leftover notes file makes a name unavailable, so it is never
+        // overwritten or adopted by this post.
+        let session = &self.session;
+        let taken = |p: &Path| p.exists() || session.notes_path_for(p).is_some_and(|n| n.exists());
+        match crate::ui::editing::filename_sync::rename_to_slug(front_matter, &current, taken) {
             Ok(Some(new_path)) => {
                 if let Some(r) = self.current_ref.as_mut() {
                     r.path = new_path.clone();
                 }
-                Ok(Some(new_path))
+                let notes_warning = self
+                    .session
+                    .rename_notes(&current, &new_path)
+                    .err()
+                    .map(|e| format!("notes not moved: {e}"));
+                Ok(Some(FilenameSync {
+                    new_path,
+                    notes_warning,
+                }))
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e.to_string()),

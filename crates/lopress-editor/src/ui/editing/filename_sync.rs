@@ -5,7 +5,7 @@
 //! equal to it. Front matter is never mutated — only the file moves.
 
 use crate::model::types::EditorDoc;
-use crate::state::EditingState;
+use crate::state::{EditingState, FilenameSync};
 use floem::reactive::{RwSignal, SignalUpdate, SignalWith};
 use lopress_core::{slugify, FrontMatter};
 use lopress_gui_host::WorkspaceSummary;
@@ -69,8 +69,12 @@ pub fn resolve_target(
 ///
 /// # Errors
 /// Returns the underlying I/O error if the rename fails.
-pub fn rename_to_slug(fm: &FrontMatter, current: &Path) -> std::io::Result<Option<PathBuf>> {
-    let Some(target) = resolve_target(fm, current, |p| p.exists()) else {
+pub fn rename_to_slug(
+    fm: &FrontMatter,
+    current: &Path,
+    taken: impl Fn(&Path) -> bool,
+) -> std::io::Result<Option<PathBuf>> {
+    let Some(target) = resolve_target(fm, current, taken) else {
         return Ok(None);
     };
     std::fs::rename(current, &target)?;
@@ -98,7 +102,15 @@ pub fn sync_filename_and_update(
             return;
         };
         match state.sync_filename(&fm) {
-            Ok(Some(new_path)) => Some((new_path, state.session.rescan())),
+            Ok(Some(FilenameSync {
+                new_path,
+                notes_warning,
+            })) => {
+                if let Some(warning) = notes_warning {
+                    eprintln!("{warning}");
+                }
+                Some((new_path, state.session.rescan()))
+            }
             Ok(None) => None,
             Err(e) => {
                 eprintln!("filename sync failed: {e}");
@@ -182,7 +194,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let old = dir.path().join("untitled-1.md");
         std::fs::write(&old, "x").unwrap();
-        let new = rename_to_slug(&fm(Some("My First Post"), None), &old)
+        let new = rename_to_slug(&fm(Some("My First Post"), None), &old, |p| p.exists())
             .unwrap()
             .unwrap();
         assert_eq!(new, dir.path().join("my-first-post.md"));
@@ -196,9 +208,25 @@ mod tests {
         std::fs::write(dir.path().join("hello.md"), "a").unwrap();
         let old = dir.path().join("untitled-1.md");
         std::fs::write(&old, "b").unwrap();
-        let new = rename_to_slug(&fm(Some("Hello"), None), &old)
+        let new = rename_to_slug(&fm(Some("Hello"), None), &old, |p| p.exists())
             .unwrap()
             .unwrap();
         assert_eq!(new, dir.path().join("hello-2.md"));
+    }
+
+    #[test]
+    fn rename_to_slug_skips_a_name_taken_by_something_other_than_a_post() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("untitled-1.md");
+        std::fs::write(&old, "b").unwrap();
+        // No hello.md exists; `taken` stands in for a leftover notes file.
+        let leftover = dir.path().join("hello.md");
+        let new = rename_to_slug(&fm(Some("Hello"), None), &old, |p| {
+            p == leftover || p.exists()
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(new, dir.path().join("hello-2.md"));
+        assert!(!leftover.exists());
     }
 }
