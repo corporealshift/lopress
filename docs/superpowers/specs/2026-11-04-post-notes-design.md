@@ -92,9 +92,9 @@ Notes have their own small pipeline, separate from the post's:
   affect the site, so a long writing session should not trigger builds.
 - **On blur:** through the inner editor's `editor_view_focus_lost` Trigger,
   because the outer `text_editor` never receives `FocusLost`.
-- **On document switch:** `flush_pending_edits` saves notes first. Sidebar rows
-  are not focusable, so clicking one never blurs the editor. A failed save
-  aborts the switch, matching post behaviour.
+- **On document switch:** `flush_pending_edits` saves notes first, so a switch
+  never depends on a blur save having run. A failed save aborts the switch,
+  matching post behaviour.
 - **On window close:** the `WindowClosed` handler saves notes before its
   existing early return for a clean post.
 
@@ -111,14 +111,18 @@ avoids floem's overlay hit-testing problems.
   when the post has notes, and any load or save error.
 - Open, the drawer takes 40% of the window height. The editor is a plain
   `text_editor_keys` with no gutter and its own internal scroll.
-- The body is **hidden, not unmounted**, when collapsed. The header is not
-  focusable, so collapsing does not blur the editor; unmounting would skip the
-  blur save and throw away the caret and undo history.
+- The body is **hidden, not unmounted**, when collapsed, so the caret and undo
+  history survive.
+- Opening the drawer focuses the editor. Floem clears focus on every pointer
+  down, so the header click blurs it and anything typed next would go nowhere.
 - The editor rebuilds only when `doc_generation` changes.
 - With no document open, the drawer renders nothing.
 
 Undo inside the drawer is the text editor's own and is independent of the
-article's undo stack.
+article's undo stack. Its steps are coarse: floem treats an unbroken run of typed
+characters as one step, and only a different kind of edit, such as Enter, ends
+it. Clicks and caret moves do not. Redo restores the text until the post is
+closed.
 
 ## Slug renames
 

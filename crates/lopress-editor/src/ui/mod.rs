@@ -9,6 +9,7 @@ pub mod inspector;
 pub mod link_bar;
 
 pub mod nav_editor;
+pub mod notes_drawer;
 pub mod sidebar;
 pub mod slash_menu;
 pub mod toolbar;
@@ -567,8 +568,10 @@ fn editing_view(
             .width_full()
     });
 
+    let notes_drawer = notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing));
+
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, link_bar, footer, nav_modal))
+    stack((columns, notes_drawer, link_bar, footer, nav_modal))
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
             // Force-flush any unsaved edits before the window dies. Notes go

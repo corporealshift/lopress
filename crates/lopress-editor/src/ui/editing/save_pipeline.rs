@@ -122,6 +122,14 @@ pub fn start_save_pipeline(
         });
     }
 
+    // Notes save on their own timer, with no rebuild: they don't affect the site.
+    {
+        let editing_for_notes = Rc::clone(&editing);
+        debounce_action(notes.edits, Duration::from_millis(500), move || {
+            save_notes(notes, &editing_for_notes);
+        });
+    }
+
     SavePipeline {
         mark_dirty,
         dirty_sig,
