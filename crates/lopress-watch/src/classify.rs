@@ -139,6 +139,14 @@ mod tests {
     }
 
     #[test]
+    fn notes_folder_is_ignored() {
+        assert_eq!(
+            classify(&ws(), &ws().join("notes/posts/hello.md")),
+            Bucket::Ignored
+        );
+    }
+
+    #[test]
     fn outside_workspace_ignored() {
         assert_eq!(classify(&ws(), Path::new("/etc/passwd")), Bucket::Ignored);
     }

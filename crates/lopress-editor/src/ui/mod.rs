@@ -9,6 +9,7 @@ pub mod inspector;
 pub mod link_bar;
 
 pub mod nav_editor;
+pub mod notes_drawer;
 pub mod sidebar;
 pub mod slash_menu;
 pub mod toolbar;
@@ -33,6 +34,7 @@ use crate::ui::dnd::DndState;
 #[cfg(debug_assertions)]
 use crate::ui::editing::ctrl_wire;
 use crate::ui::editing::new_doc;
+use crate::ui::editing::notes::{self, NotesState};
 use crate::ui::editing::save_pipeline;
 use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
@@ -89,6 +91,10 @@ pub(crate) fn root_view(
     // editing_view) so the ctrl snapshot/open/close effects can read & set it.
     let current_path: RwSignal<Option<PathBuf>> = RwSignal::new(None);
 
+    // Notes drawer state. Lifted to root_view for the same reason: the ctrl
+    // open/close effects change the document and must reload notes.
+    let notes = NotesState::new();
+
     // Callback invoked by the welcome view when the user picks a path.
     let editing_for_open = Rc::clone(&editing);
     let on_open = move |path: std::path::PathBuf| match Session::open(&path) {
@@ -130,6 +136,7 @@ pub(crate) fn root_view(
         current_path,
         Rc::clone(&editing),
         state_tag,
+        notes,
     );
 
     dyn_container(
@@ -142,6 +149,7 @@ pub(crate) fn root_view(
                 Rc::clone(&editing_for_view),
                 current_doc,
                 current_path,
+                notes,
                 #[cfg(debug_assertions)]
                 ctrl_action_read,
             )
@@ -211,6 +219,7 @@ fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
+    notes: NotesState,
     #[cfg(debug_assertions)] ctrl_action_read: floem::reactive::ReadSignal<
         Option<crate::ctrl::CtrlActionEnvelope>,
     >,
@@ -254,6 +263,7 @@ fn editing_view(
         current_doc,
         current_path,
         workspace_signal,
+        notes,
     );
 
     // Pane-stable slot holding the focused block editor's commit closure;
@@ -264,6 +274,7 @@ fn editing_view(
         active_commit,
         dirty_sig: save.dirty_sig,
         save_error_sig: save.save_error_sig,
+        notes,
     };
 
     let editing_for_open = Rc::clone(&editing);
@@ -279,14 +290,18 @@ fn editing_view(
         ) {
             return;
         }
-        let mut guard = editing_for_open.borrow_mut();
-        let Some(state) = guard.as_mut() else {
-            return;
-        };
-        state.open_document(&doc_ref);
-        current_doc.set(state.current_doc.clone());
-        current_path.set(Some(doc_ref.path));
+        {
+            let mut guard = editing_for_open.borrow_mut();
+            let Some(state) = guard.as_mut() else {
+                return;
+            };
+            state.open_document(&doc_ref);
+            current_doc.set(state.current_doc.clone());
+            current_path.set(Some(doc_ref.path));
+        }
         undo_stack.update(|s| *s = crate::undo::UndoStack::new());
+        // After the guard drops: `reload_notes` borrows `editing`.
+        notes::reload_notes(notes, &editing_for_open);
     });
 
     let on_new_post = new_doc::make_new_doc_action(
@@ -553,11 +568,15 @@ fn editing_view(
             .width_full()
     });
 
+    let notes_drawer = notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing));
+
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, link_bar, footer, nav_modal))
+    stack((columns, notes_drawer, link_bar, footer, nav_modal))
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
-            // Force-flush any unsaved edits before the window dies.
+            // Force-flush any unsaved edits before the window dies. Notes go
+            // first: a clean post returns early below.
+            let _ = notes::save_notes(notes, &editing_for_close);
             if !save.dirty_sig.get_untracked() {
                 return;
             }

@@ -50,7 +50,7 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | Endpoint | Method | Purpose | Returns |
 |---|---|---|---|
 | `/ping` | GET | Liveness check | `ok` |
-| `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}]}` — see kind values below |
+| `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}], notes:{open,dirty,text,load_error,save_error}}` — see kind values below |
 | `/screenshot` | GET | PNG of the window | `image/png` bytes; `503` if window not found |
 | `/action` | POST | Apply a `CtrlAction` to the doc | `200 {"status":"dispatched"}` / `409 no_document` / `422 block_not_found` / `400 parse error` |
 | `/open` | POST | Open a doc by path. Body `{ "path": "..." }`. Absolute or workspace-relative. | `200 {"status":"opened"}` / `404 {"status":"not_found"}` / `409 {"status":"no_workspace"}` |
@@ -71,6 +71,8 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | Opaque (image, unknown/plugin types) | `"Opaque(<type>)"`, e.g. `"Opaque(lopress:video)"`, `"Opaque(image)"` | `""` (always empty — Opaque content is not exposed; verify via `/screenshot` or the saved `.md`) |
 
 `/state` does **not** distinguish heading levels or expose plugin attrs — read the persisted `.md` for those.
+
+With a document open, `notes` reports the notes drawer. Unlike block text, `notes.text` is the live buffer, so `/input`-typed notes appear in `/state` immediately. `path` can lag a slug rename until the next document or notes change; check the file on disk when it matters.
 
 ## POST /action — document mutations
 

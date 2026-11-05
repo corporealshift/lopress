@@ -243,6 +243,48 @@ impl Session {
         Ok(())
     }
 
+    /// The notes file for `doc`, if it is a post or page.
+    pub fn notes_path_for(&self, doc: &Path) -> Option<PathBuf> {
+        crate::notes::notes_path(&self.workspace.root, doc)
+    }
+
+    /// Read the notes for `doc`. A document with no notes reads as empty.
+    ///
+    /// # Errors
+    /// Returns the I/O error when the notes file exists but can't be read.
+    pub fn load_notes(&self, doc: &Path) -> std::io::Result<String> {
+        match self.notes_path_for(doc) {
+            Some(path) => crate::notes::load(&path),
+            None => Ok(String::new()),
+        }
+    }
+
+    /// Save the notes for `doc`.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` when `doc` is not a post or page, so text is
+    /// never silently dropped, or the underlying I/O error.
+    pub fn save_notes(&self, doc: &Path, text: &str) -> std::io::Result<()> {
+        let Some(path) = self.notes_path_for(doc) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "document is not in posts or pages",
+            ));
+        };
+        crate::notes::save(&path, text)
+    }
+
+    /// Move the notes that follow a document rename.
+    ///
+    /// # Errors
+    /// Returns the error from [`crate::notes::rename`].
+    pub fn rename_notes(&self, from_doc: &Path, to_doc: &Path) -> std::io::Result<()> {
+        match (self.notes_path_for(from_doc), self.notes_path_for(to_doc)) {
+            (Some(from), Some(to)) => crate::notes::rename(&from, &to),
+            _ => Ok(()),
+        }
+    }
+
     /// Posts directory for this workspace. Sidebar uses this to write
     /// new-post stubs.
     pub fn posts_dir(&self) -> PathBuf {
@@ -557,7 +599,7 @@ pub fn sort_posts(posts: &mut [DocumentRef]) {
     posts.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.slug.cmp(&b.slug)));
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let Some(parent) = path.parent() else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,

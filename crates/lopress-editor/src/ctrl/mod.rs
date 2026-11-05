@@ -345,7 +345,20 @@ pub(crate) type CtrlCloseEnvelope = (crossbeam_channel::Sender<CtrlCloseResult>,
 
 // ── Doc state serialization ───────────────────────────────────────────────────
 
-pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::Path>) -> String {
+/// The notes fields reported by `/state`.
+pub(crate) struct NotesSnapshot {
+    pub open: bool,
+    pub dirty: bool,
+    pub text: String,
+    pub load_error: Option<String>,
+    pub save_error: Option<String>,
+}
+
+pub(crate) fn serialize_state(
+    doc: Option<&EditorDoc>,
+    path: Option<&std::path::Path>,
+    notes: &NotesSnapshot,
+) -> String {
     let Some(doc) = doc else {
         return r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string();
     };
@@ -423,6 +436,13 @@ pub(crate) fn serialize_state(doc: Option<&EditorDoc>, path: Option<&std::path::
         "doc_open": true,
         "path": path.map(|p| p.to_string_lossy().to_string()),
         "blocks": blocks,
+        "notes": {
+            "open": notes.open,
+            "dirty": notes.dirty,
+            "text": notes.text,
+            "load_error": notes.load_error,
+            "save_error": notes.save_error,
+        },
     })
     .to_string()
 }
@@ -1083,6 +1103,25 @@ mod tests {
             CtrlOpenResult::NoWorkspace.http_parts(),
             (409, r#"{"status":"no_workspace"}"#.to_string()),
         );
+    }
+
+    #[test]
+    fn serialize_state_reports_notes() {
+        let (doc, _) = doc_one_paragraph();
+        let notes = NotesSnapshot {
+            open: true,
+            dirty: true,
+            text: "an idea".to_string(),
+            load_error: None,
+            save_error: Some("disk full".to_string()),
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&serialize_state(Some(&doc), None, &notes)).unwrap();
+        assert_eq!(json["notes"]["open"], true);
+        assert_eq!(json["notes"]["dirty"], true);
+        assert_eq!(json["notes"]["text"], "an idea");
+        assert_eq!(json["notes"]["load_error"], serde_json::Value::Null);
+        assert_eq!(json["notes"]["save_error"], "disk full");
     }
 
     #[test]

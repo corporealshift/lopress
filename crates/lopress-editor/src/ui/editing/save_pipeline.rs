@@ -8,6 +8,7 @@
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActiveCommitSlot;
+use crate::ui::editing::notes::{save_notes, NotesState};
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use lopress_gui_host::{BuildStatus, ServeStatus, WorkspaceSummary};
@@ -36,6 +37,7 @@ pub fn start_save_pipeline(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
     workspace_signal: RwSignal<WorkspaceSummary>,
+    notes: NotesState,
 ) -> SavePipeline {
     // ── Save-debounce signals ────────────────────────────────────────
     // `dirty_counter` bumps on every legitimate edit; `debounce_action`
@@ -107,6 +109,7 @@ pub fn start_save_pipeline(
                         current_doc,
                         cp,
                         ws,
+                        notes,
                     );
                     if let Some(state) = editing_for_save.borrow().as_ref() {
                         state.session.rebuild();
@@ -116,6 +119,14 @@ pub fn start_save_pipeline(
                     ses.set(Some(msg));
                 }
             }
+        });
+    }
+
+    // Notes save on their own timer, with no rebuild: they don't affect the site.
+    {
+        let editing_for_notes = Rc::clone(&editing);
+        debounce_action(notes.edits, Duration::from_millis(500), move || {
+            save_notes(notes, &editing_for_notes);
         });
     }
 
@@ -137,6 +148,7 @@ pub struct FlushSignals {
     pub active_commit: ActiveCommitSlot,
     pub dirty_sig: RwSignal<bool>,
     pub save_error_sig: RwSignal<Option<String>>,
+    pub notes: NotesState,
 }
 
 /// Flush pending edits before a doc-switch path replaces `current_doc`.
@@ -163,11 +175,16 @@ pub fn flush_pending_edits(
         active_commit,
         dirty_sig,
         save_error_sig,
+        notes,
     } = signals;
     if let Some(commit) = active_commit.get_untracked() {
         // Marks the doc dirty via the action sink when the buffer differs
         // from the model; a no-change commit is dropped by `apply`.
         commit();
+    }
+    // Before the clean-post early return, or a clean post skips its notes.
+    if !save_notes(notes, editing) {
+        return false;
     }
     if !dirty_sig.get_untracked() {
         return true;
@@ -189,6 +206,7 @@ pub fn flush_pending_edits(
                 current_doc,
                 current_path,
                 workspace_signal,
+                notes,
             );
             if let Some(state) = editing.borrow().as_ref() {
                 state.session.rebuild();

@@ -503,6 +503,7 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `ui/blocks/style_span.rs` | `InlineRunStyling` — Floem `Styling` trait impl. |
 | `ui/editor_pane.rs` | Block tree canvas. |
 | `ui/link_bar.rs` | Pane-level link editing bar (survives block-pane rebuilds). |
+| `ui/notes_drawer.rs` | Collapsible bottom drawer for the open document's notes. |
 | `ui/nav_editor.rs` | Site-settings nav editor (`nav.toml`). |
 | `ui/toolbar.rs` | Block-type toolbar (P/H1/H2/Code/UL/OL + style toggles). |
 | `ui/slash_menu.rs` | Slash command popup (`/` in empty paragraph). |
@@ -510,7 +511,7 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `ui/sidebar.rs` | Left-hand sidebar (post/page list). |
 | `ui/footer.rs` | Bottom footer (build status, save status, serve status). |
 | `ui/welcome.rs` | Welcome screen (workspace picker). |
-| `ui/editing/` | Save pipeline, action sink, undo/redo, pane key, focus, new doc, ctrl wire. |
+| `ui/editing/` | Save pipeline, action sink, undo/redo, pane key, focus, new doc, notes state, ctrl wire. |
 | `ui/dnd.rs` | Drag-and-drop support. |
 | `ctrl/mod.rs` | Debug control server (HTTP API for testing). |
 | `settings.rs` | User settings (window geometry, recents). |
@@ -807,6 +808,16 @@ with itself), and an empty effective slug is left alone. The rename runs before
 plus the workspace summary so the sidebar row and inspector follow. New documents
 are created straight from the slugified default title (`new-post.md` /
 `new-page.md`) rather than `untitled-N.md`.
+
+**Notes:** Each document's notes live in `notes/posts/` or `notes/pages/` under the
+same file name, outside `src/`, so neither the build nor the watcher sees them.
+They have their own pipeline in `ui/editing/notes.rs`: a 500 ms debounce with no
+site rebuild, a save on blur, and explicit saves in `flush_pending_edits` and on
+window close. Filename sync moves the notes file with the post, and a leftover
+notes file makes a name count as taken. The drawer rebuilds on
+`NotesState::doc_generation` rather than `current_path`, so a slug rename leaves
+the editor alone. Notes errors use `NotesState::save_error`, not the footer's
+`save_error_sig`, which a successful post save clears.
 
 ---
 
