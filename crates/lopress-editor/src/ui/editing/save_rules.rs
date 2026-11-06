@@ -11,12 +11,12 @@ pub enum SaveStep {
     Write,
 }
 
-/// A clean post writes nothing. A missing file is written back.
+/// A clean post writes nothing, except that a missing file is written back.
 pub fn decide_save(unsaved: bool, disk: DiskState) -> SaveStep {
     match (unsaved, disk) {
-        (false, _) => SaveStep::NothingToDo,
+        (false, DiskState::Unchanged | DiskState::Changed) => SaveStep::NothingToDo,
         (true, DiskState::Changed) => SaveStep::ConfirmOverwrite,
-        (true, DiskState::Unchanged | DiskState::Missing) => SaveStep::Write,
+        (_, DiskState::Missing) | (true, DiskState::Unchanged) => SaveStep::Write,
     }
 }
 
@@ -75,10 +75,14 @@ mod tests {
     use DiskState::{Changed, Missing, Unchanged};
 
     #[test]
-    fn a_clean_post_never_writes() {
-        for disk in [Unchanged, Changed, Missing] {
-            assert_eq!(decide_save(false, disk), SaveStep::NothingToDo);
-        }
+    fn a_clean_post_writes_nothing() {
+        assert_eq!(decide_save(false, Unchanged), SaveStep::NothingToDo);
+        assert_eq!(decide_save(false, Changed), SaveStep::NothingToDo);
+    }
+
+    #[test]
+    fn a_missing_file_is_written_back_even_when_clean() {
+        assert_eq!(decide_save(false, Missing), SaveStep::Write);
     }
 
     #[test]

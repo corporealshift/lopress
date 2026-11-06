@@ -13,7 +13,7 @@ use crate::ui::editing::save_rules::{decide_save, SaveStep};
 use crate::undo::UndoStack;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use lopress_gui_host::{BuildStatus, DiskState, ServeStatus, WorkspaceSummary};
+use lopress_gui_host::{BuildStatus, DiskStamp, DiskState, ServeStatus, WorkspaceSummary};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -26,6 +26,8 @@ pub struct DocStatus {
     /// The post has edits that aren't on disk. Notes track their own.
     pub dirty: RwSignal<bool>,
     pub disk: RwSignal<DiskState>,
+    /// Why the last refresh failed. Cleared once the files match again.
+    pub refresh_error: RwSignal<Option<String>>,
 }
 
 impl DocStatus {
@@ -33,6 +35,7 @@ impl DocStatus {
         Self {
             dirty: RwSignal::new(false),
             disk: RwSignal::new(DiskState::Unchanged),
+            refresh_error: RwSignal::new(None),
         }
     }
 }
@@ -53,6 +56,7 @@ pub fn after_doc_loaded(
 ) {
     status.dirty.set(false);
     status.disk.set(DiskState::Unchanged);
+    status.refresh_error.set(None);
     undo_stack.update(|s| *s = UndoStack::new());
     reload_notes(notes, editing);
 }
@@ -138,6 +142,8 @@ pub fn start_save_pipeline(
         crate::ui::footer::start_serve_status_poll(serve_reader, serve_status_sig);
     }
 
+    start_disk_poll(Rc::clone(&editing), status);
+
     // Debounced save+rebuild. `debounce_action` resets its internal timer on
     // every counter bump and fires the closure 500 ms after the last bump.
     {
@@ -194,6 +200,51 @@ pub fn start_save_pipeline(
         save_error_sig,
         build_status_sig,
         serve_status_sig,
+    }
+}
+
+/// Watch the open files on a 250 ms timer. A timer rather than the watcher,
+/// which ignores `notes/`. Stats every tick and reads the files only when a
+/// stamp moves. A failed read keeps the old stamp, so the next tick retries.
+fn start_disk_poll(editing: Rc<RefCell<Option<EditingState>>>, status: DocStatus) {
+    fn tick(
+        editing: Rc<RefCell<Option<EditingState>>>,
+        status: DocStatus,
+        last: Option<DiskStamp>,
+    ) {
+        floem::action::exec_after(Duration::from_millis(250), move |_| {
+            let last = check_disk(&editing, status, last);
+            tick(editing, status, last);
+        });
+    }
+    tick(editing, status, None);
+}
+
+/// One poll tick. Returns the stamp to compare against next time.
+fn check_disk(
+    editing: &Rc<RefCell<Option<EditingState>>>,
+    status: DocStatus,
+    last: Option<DiskStamp>,
+) -> Option<DiskStamp> {
+    let guard = editing.borrow();
+    let Some(state) = guard.as_ref() else {
+        return last;
+    };
+    let stamp = state.disk_stamp();
+    if stamp == last {
+        return last;
+    }
+    match state.disk_state() {
+        Some(Ok(disk)) => {
+            if disk != status.disk.get_untracked() {
+                status.disk.set(disk);
+            }
+            if disk == DiskState::Unchanged {
+                status.refresh_error.set(None);
+            }
+            stamp
+        }
+        Some(Err(_)) | None => last,
     }
 }
 
@@ -300,7 +351,12 @@ pub fn save_now(ctx: &SaveCtx, restore: Option<SelectionRestore>, overwrite: boo
     if ctx.current_doc.with_untracked(Option::is_none) {
         return SaveOutcome::NoDocument;
     }
-    match (decide_save(ctx.unsaved(), ctx.disk_now()), overwrite) {
+    let disk = ctx.disk_now();
+    if disk == DiskState::Missing {
+        // The whole post is unsaved now, even with no edits.
+        ctx.status.dirty.set(true);
+    }
+    match (decide_save(ctx.unsaved(), disk), overwrite) {
         (SaveStep::NothingToDo, _) => SaveOutcome::NothingToSave,
         (SaveStep::ConfirmOverwrite, false) => SaveOutcome::NeedsOverwrite,
         (SaveStep::ConfirmOverwrite, true) | (SaveStep::Write, _) => {
@@ -310,6 +366,32 @@ pub fn save_now(ctx: &SaveCtx, restore: Option<SelectionRestore>, overwrite: boo
                 SaveOutcome::Failed
             }
         }
+    }
+}
+
+/// Replace the open document and its notes with what's on disk. If the file
+/// can't be loaded, the open document stays and the error goes in the bar.
+pub fn refresh_from_disk(ctx: &SaveCtx) {
+    let reloaded = {
+        let mut guard = ctx.editing.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        state.reload_current().map(|()| {
+            (
+                state.current_doc.clone(),
+                state.current_ref.as_ref().map(|r| r.path.clone()),
+            )
+        })
+    };
+    match reloaded {
+        Ok((doc, path)) => {
+            ctx.current_doc.set(doc);
+            // Same path, but setting it reseeds the inspector.
+            ctx.current_path.set(path);
+            after_doc_loaded(ctx.status, ctx.notes, ctx.undo_stack, &ctx.editing);
+        }
+        Err(e) => ctx.status.refresh_error.set(Some(e)),
     }
 }
 

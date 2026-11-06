@@ -190,23 +190,7 @@ impl EditingState {
             self.session.load_document(&doc_ref.path)
         };
         match load_result {
-            Ok(loaded) => {
-                self.baseline = Some(DiskBaseline {
-                    post: loaded.raw,
-                    notes: self.session.load_notes(&doc_ref.path).unwrap_or_default(),
-                });
-                let core_doc = Document {
-                    front_matter: loaded.front_matter,
-                    blocks: loaded.blocks,
-                };
-                let editor_doc = {
-                    let _t = perf::span("editor.open_document.from_core");
-                    doc_from_core(&core_doc, &self.plugin_registry)
-                };
-                self.current_doc = Some(editor_doc);
-                self.current_ref = Some(doc_ref.clone());
-                self.last_error = None;
-            }
+            Ok(loaded) => self.adopt(loaded, doc_ref),
             Err(e) => {
                 self.current_doc = None;
                 self.current_ref = Some(doc_ref.clone());
@@ -214,6 +198,41 @@ impl EditingState {
                 self.last_error = Some(e.to_string());
             }
         }
+    }
+
+    /// Reload the open document from disk. Unlike `open_document`, a failure
+    /// leaves the open document alone, so a broken file can't cost unsaved
+    /// work.
+    pub fn reload_current(&mut self) -> Result<(), String> {
+        let doc_ref = self
+            .current_ref
+            .clone()
+            .ok_or_else(|| "no document open".to_string())?;
+        let loaded = self
+            .session
+            .load_document(&doc_ref.path)
+            .map_err(|e| e.to_string())?;
+        self.adopt(loaded, &doc_ref);
+        Ok(())
+    }
+
+    /// Make `loaded` the open document.
+    fn adopt(&mut self, loaded: LoadedDocument, doc_ref: &DocumentRef) {
+        self.baseline = Some(DiskBaseline {
+            post: loaded.raw,
+            notes: self.session.load_notes(&doc_ref.path).unwrap_or_default(),
+        });
+        let core_doc = Document {
+            front_matter: loaded.front_matter,
+            blocks: loaded.blocks,
+        };
+        let editor_doc = {
+            let _t = perf::span("editor.open_document.from_core");
+            doc_from_core(&core_doc, &self.plugin_registry)
+        };
+        self.current_doc = Some(editor_doc);
+        self.current_ref = Some(doc_ref.clone());
+        self.last_error = None;
     }
 }
 

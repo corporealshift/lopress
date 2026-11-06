@@ -1,6 +1,7 @@
 //! Root UI module. Switches between Welcome and Editing views based on `AppState`.
 
 pub mod blocks;
+pub mod disk_bar;
 pub mod dnd;
 pub mod editing;
 pub mod editor_pane;
@@ -473,7 +474,7 @@ fn editing_view(
 
     let footer = footer_view(
         save.build_status_sig,
-        status.dirty,
+        status,
         save.save_error_sig,
         current_doc,
         save.serve_status_sig,
@@ -607,8 +608,19 @@ fn editing_view(
     let notes_drawer =
         notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing), on_save);
 
+    let on_refresh: Rc<dyn Fn()> = {
+        let ctx = save_ctx.clone();
+        Rc::new(move || {
+            // Discarding unsaved edits needs a dialog, which comes later.
+            if !status.dirty.get_untracked() && !notes.dirty.get_untracked() {
+                save_pipeline::refresh_from_disk(&ctx);
+            }
+        })
+    };
+    let disk_bar = crate::ui::disk_bar::disk_bar_view(status, on_refresh);
+
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, notes_drawer, link_bar, footer, nav_modal))
+    stack((columns, notes_drawer, link_bar, disk_bar, footer, nav_modal))
         .style(|s| s.flex_col().width_full().height_full())
         .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
             // Force-flush any unsaved edits before the window dies. Notes go

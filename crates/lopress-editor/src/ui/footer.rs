@@ -12,11 +12,11 @@ use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{button, dyn_container, empty, h_stack, label, Decorators};
 use floem::{AnyView, Clipboard, IntoView};
-use lopress_gui_host::{BuildStatus, ServeStatus};
+use lopress_gui_host::{BuildStatus, DiskState, ServeStatus};
 
 use crate::model::types::{BlockBody, EditorBlock, EditorDoc};
 use crate::ui::editing::notes::NotesState;
-use crate::ui::editing::save_pipeline::SaveSink;
+use crate::ui::editing::save_pipeline::{DocStatus, SaveSink};
 
 const FOOTER_HEIGHT: f64 = 28.0;
 const BG: Color = Color::rgb8(245, 245, 245);
@@ -30,13 +30,14 @@ const ERR: Color = Color::rgb8(170, 40, 40);
 /// Build the footer view.
 pub fn footer_view(
     build_status: RwSignal<BuildStatus>,
-    dirty: RwSignal<bool>,
+    status: DocStatus,
     save_error: RwSignal<Option<String>>,
     current_doc: RwSignal<Option<EditorDoc>>,
     serve_status: RwSignal<ServeStatus>,
     notes: NotesState,
     on_save: SaveSink,
 ) -> impl IntoView {
+    let dirty = status.dirty;
     let build_label = dyn_container(
         move || build_status.get(),
         move |status| build_status_view(&status).into_any(),
@@ -51,7 +52,9 @@ pub fn footer_view(
         .action(move || {
             on_save(None);
         })
-        .disabled(move || !(dirty.get() || notes.dirty.get()))
+        .disabled(move || {
+            !(dirty.get() || notes.dirty.get() || status.disk.get() == DiskState::Missing)
+        })
         .style(|s| {
             s.font_size(12.)
                 .padding_horiz(8.)
