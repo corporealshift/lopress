@@ -3,11 +3,47 @@
 
 use crate::model::types::{BlockId, EditorDoc};
 use crate::ui::blocks::inline_editor::{
-    ActionSink, ActiveCommitSlot, FocusPublisher, SelectionRestoreSlot,
+    ActionSink, ActiveCommitSlot, CommitClosure, FocusPublisher, SelectionRestoreSlot,
 };
+use crate::ui::editing::save_pipeline::SaveSink;
 use crate::ui::link_bar::LinkEdit;
-use floem::reactive::RwSignal;
+use floem::reactive::{create_effect, RwSignal, SignalUpdate, SignalWith};
 use std::rc::Rc;
+
+/// How block widgets take part in saving.
+#[derive(Clone)]
+pub struct SaveHooks {
+    pub on_save: SaveSink,
+    /// Marks the post unsaved. Typed text doesn't reach the document until a
+    /// commit, so the widgets holding it have to say so themselves.
+    pub on_buffer_edit: Rc<dyn Fn()>,
+}
+
+/// What a field that commits on blur needs so that a save can reach its text.
+#[derive(Clone)]
+pub struct FieldHooks {
+    pub save: SaveHooks,
+    pub active_commit: ActiveCommitSlot,
+}
+
+impl FieldHooks {
+    /// Mark the post unsaved whenever `buf` changes after this call.
+    pub fn watch(&self, buf: RwSignal<String>) {
+        let on_buffer_edit = Rc::clone(&self.save.on_buffer_edit);
+        create_effect(move |prev: Option<()>| {
+            buf.with(|_| ());
+            if prev.is_some() {
+                on_buffer_edit();
+            }
+        });
+    }
+
+    /// Make `commit` the one a save runs. Call on focus. `commit` must guard
+    /// against disposal: the slot outlives the column.
+    pub fn register(&self, commit: &CommitClosure) {
+        self.active_commit.set(Some(Rc::clone(commit)));
+    }
+}
 
 /// The block-independent environment every editor widget renders into.
 /// Created once per column rebuild; cloned freely (all fields are Copy
@@ -33,4 +69,14 @@ pub struct BlockEnv {
     /// Pane-stable selection for a block editor to re-take after the
     /// focus-loss rebuild a toolbar style click causes. See `SelectionRestore`.
     pub restore_selection: SelectionRestoreSlot, // Copy
+    pub save: SaveHooks,
+}
+
+impl BlockEnv {
+    pub fn field_hooks(&self) -> FieldHooks {
+        FieldHooks {
+            save: self.save.clone(),
+            active_commit: self.active_commit,
+        }
+    }
 }

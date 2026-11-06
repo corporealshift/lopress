@@ -280,27 +280,37 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
     let lang_sig: RwSignal<String> = RwSignal::new(lang.to_string());
     let lang_committed: RwSignal<String> = RwSignal::new(lang.to_string());
 
-    let lang_on_action_for_blur = lang_on_action.clone();
-    let lang_on_action_for_key = lang_on_action.clone();
+    let commit_lang: CommitClosure = Rc::new(move || {
+        // The slot outlives the column, so this can run after a rebuild.
+        if lang_sig.try_with_untracked(|l| l.is_none()) {
+            return;
+        }
+        let new_lang = lang_sig.get_untracked();
+        if new_lang != lang_committed.get_untracked() {
+            let mut new_attrs = serde_json::Map::new();
+            new_attrs.insert(
+                "lang".to_string(),
+                serde_json::Value::String(new_lang.clone()),
+            );
+            lang_on_action(BlockAction::EditAttrs {
+                block_id,
+                new_attrs: Box::new(new_attrs),
+            });
+            lang_committed.set(new_lang);
+        }
+    });
+    let commit_lang_for_blur = Rc::clone(&commit_lang);
+    let commit_lang_for_key = Rc::clone(&commit_lang);
+    let hooks = env.field_hooks();
+    hooks.watch(lang_sig);
 
     let lang_input = text_input(lang_sig)
+        .on_event_cont(EventListener::FocusGained, move |_| {
+            hooks.register(&commit_lang);
+        })
         .on_event_stop(EventListener::FocusLost, move |_| {
-            let on_action = lang_on_action_for_blur.clone();
-            floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
-                let new_lang = lang_sig.get_untracked();
-                if new_lang != lang_committed.get_untracked() {
-                    let mut new_attrs = serde_json::Map::new();
-                    new_attrs.insert(
-                        "lang".to_string(),
-                        serde_json::Value::String(new_lang.clone()),
-                    );
-                    on_action(BlockAction::EditAttrs {
-                        block_id,
-                        new_attrs: Box::new(new_attrs),
-                    });
-                    lang_committed.set(new_lang);
-                }
-            });
+            let commit = Rc::clone(&commit_lang_for_blur);
+            floem::action::exec_after(std::time::Duration::from_millis(0), move |_| commit());
         })
         .on_event_stop(EventListener::KeyDown, move |e: &floem::event::Event| {
             if let floem::event::Event::KeyDown(k) = e {
@@ -308,21 +318,9 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
                     k.key.logical_key,
                     floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter)
                 ) {
-                    let on_action = lang_on_action_for_key.clone();
+                    let commit = Rc::clone(&commit_lang_for_key);
                     floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
-                        let new_lang = lang_sig.get_untracked();
-                        if new_lang != lang_committed.get_untracked() {
-                            let mut new_attrs = serde_json::Map::new();
-                            new_attrs.insert(
-                                "lang".to_string(),
-                                serde_json::Value::String(new_lang.clone()),
-                            );
-                            on_action(BlockAction::EditAttrs {
-                                block_id,
-                                new_attrs: Box::new(new_attrs),
-                            });
-                            lang_committed.set(new_lang);
-                        }
+                        commit();
                     });
                 } else if matches!(
                     k.key.logical_key,

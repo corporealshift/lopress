@@ -1,12 +1,9 @@
 //! "+ New post" / "+ New page" sidebar actions.
 
-use crate::model::types::EditorDoc;
-use crate::state::EditingState;
+use crate::ui::editing::save_pipeline::{after_doc_loaded, flush_pending_edits, SaveCtx};
 use crate::ui::sidebar::{new_doc_stub, unique_doc_path};
-use floem::reactive::{RwSignal, SignalUpdate};
-use lopress_gui_host::{DocumentRef, WorkspaceSummary};
-use std::cell::RefCell;
-use std::path::PathBuf;
+use floem::reactive::SignalUpdate;
+use lopress_gui_host::DocumentRef;
 use std::rc::Rc;
 
 /// Whether a "+ New …" sidebar action targets the Posts or Pages directory.
@@ -33,28 +30,15 @@ impl DocKind {
 /// the new doc through
 /// `EditingState::open_document` so the editor pane and current_path signal
 /// stay in sync with the sidebar.
-pub fn make_new_doc_action(
-    editing: Rc<RefCell<Option<EditingState>>>,
-    workspace_signal: RwSignal<WorkspaceSummary>,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    current_path: RwSignal<Option<PathBuf>>,
-    flush_signals: crate::ui::editing::save_pipeline::FlushSignals,
-    kind: DocKind,
-) -> Rc<dyn Fn()> {
+pub fn make_new_doc_action(ctx: SaveCtx, kind: DocKind) -> Rc<dyn Fn()> {
     Rc::new(move || {
         // Flush the focused editor's buffer and persist unsaved edits before
         // the switch discards them; abort when the dirty doc can't be saved.
-        if !crate::ui::editing::save_pipeline::flush_pending_edits(
-            flush_signals,
-            &editing,
-            current_doc,
-            current_path,
-            workspace_signal,
-        ) {
+        if !flush_pending_edits(&ctx) {
             return;
         }
         {
-            let mut guard = editing.borrow_mut();
+            let mut guard = ctx.editing.borrow_mut();
             let Some(state) = guard.as_mut() else {
                 return;
             };
@@ -89,16 +73,11 @@ pub fn make_new_doc_action(
                 });
 
             state.open_document(&doc_ref);
-            current_doc.set(state.current_doc.clone());
-            current_path.set(Some(doc_ref.path));
-            workspace_signal.set(summary);
+            ctx.current_doc.set(state.current_doc.clone());
+            ctx.current_path.set(Some(doc_ref.path));
+            ctx.workspace_signal.set(summary);
         }
         // After the guard drops: it borrows `editing`.
-        crate::ui::editing::save_pipeline::after_doc_loaded(
-            flush_signals.status,
-            flush_signals.notes,
-            flush_signals.undo_stack,
-            &editing,
-        );
+        after_doc_loaded(ctx.status, ctx.notes, ctx.undo_stack, &ctx.editing);
     })
 }

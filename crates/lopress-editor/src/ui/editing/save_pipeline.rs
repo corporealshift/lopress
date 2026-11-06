@@ -7,8 +7,9 @@
 
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
-use crate::ui::blocks::inline_editor::ActiveCommitSlot;
+use crate::ui::blocks::inline_editor::{ActiveCommitSlot, SelectionRestore, SelectionRestoreSlot};
 use crate::ui::editing::notes::{reload_notes, save_notes, NotesState};
+use crate::ui::editing::save_rules::{decide_save, SaveStep};
 use crate::undo::UndoStack;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -56,10 +57,28 @@ pub fn after_doc_loaded(
     reload_notes(notes, editing);
 }
 
+/// What a save request did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveOutcome {
+    Saved,
+    NothingToSave,
+    /// The file changed on disk, so nothing was written.
+    NeedsOverwrite,
+    /// The error is in `save_error_sig` or the notes' `save_error`.
+    Failed,
+    NoDocument,
+}
+
+/// Runs a save. The selection is where to put the caret back after the commit
+/// rebuilds the block column; only a block editor can supply one.
+pub type SaveSink = Rc<dyn Fn(Option<SelectionRestore>) -> SaveOutcome>;
+
 /// Bag of save-pipeline signals exposed to `editing_view` for the footer
 /// and the debounced save closure.
 pub struct SavePipeline {
     pub mark_dirty: Rc<dyn Fn()>,
+    /// Bumped by every change to the document.
+    pub edit_rev: RwSignal<u64>,
     pub save_error_sig: RwSignal<Option<String>>,
     pub build_status_sig: RwSignal<BuildStatus>,
     pub serve_status_sig: RwSignal<ServeStatus>,
@@ -171,68 +190,82 @@ pub fn start_save_pipeline(
 
     SavePipeline {
         mark_dirty,
+        edit_rev: dirty_counter,
         save_error_sig,
         build_status_sig,
         serve_status_sig,
     }
 }
 
-/// Copyable bundle of the signals a doc-switch flush needs. Built once in
-/// `editing_view` from the save pipeline + the pane-stable commit slot, and
-/// captured by every closure that replaces `current_doc` (sidebar open,
-/// "+ New post/page").
-#[derive(Clone, Copy)]
-pub struct FlushSignals {
+/// Everything a save needs. Built once in `editing_view` and captured by every
+/// closure that saves or replaces `current_doc`.
+#[derive(Clone)]
+pub struct SaveCtx {
+    pub editing: Rc<RefCell<Option<EditingState>>>,
+    pub current_doc: RwSignal<Option<EditorDoc>>,
+    pub current_path: RwSignal<Option<PathBuf>>,
+    pub workspace_signal: RwSignal<WorkspaceSummary>,
     pub active_commit: ActiveCommitSlot,
     pub status: DocStatus,
     pub save_error_sig: RwSignal<Option<String>>,
     pub notes: NotesState,
     pub undo_stack: RwSignal<UndoStack>,
+    pub edit_rev: RwSignal<u64>,
+    pub restore_selection: SelectionRestoreSlot,
 }
 
-/// Flush pending edits before a doc-switch path replaces `current_doc`.
-///
-/// Two loss windows close here. First, the focused editor's
-/// typed-but-uncommitted buffer: sidebar rows aren't focusable, so clicking
-/// one never blurs the editor and the FocusLost commit never fires — run the
-/// registered `active_commit` instead. Second, committed-but-unsaved edits:
-/// the debounced save reads `current_doc` at fire time, which after a switch
-/// is already the *new* doc, so anything dirty must be saved synchronously
-/// now.
-///
-/// Returns `false` when a dirty document could not be saved — callers must
-/// abort the switch, otherwise the unsaved edits are discarded. The error is
-/// left in `save_error_sig` for the footer to display.
-pub fn flush_pending_edits(
-    signals: FlushSignals,
-    editing: &Rc<RefCell<Option<EditingState>>>,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    current_path: RwSignal<Option<PathBuf>>,
-    workspace_signal: RwSignal<WorkspaceSummary>,
-) -> bool {
-    let FlushSignals {
-        active_commit,
-        status,
-        save_error_sig,
-        notes,
-        undo_stack: _,
-    } = signals;
-    let dirty_sig = status.dirty;
-    if let Some(commit) = active_commit.get_untracked() {
-        // Marks the doc dirty via the action sink when the buffer differs
-        // from the model; a no-change commit is dropped by `apply`.
-        commit();
+impl SaveCtx {
+    /// The post or its notes have edits that aren't on disk.
+    fn unsaved(&self) -> bool {
+        self.status.dirty.get_untracked() || self.notes.dirty.get_untracked()
     }
-    // Before the clean-post early return, or a clean post skips its notes.
-    if !save_notes(notes, editing) {
+
+    /// Reads the files rather than trusting the poll, which can lag a save by
+    /// up to one tick. A failed read is left for the write to report.
+    fn disk_now(&self) -> DiskState {
+        match self
+            .editing
+            .borrow()
+            .as_ref()
+            .and_then(EditingState::disk_state)
+        {
+            Some(Ok(state)) => state,
+            Some(Err(_)) | None => DiskState::Unchanged,
+        }
+    }
+}
+
+/// Move a focused editor's buffer into the document. Typing records nothing
+/// until a commit, so every save starts here.
+fn commit_focused(ctx: &SaveCtx, restore: Option<SelectionRestore>) {
+    let Some(commit) = ctx.active_commit.get_untracked() else {
+        return;
+    };
+    let before = ctx.edit_rev.get_untracked();
+    if restore.is_some() {
+        ctx.restore_selection.set(restore);
+    }
+    // Marks the doc dirty via the action sink when the buffer differs from
+    // the model; a no-change commit is dropped by `apply`.
+    commit();
+    // No change means no rebuild, so nothing would consume the restore.
+    if ctx.edit_rev.get_untracked() == before {
+        ctx.restore_selection.set(None);
+    }
+}
+
+/// Write whatever is unsaved. Notes go first, so a clean post still saves its
+/// notes, and a notes-only save skips the rebuild: they don't affect the site.
+fn write_unsaved(ctx: &SaveCtx) -> bool {
+    if !save_notes(ctx.notes, &ctx.editing) {
         return false;
     }
-    if !dirty_sig.get_untracked() {
+    if !ctx.status.dirty.get_untracked() {
         return true;
     }
-    let result = current_doc.with_untracked(|d| {
+    let result = ctx.current_doc.with_untracked(|d| {
         let doc = d.as_ref()?;
-        let mut guard = editing.borrow_mut();
+        let mut guard = ctx.editing.borrow_mut();
         let state = guard.as_mut()?;
         Some(state.save_doc(doc))
     });
@@ -240,23 +273,57 @@ pub fn flush_pending_edits(
         // No doc open (or no session): nothing to lose.
         None => true,
         Some(Ok(())) => {
-            dirty_sig.set(false);
-            save_error_sig.set(None);
+            ctx.status.dirty.set(false);
+            ctx.save_error_sig.set(None);
             crate::ui::editing::filename_sync::sync_filename_and_update(
-                editing,
-                current_doc,
-                current_path,
-                workspace_signal,
-                notes,
+                &ctx.editing,
+                ctx.current_doc,
+                ctx.current_path,
+                ctx.workspace_signal,
+                ctx.notes,
             );
-            if let Some(state) = editing.borrow().as_ref() {
+            if let Some(state) = ctx.editing.borrow().as_ref() {
                 state.session.rebuild();
             }
             true
         }
         Some(Err(msg)) => {
-            save_error_sig.set(Some(msg));
+            ctx.save_error_sig.set(Some(msg));
             false
         }
     }
+}
+
+/// Save the open document. `overwrite` skips the check for outside changes.
+pub fn save_now(ctx: &SaveCtx, restore: Option<SelectionRestore>, overwrite: bool) -> SaveOutcome {
+    commit_focused(ctx, restore);
+    if ctx.current_doc.with_untracked(Option::is_none) {
+        return SaveOutcome::NoDocument;
+    }
+    match (decide_save(ctx.unsaved(), ctx.disk_now()), overwrite) {
+        (SaveStep::NothingToDo, _) => SaveOutcome::NothingToSave,
+        (SaveStep::ConfirmOverwrite, false) => SaveOutcome::NeedsOverwrite,
+        (SaveStep::ConfirmOverwrite, true) | (SaveStep::Write, _) => {
+            if write_unsaved(ctx) {
+                SaveOutcome::Saved
+            } else {
+                SaveOutcome::Failed
+            }
+        }
+    }
+}
+
+/// Flush pending edits before a doc-switch path replaces `current_doc`.
+///
+/// Two loss windows close here. First, the focused editor's
+/// typed-but-uncommitted buffer. Second, committed-but-unsaved edits: the
+/// debounced save reads `current_doc` at fire time, which after a switch is
+/// already the *new* doc, so anything dirty must be saved synchronously now.
+///
+/// Returns `false` when a dirty document could not be saved — callers must
+/// abort the switch, otherwise the unsaved edits are discarded. The error is
+/// left in `save_error_sig` for the footer to display.
+pub fn flush_pending_edits(ctx: &SaveCtx) -> bool {
+    commit_focused(ctx, None);
+    write_unsaved(ctx)
 }

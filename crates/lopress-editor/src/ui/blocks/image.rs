@@ -10,7 +10,7 @@ use crate::actions::BlockAction;
 use crate::model::types::EditorBlock;
 use crate::ui::blocks::env::BlockEnv;
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{h_stack, label, text_input, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use serde_json::Value;
@@ -51,6 +51,7 @@ pub fn image_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         attrs.clone(),
         block_id,
         env.on_action.clone(),
+        &env.field_hooks(),
     );
     let caption_field = attr_field(
         "caption".to_string(),
@@ -58,6 +59,7 @@ pub fn image_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         attrs,
         block_id,
         env.on_action.clone(),
+        &env.field_hooks(),
     );
 
     v_stack((
@@ -104,20 +106,39 @@ fn attr_field(
     attrs: serde_json::Map<String, Value>,
     block_id: crate::model::types::BlockId,
     on_action: crate::ui::blocks::inline_editor::ActionSink,
+    hooks: &crate::ui::blocks::env::FieldHooks,
 ) -> impl IntoView + 'static {
+    let committed: RwSignal<String> = RwSignal::new(initial.clone());
     let buf: RwSignal<String> = RwSignal::new(initial);
     let name_for_commit = name.clone();
     let on_action_for_commit = on_action;
+    hooks.watch(buf);
+    let commit: crate::ui::blocks::inline_editor::CommitClosure = std::rc::Rc::new(move || {
+        // The slot outlives the column, so this can run after a rebuild.
+        if buf.try_with_untracked(|b| b.is_none()) {
+            return;
+        }
+        let s = buf.get_untracked();
+        if s == committed.get_untracked() {
+            return;
+        }
+        committed.set(s.clone());
+        let mut updated = attrs.clone();
+        updated.insert(name_for_commit.clone(), Value::String(s));
+        on_action_for_commit(BlockAction::EditAttrs {
+            block_id,
+            new_attrs: Box::new(updated),
+        });
+    });
+    let commit_for_blur = std::rc::Rc::clone(&commit);
+    let hooks_for_focus = hooks.clone();
     text_input(buf)
         .placeholder(name.clone())
+        .on_event_cont(floem::event::EventListener::FocusGained, move |_| {
+            hooks_for_focus.register(&commit);
+        })
         .on_event(floem::event::EventListener::FocusLost, move |_| {
-            let s = buf.get_untracked();
-            let mut updated = attrs.clone();
-            updated.insert(name_for_commit.clone(), Value::String(s));
-            on_action_for_commit(BlockAction::EditAttrs {
-                block_id,
-                new_attrs: Box::new(updated),
-            });
+            commit_for_blur();
             floem::event::EventPropagation::Continue
         })
         .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))

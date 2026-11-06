@@ -6,11 +6,15 @@
 //! header blurs the editor; opening the drawer hands focus back.
 
 use crate::state::EditingState;
+use crate::ui::blocks::inline_editor::is_save_key;
 use crate::ui::editing::notes::{save_notes, NotesState};
+use crate::ui::editing::save_pipeline::SaveSink;
 use floem::peniko::Color;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
-use floem::views::{dyn_container, empty, h_stack, label, text_editor, v_stack, Decorators};
+use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::{dyn_container, empty, h_stack, label, text_editor_keys, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
 use std::cell::RefCell;
@@ -30,12 +34,13 @@ pub fn notes_drawer_view(
     notes: NotesState,
     current_path: RwSignal<Option<PathBuf>>,
     editing: Rc<RefCell<Option<EditingState>>>,
+    on_save: SaveSink,
 ) -> impl IntoView {
     // Keyed on the generation, not `current_path`: a slug rename must not
     // rebuild the editor under someone typing in it.
     let body = dyn_container(
         move || notes.doc_generation.get(),
-        move |_| notes_editor(notes, Rc::clone(&editing)),
+        move |_| notes_editor(notes, Rc::clone(&editing), Rc::clone(&on_save)),
     )
     .style(move |s| {
         s.width_full()
@@ -104,14 +109,24 @@ fn header(notes: NotesState) -> impl IntoView {
 
 /// The text editor for the current document's notes. Nothing is mounted after
 /// a load failure, so an empty buffer can't overwrite the real notes.
-fn notes_editor(notes: NotesState, editing: Rc<RefCell<Option<EditingState>>>) -> AnyView {
+fn notes_editor(
+    notes: NotesState,
+    editing: Rc<RefCell<Option<EditingState>>>,
+    on_save: SaveSink,
+) -> AnyView {
     if notes.load_error.with_untracked(Option::is_some) {
         return empty().into_any();
     }
 
     let initial = notes.text.get_untracked();
-    let text_ed =
-        text_editor(Rope::from(initial.as_str())).placeholder("Notes for this post\u{2026}");
+    let text_ed = text_editor_keys(Rope::from(initial.as_str()), move |editor_sig, kp, ms| {
+        if is_save_key(kp, ms) {
+            on_save(None);
+            return CommandExecuted::Yes;
+        }
+        default_key_handler(editor_sig)(kp, ms)
+    })
+    .placeholder("Notes for this post\u{2026}");
     let editor = text_ed.editor().clone();
 
     // Mirror every edit into the buffer. `cache_rev` is the same trigger the

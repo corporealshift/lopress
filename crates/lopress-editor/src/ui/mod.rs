@@ -15,12 +15,13 @@ pub mod slash_menu;
 pub mod toolbar;
 pub mod welcome;
 
-use floem::event::{Event, EventListener};
+use floem::event::{Event, EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::Position;
 use floem::text::Weight;
 use floem::unit::PxPctAuto;
+use floem::views::editor::keypress::press::KeyPress;
 use floem::views::{button, dyn_container, empty, h_stack, label, stack, v_stack, Decorators};
 use floem::IntoView;
 use std::cell::RefCell;
@@ -66,6 +67,9 @@ pub(crate) fn root_view(
     #[cfg(debug_assertions)] ctrl_close_rx: crossbeam_channel::Receiver<
         crate::ctrl::CtrlCloseEnvelope,
     >,
+    #[cfg(debug_assertions)] ctrl_save_rx: crossbeam_channel::Receiver<
+        crate::ctrl::CtrlSaveEnvelope,
+    >,
 ) -> impl IntoView {
     // Initialise the signal with the loaded settings.
     settings_signal.set(ctx.settings);
@@ -98,6 +102,10 @@ pub(crate) fn root_view(
     // Save status and undo history, lifted for the same reason.
     let status = save_pipeline::DocStatus::new();
     let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
+
+    // Set while the editing view is mounted. Ctrl+S from anything that doesn't
+    // handle it, and `/save`, reach the save through here.
+    let save_sink: RwSignal<Option<save_pipeline::SaveSink>> = RwSignal::new(None);
 
     // Callback invoked by the welcome view when the user picks a path.
     let editing_for_open = Rc::clone(&editing);
@@ -136,6 +144,7 @@ pub(crate) fn root_view(
         ctrl_action_rx,
         ctrl_open_rx,
         ctrl_close_rx,
+        ctrl_save_rx,
         current_doc,
         current_path,
         Rc::clone(&editing),
@@ -143,6 +152,7 @@ pub(crate) fn root_view(
         notes,
         status,
         undo_stack,
+        save_sink,
     );
 
     dyn_container(
@@ -158,6 +168,7 @@ pub(crate) fn root_view(
                 notes,
                 status,
                 undo_stack,
+                save_sink,
                 #[cfg(debug_assertions)]
                 ctrl_action_read,
             )
@@ -165,6 +176,20 @@ pub(crate) fn root_view(
         },
     )
     .style(|s| s.width_full().height_full())
+    // floem offers the main view any key the focused view left unprocessed.
+    .on_event(EventListener::KeyDown, move |e| {
+        if let Event::KeyDown(key_event) = e {
+            if let Ok(keypress) = KeyPress::try_from(key_event) {
+                if crate::ui::blocks::inline_editor::is_save_key(&keypress, key_event.modifiers) {
+                    if let Some(on_save) = save_sink.get_untracked() {
+                        on_save(None);
+                    }
+                    return EventPropagation::Stop;
+                }
+            }
+        }
+        EventPropagation::Continue
+    })
 }
 
 /// Favicon block of the Site settings modal: a status line (staged change
@@ -223,6 +248,8 @@ fn favicon_section(
 
 /// Three-column scaffold: sidebar (left) + editor pane (center) + inspector (right),
 /// with a footer pinned at the bottom.
+// Each argument is root-scope state with its own consumers in this view.
+#[allow(clippy::too_many_arguments)]
 fn editing_view(
     editing: Rc<RefCell<Option<EditingState>>>,
     current_doc: RwSignal<Option<EditorDoc>>,
@@ -230,6 +257,7 @@ fn editing_view(
     notes: NotesState,
     status: save_pipeline::DocStatus,
     undo_stack: RwSignal<crate::undo::UndoStack>,
+    save_sink: RwSignal<Option<save_pipeline::SaveSink>>,
     #[cfg(debug_assertions)] ctrl_action_read: floem::reactive::ReadSignal<
         Option<crate::ctrl::CtrlActionEnvelope>,
     >,
@@ -279,25 +307,40 @@ fn editing_view(
     // registered on focus by `mount_block_editor`, consumed by the doc-switch
     // flush below. See `ActiveCommitSlot`.
     let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
-    let flush_signals = save_pipeline::FlushSignals {
+    // Pane-stable like `link_edit`: a toolbar style click or Ctrl+S records the
+    // selection here so the block editor rebuilt by the commit can re-focus and
+    // re-select. See `SelectionRestore`.
+    let restore_selection: crate::ui::blocks::inline_editor::SelectionRestoreSlot =
+        RwSignal::new(None);
+    let save_ctx = save_pipeline::SaveCtx {
+        editing: Rc::clone(&editing),
+        current_doc,
+        current_path,
+        workspace_signal,
         active_commit,
         status,
         save_error_sig: save.save_error_sig,
         notes,
         undo_stack,
+        edit_rev: save.edit_rev,
+        restore_selection,
+    };
+    let on_save: save_pipeline::SaveSink = {
+        let ctx = save_ctx.clone();
+        Rc::new(move |restore| save_pipeline::save_now(&ctx, restore, false))
+    };
+    save_sink.set(Some(Rc::clone(&on_save)));
+    let save_hooks = crate::ui::blocks::env::SaveHooks {
+        on_save: Rc::clone(&on_save),
+        on_buffer_edit: Rc::new(move || status.dirty.set(true)),
     };
 
     let editing_for_open = Rc::clone(&editing);
+    let ctx_for_open = save_ctx.clone();
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
         // Flush the focused editor's buffer and persist unsaved edits before
         // the switch discards them; abort when the dirty doc can't be saved.
-        if !save_pipeline::flush_pending_edits(
-            flush_signals,
-            &editing_for_open,
-            current_doc,
-            current_path,
-            workspace_signal,
-        ) {
+        if !save_pipeline::flush_pending_edits(&ctx_for_open) {
             return;
         }
         {
@@ -313,22 +356,8 @@ fn editing_view(
         save_pipeline::after_doc_loaded(status, notes, undo_stack, &editing_for_open);
     });
 
-    let on_new_post = new_doc::make_new_doc_action(
-        Rc::clone(&editing),
-        workspace_signal,
-        current_doc,
-        current_path,
-        flush_signals,
-        new_doc::DocKind::Post,
-    );
-    let on_new_page = new_doc::make_new_doc_action(
-        Rc::clone(&editing),
-        workspace_signal,
-        current_doc,
-        current_path,
-        flush_signals,
-        new_doc::DocKind::Page,
-    );
+    let on_new_post = new_doc::make_new_doc_action(save_ctx.clone(), new_doc::DocKind::Post);
+    let on_new_page = new_doc::make_new_doc_action(save_ctx.clone(), new_doc::DocKind::Page);
 
     // ── Nav editor modal state ───────────────────────────────────────────
     // Opened from the sidebar's "Site settings" button; the modal itself is
@@ -356,11 +385,6 @@ fn editing_view(
     // rebuild that a focus-loss commit triggers when the user clicks the Link
     // button or the bar's own input.
     let link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>> = RwSignal::new(None);
-    // Pane-stable like `link_edit`: a toolbar style click records the
-    // selection here so the block editor rebuilt by the focus-loss commit can
-    // re-focus and re-select. See `SelectionRestore`.
-    let restore_selection: crate::ui::blocks::inline_editor::SelectionRestoreSlot =
-        RwSignal::new(None);
     let dnd = DndState::new();
 
     // ── Action sink + undo/redo closures ───────────────────────────────
@@ -441,6 +465,7 @@ fn editing_view(
         link_edit,
         active_commit,
         restore_selection,
+        save_hooks,
     )
     .style(|s| s.flex_grow(1.0f32).height_full().min_height(0.));
 
@@ -452,6 +477,8 @@ fn editing_view(
         save.save_error_sig,
         current_doc,
         save.serve_status_sig,
+        notes,
+        Rc::clone(&on_save),
     );
 
     // Pane-level link-URL bar: appears just above the footer while a link is
@@ -577,7 +604,8 @@ fn editing_view(
             .width_full()
     });
 
-    let notes_drawer = notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing));
+    let notes_drawer =
+        notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing), on_save);
 
     let editing_for_close = Rc::clone(&editing);
     stack((columns, notes_drawer, link_bar, footer, nav_modal))

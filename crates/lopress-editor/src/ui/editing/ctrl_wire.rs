@@ -9,13 +9,13 @@
 use crate::actions::BlockAction;
 use crate::ctrl::{
     CtrlActionEnvelope, CtrlActionResult, CtrlCloseEnvelope, CtrlCloseResult, CtrlHandle,
-    CtrlOpenEnvelope, CtrlOpenResult, NotesSnapshot, StatusSnapshot,
+    CtrlOpenEnvelope, CtrlOpenResult, CtrlSaveEnvelope, NotesSnapshot, StatusSnapshot,
 };
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActionSink;
 use crate::ui::editing::notes::NotesState;
-use crate::ui::editing::save_pipeline::{after_doc_loaded, DocStatus};
+use crate::ui::editing::save_pipeline::{after_doc_loaded, DocStatus, SaveOutcome, SaveSink};
 use crate::ui::StateTag;
 use crate::undo::UndoStack;
 use floem::ext_event::create_signal_from_channel;
@@ -34,6 +34,7 @@ pub(crate) fn wire_ctrl_root(
     ctrl_action_rx: crossbeam_channel::Receiver<CtrlActionEnvelope>,
     ctrl_open_rx: crossbeam_channel::Receiver<CtrlOpenEnvelope>,
     ctrl_close_rx: crossbeam_channel::Receiver<CtrlCloseEnvelope>,
+    ctrl_save_rx: crossbeam_channel::Receiver<CtrlSaveEnvelope>,
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
     editing: Rc<RefCell<Option<EditingState>>>,
@@ -41,6 +42,7 @@ pub(crate) fn wire_ctrl_root(
     notes: NotesState,
     status: DocStatus,
     undo_stack: RwSignal<UndoStack>,
+    save_sink: RwSignal<Option<SaveSink>>,
 ) -> ReadSignal<Option<CtrlActionEnvelope>> {
     // Snapshot effect: serialise current doc + path into the handle on change.
     let snap = ctrl_handle.snapshot.clone();
@@ -93,6 +95,7 @@ pub(crate) fn wire_ctrl_root(
         if let Some((reply_tx,)) = close_read.get() {
             let result = if editing_for_close.borrow().is_some() {
                 *editing_for_close.borrow_mut() = None;
+                save_sink.set(None);
                 current_doc.set(None);
                 current_path.set(None);
                 after_doc_loaded(status, notes, undo_stack, &editing_for_close);
@@ -102,6 +105,18 @@ pub(crate) fn wire_ctrl_root(
                 CtrlCloseResult::NoWorkspace
             };
             let _ = reply_tx.send(result);
+        }
+    });
+
+    // Save effect: run the same save as Ctrl+S.
+    let save_read = create_signal_from_channel(ctrl_save_rx);
+    create_effect(move |_| {
+        if let Some((reply_tx,)) = save_read.get() {
+            let outcome = match save_sink.get_untracked() {
+                Some(on_save) => on_save(None),
+                None => SaveOutcome::NoDocument,
+            };
+            let _ = reply_tx.send(outcome);
         }
     });
 

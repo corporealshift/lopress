@@ -43,6 +43,7 @@ pub fn editor_pane(
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
     active_commit: ActiveCommitSlot,
     restore_selection: SelectionRestoreSlot,
+    save: crate::ui::blocks::env::SaveHooks,
 ) -> impl IntoView {
     // The block column is rebuilt on every document mutation: Floem's
     // `create_updater` (behind `dyn_container`) fires on every
@@ -76,6 +77,7 @@ pub fn editor_pane(
                 link_edit,
                 active_commit,
                 restore_selection,
+                save.clone(),
             ),
             None => empty().into_any(),
         },
@@ -211,6 +213,7 @@ fn block_column(
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
     active_commit: ActiveCommitSlot,
     restore_selection: SelectionRestoreSlot,
+    save: crate::ui::blocks::env::SaveHooks,
 ) -> AnyView {
     // `focus_pub` is created per rebuild and shared by this column's block
     // editors (which publish their editor signals into it on focus) and the
@@ -232,6 +235,7 @@ fn block_column(
         link_edit,
         active_commit,
         restore_selection,
+        save,
     };
     let mut rows: Vec<AnyView> = Vec::with_capacity(doc.blocks.len() * 2 + 2);
     if doc.blocks.is_empty() {
