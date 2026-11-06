@@ -188,11 +188,10 @@ The rule against driving real sites stays: closing the window still saves.
 
 ## Known limitations
 
-- A save after an outside edit is only protected if the post changed since the
-  baseline. Content comparison at save time is authoritative, so the 250 ms poll
-  delay can't cause an overwrite.
-- An edit that keeps the same modified time and size is missed by the poll until
-  the next save, which reads the content.
+- An edit that keeps the same modified time and size is missed by the poll, so
+  the bar doesn't appear. Save still catches it, because it compares content
+  rather than relying on the poll. For the same reason, the poll's delay can't
+  cause an overwrite.
 - Debug `/close` and `/open` drop unsaved changes without asking. They exist only
   in debug builds.
 
