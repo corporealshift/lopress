@@ -91,7 +91,7 @@ fn wrap_block(
 
     // Padding the right by the handle's width centres the text in the column.
     // Focus and hover only change the fill, so neither moves the text.
-    let row = h_stack((handle, body.style(|s| s.flex_grow(1.0f32))))
+    let row = h_stack((handle, body.style(|s| s.flex_grow(1.0f32).min_width(0.))))
         .style(move |s| {
             let s = s
                 .width_full()

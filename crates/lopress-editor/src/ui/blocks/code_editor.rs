@@ -329,19 +329,18 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
             }
         })
         .style(|s| {
-            s.color(Color::rgb8(120, 120, 120))
-                .font_size(11.)
-                .padding_horiz(6.)
+            s.color(theme::TEXT_MUTED)
+                .font_size(theme::UI_TINY)
+                .padding_horiz(theme::SPACE_6)
                 .padding_vert(0.)
                 .min_width(60.)
                 .border(0.0)
                 .background(Color::TRANSPARENT)
                 .cursor(floem::style::CursorStyle::Text)
-                .hover(|s| s.background(Color::rgb8(235, 235, 235)))
+                .hover(|s| s.background(theme::ROW_HOVER_BG))
                 .focus(|s| {
-                    s.border(1.0)
-                        .border_color(Color::rgb8(180, 180, 180))
-                        .background(Color::WHITE)
+                    s.background(theme::SURFACE)
+                        .hover(|s| s.background(theme::SURFACE))
                 })
         });
 
@@ -366,11 +365,8 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
         .style(|s| {
             s.flex_col()
                 .width_full()
-                .background(Color::rgb8(245, 245, 245))
-                .border_radius(4.)
-                .border(1.)
-                .border_color(Color::rgb8(220, 220, 220))
-                .margin_vert(8.)
+                .apply(theme::card(floem::style::Style::new()))
+                .margin_vert(theme::SPACE_8)
         })
         .into_any()
 }

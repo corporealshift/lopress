@@ -15,25 +15,6 @@ const LITERALS: &[&str] = &[
     "rgba8(",
 ];
 
-/// Files not yet moved onto the theme. Remove a file when it's converted: the
-/// test fails if a listed file no longer needs to be here.
-const ALLOWED: &[&str] = &[
-    "blocks/code_editor.rs",
-    "blocks/fallback.rs",
-    "blocks/image.rs",
-    "blocks/opaque.rs",
-    "blocks/plugin.rs",
-    "blocks/read_more.rs",
-    "blocks/separator.rs",
-    "blocks/table.rs",
-    "confirm_dialog.rs",
-    "dnd.rs",
-    "mod.rs",
-    "nav_editor.rs",
-    "slash_menu.rs",
-    "welcome.rs",
-];
-
 fn rust_files(dir: &Path, found: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
@@ -52,7 +33,6 @@ fn colour_literals_stay_in_the_theme() {
     rust_files(&root, &mut files);
 
     let mut stray = Vec::new();
-    let mut stale = Vec::new();
     for path in files {
         let relative = path
             .strip_prefix(&root)
@@ -63,12 +43,8 @@ fn colour_literals_stay_in_the_theme() {
             continue;
         }
         let source = fs::read_to_string(&path).unwrap();
-        let has_literal = LITERALS.iter().any(|literal| source.contains(literal));
-        let allowed = ALLOWED.contains(&relative.as_str());
-        if has_literal && !allowed {
+        if LITERALS.iter().any(|literal| source.contains(literal)) {
             stray.push(relative);
-        } else if !has_literal && allowed {
-            stale.push(relative);
         }
     }
 
@@ -76,5 +52,4 @@ fn colour_literals_stay_in_the_theme() {
         stray.is_empty(),
         "colour literals outside ui/theme.rs: {stray:?}"
     );
-    assert!(stale.is_empty(), "remove from ALLOWED: {stale:?}");
 }

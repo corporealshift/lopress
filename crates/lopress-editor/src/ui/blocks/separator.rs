@@ -4,19 +4,22 @@
 
 use crate::model::types::EditorBlock;
 use crate::ui::blocks::env::BlockEnv;
+use crate::ui::theme;
 use floem::event::{EventListener, EventPropagation};
-use floem::peniko::Color;
 use floem::reactive::SignalUpdate;
 use floem::views::{empty, Decorators};
 use floem::{AnyView, IntoView};
-
-const RULE: Color = Color::rgb8(180, 180, 188);
 
 pub fn separator_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let block_id = block.id;
     let focus_pub = env.focus_pub;
     empty()
-        .style(move |s| s.width_full().height(1.).margin_vert(10.).background(RULE))
+        .style(move |s| {
+            s.width_full()
+                .height(1.)
+                .margin_vert(theme::SPACE_10)
+                .background(theme::RULE)
+        })
         .on_event(EventListener::PointerDown, move |_| {
             focus_pub.block.set(Some(block_id));
             focus_pub.editor_and_spans.set(None);

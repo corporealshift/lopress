@@ -195,6 +195,7 @@ pub const SPACE_14: f32 = 14.0;
 pub const SPACE_16: f32 = 16.0;
 pub const SPACE_18: f32 = 18.0;
 pub const SPACE_24: f32 = 24.0;
+pub const SPACE_28: f32 = 28.0;
 
 /// Toolbar buttons.
 pub const CORNER_SM: f32 = 5.0;
@@ -207,6 +208,8 @@ pub const CORNER_LG: f32 = 8.0;
 
 /// Scrollbar handle thickness.
 const SCROLL_HANDLE: f32 = 6.0;
+const SHADOW_BLUR: f32 = 18.0;
+const SHADOW_OFFSET: f32 = 6.0;
 
 /// The look of every control, set once on the root view. A view's own style
 /// still wins over these.
@@ -257,6 +260,20 @@ pub fn root_style(s: Style) -> Style {
                 .set(CursorColor, TEXT)
                 .set(PlaceholderColor, PLACEHOLDER)
         })
+}
+
+/// A surface that floats over the page: the toolbar, menus and dialogs.
+pub fn floating(s: Style) -> Style {
+    s.background(SURFACE)
+        .border_radius(CORNER_LG)
+        .box_shadow_blur(SHADOW_BLUR)
+        .box_shadow_v_offset(SHADOW_OFFSET)
+        .box_shadow_color(SHADOW)
+}
+
+/// A flat card inside the article: plugin, image, fallback and opaque blocks.
+pub fn card(s: Style) -> Style {
+    s.background(DRAWER_BG).border_radius(CORNER_MD)
 }
 
 /// Shared by both button styles: no border, and a keyboard focus ring that

@@ -33,8 +33,6 @@ const BUTTON_MIN_WIDTH: f64 = 28.0;
 const DELETE_ICON_SIZE: f32 = 12.0;
 const SEPARATOR_HEIGHT: f64 = 16.0;
 const SEPARATOR_MARGIN: f64 = 5.0;
-const SHADOW_BLUR: f64 = 18.0;
-const SHADOW_OFFSET: f64 = 6.0;
 
 /// Currently only used by tests / external callers — the live toolbar reads
 /// directly from the focused widget's signals via `block_toolbar_for`.
@@ -164,11 +162,7 @@ pub fn block_toolbar_for(
         s.padding(theme::SPACE_4)
             .gap(1.)
             .items_center()
-            .background(theme::SURFACE)
-            .border_radius(theme::CORNER_LG)
-            .box_shadow_blur(SHADOW_BLUR)
-            .box_shadow_v_offset(SHADOW_OFFSET)
-            .box_shadow_color(theme::SHADOW)
+            .apply(theme::floating(floem::style::Style::new()))
     });
 
     // The URL entry UI is the pane-level `link_bar` (see `ui::link_bar`); it

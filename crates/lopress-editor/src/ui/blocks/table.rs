@@ -20,7 +20,6 @@ use crate::ui::blocks::inline_editor::{
 };
 use crate::ui::theme;
 use floem::event::{EventListener, EventPropagation};
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::Editor;
 use floem::views::{
@@ -30,10 +29,6 @@ use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-const HEADER_BG: Color = Color::rgb8(238, 238, 244);
-const CELL_BORDER: Color = Color::rgb8(214, 214, 222);
-const STRIP_BG: Color = Color::rgb8(250, 250, 252);
 
 /// (row, col, editor_sig, spans_sig) for every cell, in row-major order.
 type CellHandles = Rc<RefCell<Vec<(usize, usize, RwSignal<Editor>, RwSignal<Vec<StyleSpan>>)>>>;
@@ -179,22 +174,20 @@ pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
                 .into_any()
                 .style(move |s| {
                     let s = s
-                        .border(1.)
-                        .border_color(CELL_BORDER)
-                        .padding_horiz(8.)
-                        .padding_vert(8.)
-                        // Give rows a comfortable height. The inner editor is a
-                        // fixed single-line height (~20px at the 15px body
-                        // font); without this floor a cell is only ~28px and
-                        // reads as cramped, and an empty cell can collapse
-                        // shorter still. `items_center` keeps the one-line text
+                        .border_bottom(1.)
+                        .border_color(theme::RULE_SOFT)
+                        .padding_horiz(theme::SPACE_8)
+                        .padding_vert(theme::SPACE_8)
+                        // An empty cell would otherwise collapse shorter than a
+                        // filled one. `items_center` keeps the one-line text
                         // vertically centered in the taller cell.
                         .min_height(40.)
                         .items_center()
                         .min_width(80.)
                         .flex_grow(1.0f32);
                     if is_header {
-                        s.background(HEADER_BG)
+                        s.background(theme::DRAWER_BG)
+                            .border_color(theme::RULE)
                             .font_weight(floem::text::Weight::SEMIBOLD)
                     } else {
                         s
@@ -238,11 +231,6 @@ pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
 /// cloned into the rebuild closure of `dyn_container`.
 type BtnView = Rc<dyn Fn() -> AnyView>;
 
-/// Highlight fill for the active alignment button (matches the block toolbar).
-const STRIP_ACTIVE_BG: Color = Color::rgb8(210, 220, 240);
-/// Muted text for the "Align:" group label.
-const STRIP_LABEL_FG: Color = Color::rgb8(120, 120, 132);
-
 /// The in-flow control strip: shown when a cell in this table is focused.
 /// `align` is a snapshot of the column alignments at build time; the strip is
 /// rebuilt whenever the table body changes, so it stays current.
@@ -278,7 +266,7 @@ fn control_strip(
                         }
                     }
                 })
-                .style(|s| s.padding_horiz(6.).padding_vert(1.).font_size(12.))
+                .style(strip_button)
                 .into_any()
         })
     };
@@ -309,11 +297,13 @@ fn control_strip(
                     }
                 })
                 .style(move |s| {
-                    let s = s.padding_horiz(6.).padding_vert(1.).font_size(12.);
+                    let s = strip_button(s);
                     let active =
                         focused_cell.get().and_then(|(_, c)| align.get(c).copied()) == Some(target);
                     if active {
-                        s.background(STRIP_ACTIVE_BG).font_weight(Weight::SEMIBOLD)
+                        s.background(theme::ACCENT_TINT)
+                            .color(theme::ACCENT)
+                            .font_weight(Weight::SEMIBOLD)
                     } else {
                         s
                     }
@@ -358,9 +348,9 @@ fn control_strip(
         move |shown| {
             if shown {
                 let align_label = label(|| "Align:".to_string()).style(|s| {
-                    s.font_size(12.)
-                        .color(STRIP_LABEL_FG)
-                        .padding_horiz(4.)
+                    s.font_size(theme::UI_SMALL)
+                        .color(theme::TEXT_MUTED)
+                        .padding_horiz(theme::SPACE_4)
                         .items_center()
                 });
                 h_stack((
@@ -374,14 +364,12 @@ fn control_strip(
                     (al_r)(),
                 ))
                 .style(|s| {
-                    s.gap(4.)
-                        .padding_horiz(6.)
+                    s.gap(theme::SPACE_4)
+                        .padding_horiz(theme::SPACE_6)
                         .padding_vert(3.)
-                        .margin_bottom(4.)
-                        .background(STRIP_BG)
-                        .border(1.)
-                        .border_color(CELL_BORDER)
-                        .border_radius(4.)
+                        .margin_bottom(theme::SPACE_4)
+                        .background(theme::DRAWER_BG)
+                        .border_radius(theme::CORNER_MD)
                         .items_center()
                 })
                 .into_any()
@@ -391,4 +379,11 @@ fn control_strip(
         },
     )
     .into_any()
+}
+
+/// A button in the table's control strip.
+fn strip_button(s: floem::style::Style) -> floem::style::Style {
+    s.padding_horiz(theme::SPACE_6)
+        .padding_vert(1.)
+        .font_size(theme::UI_SMALL)
 }
