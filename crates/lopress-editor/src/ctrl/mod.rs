@@ -354,10 +354,26 @@ pub(crate) struct NotesSnapshot {
     pub save_error: Option<String>,
 }
 
+/// The save fields reported by `/state`.
+pub(crate) struct StatusSnapshot {
+    pub dirty: bool,
+    pub disk: lopress_gui_host::DiskState,
+}
+
+fn disk_label(disk: lopress_gui_host::DiskState) -> &'static str {
+    use lopress_gui_host::DiskState::{Changed, Missing, Unchanged};
+    match disk {
+        Unchanged => "unchanged",
+        Changed => "changed",
+        Missing => "missing",
+    }
+}
+
 pub(crate) fn serialize_state(
     doc: Option<&EditorDoc>,
     path: Option<&std::path::Path>,
     notes: &NotesSnapshot,
+    status: &StatusSnapshot,
 ) -> String {
     let Some(doc) = doc else {
         return r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string();
@@ -435,6 +451,8 @@ pub(crate) fn serialize_state(
     serde_json::json!({
         "doc_open": true,
         "path": path.map(|p| p.to_string_lossy().to_string()),
+        "dirty": status.dirty,
+        "disk": disk_label(status.disk),
         "blocks": blocks,
         "notes": {
             "open": notes.open,
@@ -1115,8 +1133,14 @@ mod tests {
             load_error: None,
             save_error: Some("disk full".to_string()),
         };
+        let status = StatusSnapshot {
+            dirty: true,
+            disk: lopress_gui_host::DiskState::Changed,
+        };
         let json: serde_json::Value =
-            serde_json::from_str(&serialize_state(Some(&doc), None, &notes)).unwrap();
+            serde_json::from_str(&serialize_state(Some(&doc), None, &notes, &status)).unwrap();
+        assert_eq!(json["dirty"], true);
+        assert_eq!(json["disk"], "changed");
         assert_eq!(json["notes"]["open"], true);
         assert_eq!(json["notes"]["dirty"], true);
         assert_eq!(json["notes"]["text"], "an idea");

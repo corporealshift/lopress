@@ -75,7 +75,7 @@ pub fn save_notes(notes: NotesState, editing: &Rc<RefCell<Option<EditingState>>>
         return true;
     }
     let text = notes.text.get_untracked();
-    let result = editing.borrow().as_ref().map(|s| s.save_notes(&text));
+    let result = editing.borrow_mut().as_mut().map(|s| s.save_notes(&text));
     match result {
         // No session: nothing to save into.
         None => true,

@@ -9,13 +9,15 @@
 use crate::actions::BlockAction;
 use crate::ctrl::{
     CtrlActionEnvelope, CtrlActionResult, CtrlCloseEnvelope, CtrlCloseResult, CtrlHandle,
-    CtrlOpenEnvelope, CtrlOpenResult, NotesSnapshot,
+    CtrlOpenEnvelope, CtrlOpenResult, NotesSnapshot, StatusSnapshot,
 };
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActionSink;
-use crate::ui::editing::notes::{reload_notes, NotesState};
+use crate::ui::editing::notes::NotesState;
+use crate::ui::editing::save_pipeline::{after_doc_loaded, DocStatus};
 use crate::ui::StateTag;
+use crate::undo::UndoStack;
 use floem::ext_event::create_signal_from_channel;
 use floem::reactive::{create_effect, ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use lopress_gui_host::{DocumentRef, Session};
@@ -37,6 +39,8 @@ pub(crate) fn wire_ctrl_root(
     editing: Rc<RefCell<Option<EditingState>>>,
     state_tag: RwSignal<StateTag>,
     notes: NotesState,
+    status: DocStatus,
+    undo_stack: RwSignal<UndoStack>,
 ) -> ReadSignal<Option<CtrlActionEnvelope>> {
     // Snapshot effect: serialise current doc + path into the handle on change.
     let snap = ctrl_handle.snapshot.clone();
@@ -48,11 +52,16 @@ pub(crate) fn wire_ctrl_root(
             load_error: notes.load_error.get(),
             save_error: notes.save_error.get(),
         };
+        let status_snapshot = StatusSnapshot {
+            dirty: status.dirty.get(),
+            disk: status.disk.get(),
+        };
         let json = current_doc.with(|maybe| {
             crate::ctrl::serialize_state(
                 maybe.as_ref(),
                 current_path.get_untracked().as_deref(),
                 &notes_snapshot,
+                &status_snapshot,
             )
         });
         *snap.lock().unwrap_or_else(|e| e.into_inner()) = json;
@@ -70,6 +79,8 @@ pub(crate) fn wire_ctrl_root(
                 current_path,
                 state_tag,
                 notes,
+                status,
+                undo_stack,
             );
             let _ = reply_tx.send(result);
         }
@@ -84,7 +95,7 @@ pub(crate) fn wire_ctrl_root(
                 *editing_for_close.borrow_mut() = None;
                 current_doc.set(None);
                 current_path.set(None);
-                reload_notes(notes, &editing_for_close);
+                after_doc_loaded(status, notes, undo_stack, &editing_for_close);
                 state_tag.set(StateTag::Welcome);
                 CtrlCloseResult::Closed
             } else {
@@ -138,6 +149,8 @@ fn find_workspace_root(md: &Path) -> Option<PathBuf> {
 
 /// Resolve `path_str` to a document, open its workspace if needed, load the
 /// document into `current_doc`, and switch to the editing view.
+// Each signal is separate root state; a bundle would exist only for this call.
+#[allow(clippy::too_many_arguments)]
 fn open_document_by_path(
     path_str: &str,
     editing: &Rc<RefCell<Option<EditingState>>>,
@@ -145,6 +158,8 @@ fn open_document_by_path(
     current_path: RwSignal<Option<PathBuf>>,
     state_tag: RwSignal<StateTag>,
     notes: NotesState,
+    status: DocStatus,
+    undo_stack: RwSignal<UndoStack>,
 ) -> CtrlOpenResult {
     let raw = PathBuf::from(path_str);
     // Absolute → used as-is. Relative → resolved against the open workspace
@@ -202,7 +217,7 @@ fn open_document_by_path(
     // sees a populated doc when it mounts.
     current_doc.set(doc);
     current_path.set(Some(target));
-    reload_notes(notes, editing);
+    after_doc_loaded(status, notes, undo_stack, editing);
     state_tag.set(StateTag::Editing);
     CtrlOpenResult::Opened
 }

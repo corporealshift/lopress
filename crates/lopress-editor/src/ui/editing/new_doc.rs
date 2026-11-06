@@ -93,7 +93,12 @@ pub fn make_new_doc_action(
             current_path.set(Some(doc_ref.path));
             workspace_signal.set(summary);
         }
-        // After the guard drops: `reload_notes` borrows `editing`.
-        crate::ui::editing::notes::reload_notes(flush_signals.notes, &editing);
+        // After the guard drops: it borrows `editing`.
+        crate::ui::editing::save_pipeline::after_doc_loaded(
+            flush_signals.status,
+            flush_signals.notes,
+            flush_signals.undo_stack,
+            &editing,
+        );
     })
 }

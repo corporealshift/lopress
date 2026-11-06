@@ -13,4 +13,5 @@ pub mod new_doc;
 pub mod notes;
 pub mod pane_key;
 pub mod save_pipeline;
+pub mod save_rules;
 pub mod undo_redo;

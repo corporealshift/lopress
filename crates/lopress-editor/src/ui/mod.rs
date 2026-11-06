@@ -95,6 +95,10 @@ pub(crate) fn root_view(
     // open/close effects change the document and must reload notes.
     let notes = NotesState::new();
 
+    // Save status and undo history, lifted for the same reason.
+    let status = save_pipeline::DocStatus::new();
+    let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
+
     // Callback invoked by the welcome view when the user picks a path.
     let editing_for_open = Rc::clone(&editing);
     let on_open = move |path: std::path::PathBuf| match Session::open(&path) {
@@ -137,6 +141,8 @@ pub(crate) fn root_view(
         Rc::clone(&editing),
         state_tag,
         notes,
+        status,
+        undo_stack,
     );
 
     dyn_container(
@@ -150,6 +156,8 @@ pub(crate) fn root_view(
                 current_doc,
                 current_path,
                 notes,
+                status,
+                undo_stack,
                 #[cfg(debug_assertions)]
                 ctrl_action_read,
             )
@@ -220,6 +228,8 @@ fn editing_view(
     current_doc: RwSignal<Option<EditorDoc>>,
     current_path: RwSignal<Option<PathBuf>>,
     notes: NotesState,
+    status: save_pipeline::DocStatus,
+    undo_stack: RwSignal<crate::undo::UndoStack>,
     #[cfg(debug_assertions)] ctrl_action_read: floem::reactive::ReadSignal<
         Option<crate::ctrl::CtrlActionEnvelope>,
     >,
@@ -253,8 +263,6 @@ fn editing_view(
         .into_boxed_slice(),
     );
 
-    let undo_stack: RwSignal<crate::undo::UndoStack> = RwSignal::new(crate::undo::UndoStack::new());
-
     // ── Save pipeline ────────────────────────────────────────────────────
     // Created before the doc-switch closures below: they flush pending edits
     // through it before replacing `current_doc`.
@@ -264,6 +272,7 @@ fn editing_view(
         current_path,
         workspace_signal,
         notes,
+        status,
     );
 
     // Pane-stable slot holding the focused block editor's commit closure;
@@ -272,9 +281,10 @@ fn editing_view(
     let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
     let flush_signals = save_pipeline::FlushSignals {
         active_commit,
-        dirty_sig: save.dirty_sig,
+        status,
         save_error_sig: save.save_error_sig,
         notes,
+        undo_stack,
     };
 
     let editing_for_open = Rc::clone(&editing);
@@ -299,9 +309,8 @@ fn editing_view(
             current_doc.set(state.current_doc.clone());
             current_path.set(Some(doc_ref.path));
         }
-        undo_stack.update(|s| *s = crate::undo::UndoStack::new());
-        // After the guard drops: `reload_notes` borrows `editing`.
-        notes::reload_notes(notes, &editing_for_open);
+        // After the guard drops: it borrows `editing`.
+        save_pipeline::after_doc_loaded(status, notes, undo_stack, &editing_for_open);
     });
 
     let on_new_post = new_doc::make_new_doc_action(
@@ -439,7 +448,7 @@ fn editing_view(
 
     let footer = footer_view(
         save.build_status_sig,
-        save.dirty_sig,
+        status.dirty,
         save.save_error_sig,
         current_doc,
         save.serve_status_sig,
@@ -577,14 +586,14 @@ fn editing_view(
             // Force-flush any unsaved edits before the window dies. Notes go
             // first: a clean post returns early below.
             let _ = notes::save_notes(notes, &editing_for_close);
-            if !save.dirty_sig.get_untracked() {
+            if !status.dirty.get_untracked() {
                 return;
             }
             let doc = match current_doc.with_untracked(|d| d.clone()) {
                 Some(d) => d,
                 None => return,
             };
-            if let Some(state) = editing_for_close.borrow().as_ref() {
+            if let Some(state) = editing_for_close.borrow_mut().as_mut() {
                 let _ = state.save_doc(&doc);
             }
         })

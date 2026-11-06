@@ -8,20 +8,58 @@
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::ActiveCommitSlot;
-use crate::ui::editing::notes::{save_notes, NotesState};
+use crate::ui::editing::notes::{reload_notes, save_notes, NotesState};
+use crate::undo::UndoStack;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use lopress_gui_host::{BuildStatus, ServeStatus, WorkspaceSummary};
+use lopress_gui_host::{BuildStatus, DiskState, ServeStatus, WorkspaceSummary};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
+/// Save status of the open document. Created in `root_view` because the debug
+/// `/state` and `/open` wiring at root scope needs it.
+#[derive(Clone, Copy)]
+pub struct DocStatus {
+    /// The post has edits that aren't on disk. Notes track their own.
+    pub dirty: RwSignal<bool>,
+    pub disk: RwSignal<DiskState>,
+}
+
+impl DocStatus {
+    pub fn new() -> Self {
+        Self {
+            dirty: RwSignal::new(false),
+            disk: RwSignal::new(DiskState::Unchanged),
+        }
+    }
+}
+
+impl Default for DocStatus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Reset everything tied to the previous document. Every path that loads a
+/// document calls this, with no `editing` borrow held.
+pub fn after_doc_loaded(
+    status: DocStatus,
+    notes: NotesState,
+    undo_stack: RwSignal<UndoStack>,
+    editing: &Rc<RefCell<Option<EditingState>>>,
+) {
+    status.dirty.set(false);
+    status.disk.set(DiskState::Unchanged);
+    undo_stack.update(|s| *s = UndoStack::new());
+    reload_notes(notes, editing);
+}
+
 /// Bag of save-pipeline signals exposed to `editing_view` for the footer
 /// and the debounced save closure.
 pub struct SavePipeline {
     pub mark_dirty: Rc<dyn Fn()>,
-    pub dirty_sig: RwSignal<bool>,
     pub save_error_sig: RwSignal<Option<String>>,
     pub build_status_sig: RwSignal<BuildStatus>,
     pub serve_status_sig: RwSignal<ServeStatus>,
@@ -38,13 +76,14 @@ pub fn start_save_pipeline(
     current_path: RwSignal<Option<PathBuf>>,
     workspace_signal: RwSignal<WorkspaceSummary>,
     notes: NotesState,
+    status: DocStatus,
 ) -> SavePipeline {
     // ── Save-debounce signals ────────────────────────────────────────
     // `dirty_counter` bumps on every legitimate edit; `debounce_action`
     // watches it and runs the save closure 500 ms after the last bump.
-    // `dirty_sig` / `save_error_sig` drive the footer's status display.
+    // `status.dirty` / `save_error_sig` drive the footer's status display.
     let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
-    let dirty_sig: RwSignal<bool> = RwSignal::new(false);
+    let dirty_sig = status.dirty;
     let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
     let dirty_counter: RwSignal<u64> = RwSignal::new(0);
 
@@ -92,8 +131,8 @@ pub fn start_save_pipeline(
         debounce_action(dc, Duration::from_millis(500), move || {
             let result = current_doc.with_untracked(|d| {
                 let doc = d.as_ref()?;
-                let guard = editing_for_save.borrow();
-                let state = guard.as_ref()?;
+                let mut guard = editing_for_save.borrow_mut();
+                let state = guard.as_mut()?;
                 Some(state.save_doc(doc))
             });
             let result = match result {
@@ -132,7 +171,6 @@ pub fn start_save_pipeline(
 
     SavePipeline {
         mark_dirty,
-        dirty_sig,
         save_error_sig,
         build_status_sig,
         serve_status_sig,
@@ -146,9 +184,10 @@ pub fn start_save_pipeline(
 #[derive(Clone, Copy)]
 pub struct FlushSignals {
     pub active_commit: ActiveCommitSlot,
-    pub dirty_sig: RwSignal<bool>,
+    pub status: DocStatus,
     pub save_error_sig: RwSignal<Option<String>>,
     pub notes: NotesState,
+    pub undo_stack: RwSignal<UndoStack>,
 }
 
 /// Flush pending edits before a doc-switch path replaces `current_doc`.
@@ -173,10 +212,12 @@ pub fn flush_pending_edits(
 ) -> bool {
     let FlushSignals {
         active_commit,
-        dirty_sig,
+        status,
         save_error_sig,
         notes,
+        undo_stack: _,
     } = signals;
+    let dirty_sig = status.dirty;
     if let Some(commit) = active_commit.get_untracked() {
         // Marks the doc dirty via the action sink when the buffer differs
         // from the model; a no-change commit is dropped by `apply`.
@@ -191,8 +232,8 @@ pub fn flush_pending_edits(
     }
     let result = current_doc.with_untracked(|d| {
         let doc = d.as_ref()?;
-        let guard = editing.borrow();
-        let state = guard.as_ref()?;
+        let mut guard = editing.borrow_mut();
+        let state = guard.as_mut()?;
         Some(state.save_doc(doc))
     });
     match result {
