@@ -47,6 +47,12 @@ So typing has to mark the post unsaved directly. Every block editor is built by
 `text_sig` in `mount_block_editor` covers paragraphs, headings, lists, tables
 and code. `text_sig` is only written for edits made through an editor.
 
+Plugin attribute fields, image alt and caption fields, and the code language box
+commit on blur instead. Each one marks the post unsaved as it changes and registers
+its commit in `active_commit`, so Ctrl+S reaches its text. Without this, Ctrl+S in
+a pull quote would save nothing and still report "Saved". Clicking in and out of
+one of these fields changes nothing, so it doesn't mark the post unsaved.
+
 Typing something and deleting it still counts as unsaved. Comparing buffers to
 catch that isn't worth the code.
 
@@ -58,7 +64,8 @@ that exact title. Unsaved state shows in the footer.
 One function, used by Ctrl+S, the Save button, the dialog and `/save`:
 
 1. Run `active_commit`, so a focused block's buffer reaches the document.
-2. If nothing is unsaved, stop. A clean Save writes nothing.
+2. If nothing is unsaved, stop. A clean Save writes nothing, unless the file is
+   missing, which counts as unsaved.
 3. If the post or notes changed on disk, ask (see below) and stop.
 4. Save the notes if they're dirty.
 5. Save the post if it's dirty, rename the file if the slug changed, and
@@ -78,7 +85,7 @@ the main view. Block editors stop every key, so Ctrl+S needs three entry points:
 | Focus | Handler |
 |---|---|
 | A block editor | `handle_key`, beside Ctrl+Z |
-| The notes editor | A key handler on the notes `text_editor` |
+| The notes editor, or a plugin textarea | A key handler on the `text_editor` |
 | Inspector fields, or nothing | A `KeyDown` listener on the root view, the main view that receives unprocessed keys |
 
 ### Keeping the caret
@@ -142,6 +149,9 @@ One in-app modal, `ui/confirm_dialog.rs`, drawn like the site settings modal.
 
 Choosing Save in the first dialog when the file changed on disk leads to the
 Overwrite dialog, and the switch only continues if that save succeeds.
+
+Clicking the open post's own sidebar row with unsaved changes does nothing, rather
+than asking about a switch that isn't happening.
 
 ## Closing
 

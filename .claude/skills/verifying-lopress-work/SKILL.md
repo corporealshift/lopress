@@ -36,7 +36,7 @@ If you cannot show the output, say **UNVERIFIED** and what's needed to verify. A
 
 ## Don't mutate what you're inspecting
 
-`/action` and the editor's autosave **persist to disk**. Drive edits only against a scratch site (`cargo run --quiet -- new <scratch-dir>` under `$env:TEMP` — see the `driving-lopress-editor` skill), never a real site or committed fixture. If you must exercise a real fixture's content, copy it into the scratch site first (`Copy-Item <fixture> "$site\src\posts\test.md"`). If you touched a real file anyway, say so in the report and restore it (`git checkout -- <file>`).
+`/save`, Ctrl+S and closing the window **write to disk**. Drive edits only against a scratch site (`cargo run --quiet -- new <scratch-dir>` under `$env:TEMP` — see the `driving-lopress-editor` skill), never a real site or committed fixture. If you must exercise a real fixture's content, copy it into the scratch site first (`Copy-Item <fixture> "$site\src\posts\test.md"`). If you touched a real file anyway, say so in the report and restore it (`git checkout -- <file>`).
 
 Save debug artifacts (screenshots, `/state` dumps, command logs) under `.pi/results/<YYYY-MM-DD>-<short-task>/` — it's gitignored, so it never dirties the repo. Never drop PNGs at the repo root, and reference each artifact by its real path there.
 

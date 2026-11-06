@@ -16,7 +16,7 @@ pub struct LoadedDocument {
     pub raw: String,
     /// True when the in-memory state differs from the last write.
     pub dirty: bool,
-    /// Timestamp of the last edit, used for the 500 ms debounce.
+    /// Timestamp of the last edit.
     pub dirty_at: Option<Instant>,
     /// Wall-clock time of the last successful write.
     pub last_written: Option<SystemTime>,

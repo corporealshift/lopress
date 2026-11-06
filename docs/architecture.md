@@ -504,6 +504,8 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `ui/editor_pane.rs` | Block tree canvas. |
 | `ui/link_bar.rs` | Pane-level link editing bar (survives block-pane rebuilds). |
 | `ui/notes_drawer.rs` | Collapsible bottom drawer for the open document's notes. |
+| `ui/disk_bar.rs` | Bar shown when the open files change on disk, with Refresh. |
+| `ui/confirm_dialog.rs` | In-app modal for questions about unsaved work. |
 | `ui/nav_editor.rs` | Site-settings nav editor (`nav.toml`). |
 | `ui/toolbar.rs` | Block-type toolbar (P/H1/H2/Code/UL/OL + style toggles). |
 | `ui/slash_menu.rs` | Slash command popup (`/` in empty paragraph). |
@@ -775,30 +777,46 @@ disappearing. All blocks then funnel through `wrap_block` for shared chrome
 
 ### 7.5 Save Pipeline
 
+Nothing is written while editing. Typing sets `DocStatus::dirty` through
+`on_buffer_edit`, because typed text doesn't reach the document until a commit.
+Fields that commit on blur register in `active_commit`, so a save can reach them.
+
 ```
-User edits
+Ctrl+S / Save button / dialog / POST /save
     │
     ▼
-mark_dirty() → dirty_sig = true, dirty_counter++
+request_save() → asks before overwriting an outside change
     │
     ▼
-debounce_action(500ms)
-    │
-    ▼
-save_doc(&doc)
-    │
-    ├── doc_to_core(doc) → lopress_core::Document
-    ├── session.save(loaded_doc) → serialize + atomic write
-    ├── dirty_sig = false
-    ├── save_error_sig = None
-    ├── sync_filename_and_update() → rename .md to match slug, update current_path + sidebar
-    └── session.rebuild() → background rebuild + SSE broadcast
+save_now()
+    ├── commit_focused() → active_commit, restoring the caret after the rebuild
+    ├── disk_state() → content comparison, not the poll's last answer
+    ├── decide_save() → nothing to do / confirm overwrite / write
+    └── write_unsaved()
+        ├── save_notes()
+        └── save_doc(&doc)
+            ├── doc_to_core(doc) → lopress_core::Document
+            ├── session.save(loaded_doc) → serialize + atomic write, returns the text
+            ├── baseline updated, dirty = false, save_error_sig = None
+            ├── sync_filename_and_update() → rename .md to match slug, update current_path + sidebar
+            └── session.rebuild() → background rebuild + SSE broadcast
 ```
+
+The decisions live in `ui/editing/save_rules.rs`, with no UI, so each one is
+unit tested. `guard_switch` asks before replacing the open document, and
+`request_refresh` asks before discarding edits. `save_on_close` runs from
+`WindowClosed`: floem 0.2 destroys the window on `CloseRequested` with no hook, so
+it can't ask, and it skips the save if the file changed on disk.
+
+**Outside changes:** `EditingState` keeps a `DiskBaseline`, the post and notes text
+last read or written. A 250 ms poll stats the open files and compares content only
+when a `DiskStamp` moves, setting `DocStatus::disk`. It polls because the watcher
+ignores `notes/`. `ui/disk_bar.rs` shows the result. Comparing content means
+lopress's own saves never look like outside changes.
 
 **Key optimization:** The save closure performs the `RefCell::borrow()` of editing state inside `with_untracked`, passing `&doc` directly instead of cloning the full `EditorDoc`. This eliminates one full-text allocation per save.
 
-**Filename sync:** After a successful save (both the debounced autosave here and
-the `flush_pending_edits` on doc-switch), `ui/editing/filename_sync.rs` renames
+**Filename sync:** After a successful save, `ui/editing/filename_sync.rs` renames
 the `.md` so its stem tracks the document's *effective slug* —
 `slugify(front_matter.slug)` if set, else `slugify(front_matter.title)`. Front
 matter itself is never rewritten; only the file moves. Collisions get a `-2`,
@@ -811,9 +829,8 @@ are created straight from the slugified default title (`new-post.md` /
 
 **Notes:** Each document's notes live in `notes/posts/` or `notes/pages/` under the
 same file name, outside `src/`, so neither the build nor the watcher sees them.
-They have their own pipeline in `ui/editing/notes.rs`: a 500 ms debounce with no
-site rebuild, a save on blur, and explicit saves in `flush_pending_edits` and on
-window close. Filename sync moves the notes file with the post, and a leftover
+They are saved with the post by `write_unsaved`, and a notes-only save skips the
+site rebuild. Filename sync moves the notes file with the post, and a leftover
 notes file makes a name count as taken. The drawer rebuilds on
 `NotesState::doc_generation` rather than `current_path`, so a slug rename leaves
 the editor alone. Notes errors use `NotesState::save_error`, not the footer's
@@ -1051,7 +1068,8 @@ The preview server runs on `127.0.0.1:8080` (or ephemeral port if 8080 is taken)
 | `src/ui/editing/mod.rs` | Editing submodules |
 | `src/ui/editing/action_sink.rs` | ActionSink builder |
 | `src/ui/editing/undo_redo.rs` | Undo/redo builders |
-| `src/ui/editing/save_pipeline.rs` | Debounced save pipeline |
+| `src/ui/editing/save_pipeline.rs` | Manual save, refresh and status polling |
+| `src/ui/editing/save_rules.rs` | Save, close, switch and refresh decisions |
 | `src/ui/editing/filename_sync.rs` | Rename .md to match slug on save |
 | `src/ui/editing/pane_key.rs` | Pane rebuild key |
 | `src/ui/editing/focus.rs` | Focus management |

@@ -52,6 +52,8 @@ floem 0.2 does **not** hit-test absolutely-positioned children that overflow abo
 | Clicking a button destroys the UI it targets | Blur → commit → `current_doc.update()` → pane rebuild | Make the UI pane-level; capture target at click time |
 | Focused block renders enormously tall | Height cached from a width-0 layout pass | Height memo ignores width<1 readings |
 | `text_input` clips long values | Auto width sizes the text, not the box | Explicit `width_full`/`width(px)` |
+| A window-wide shortcut misses when an editor has focus | floem offers a key to the focused view, then the main view only if unprocessed, and block editors stop every key | Handle it in `handle_key` and in each `text_editor_keys`, plus a `KeyDown` listener on the root view. See Ctrl+S |
+| Can't warn before the window closes | floem 0.2 destroys the window on `CloseRequested` with no hook | `WindowClosed` runs too late to cancel. `WindowCloseRequested` exists only on floem main |
 
 ## Debugging method
 

@@ -44,9 +44,19 @@ A block-tree editor with a file sidebar and a front-matter inspector:
 - **Center — block canvas**: the keyboard-driven block editor. `/` opens the block inserter (built-in kinds plus any registered plugin blocks), `Enter` splits a paragraph, `Backspace` at the start merges blocks, and blocks reorder by drag-and-drop. Inline formatting uses `Ctrl/Cmd+B` (bold), `Ctrl/Cmd+I` (italic), and `Ctrl/Cmd+K` (link). A small toolbar above the focused block converts its type (P / H1–H6 / Code / lists) and toggles formatting. Plugin block attributes are edited in a form rendered inline within the block.
 - **Right — inspector**: the front-matter fields for the current post (title, slug, date, tags, draft, description).
 - **Bottom — notes drawer**: a collapsible panel for notes on the open post or page. Notes are plain text, saved to `notes/posts/` or `notes/pages/`, and never published. They are tracked by git unless you add `/notes` to `.gitignore`.
-- **Footer**: build status, save state, word count, and the live-preview URL.
+- **Footer**: build status, the Save button, save state, word count, and the live-preview URL.
 
 The live preview is served from `www/` on `http://127.0.0.1:8080` and rebuilds on save; open it in any browser alongside the editor.
+
+### Saving
+
+Nothing is written until you save, with `Ctrl/Cmd+S` or the Save button. That saves the post and its notes together, renames the file if the slug changed, and rebuilds the site.
+
+- **Switching posts** with unsaved changes asks whether to save first.
+- **Closing the app** saves without asking, because the window can't be held open to ask. If the file also changed on disk, the save is skipped and your unsaved edits are lost, so the newer file wins.
+- **A crash loses anything unsaved.** There is no recovery file.
+
+If the open post or its notes change on disk, a bar appears above the footer with a Refresh button. Refresh asks before discarding unsaved edits, and saving over an outside change asks before overwriting it.
 
 ## Content format
 

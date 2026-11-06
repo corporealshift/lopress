@@ -33,7 +33,7 @@ The lopress editor ships a **debug-only HTTP control server** so Claude can see 
 
 ## Safety: only drive scratch workspaces
 
-**`/action` mutations and the editor's autosave persist to disk.** Never open the user's real blog or a committed test fixture — a stray action or autosave will silently overwrite it (this has corrupted a real site before). Scaffold a disposable site instead:
+**`/save`, Ctrl+S and closing the window all write to disk.** `/action` and typed input stay in memory until then. Never open the user's real blog or a committed test fixture — a stray save or window close will silently overwrite it (this has corrupted a real site before). Scaffold a disposable site instead:
 
 ```powershell
 $site = "$env:TEMP\lopress-scratch"
@@ -50,11 +50,12 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 | Endpoint | Method | Purpose | Returns |
 |---|---|---|---|
 | `/ping` | GET | Liveness check | `ok` |
-| `/state` | GET | Current doc as JSON | `{doc_open, path, blocks:[{id,kind,text,lang?}], notes:{open,dirty,text,load_error,save_error}}` — see kind values below |
+| `/state` | GET | Current doc as JSON | `{doc_open, path, dirty, disk, blocks:[{id,kind,text,lang?}], notes:{open,dirty,text,load_error,save_error}}` — see kind values below |
 | `/screenshot` | GET | PNG of the window | `image/png` bytes; `503` if window not found |
 | `/action` | POST | Apply a `CtrlAction` to the doc | `200 {"status":"dispatched"}` / `409 no_document` / `422 block_not_found` / `400 parse error` |
 | `/open` | POST | Open a doc by path. Body `{ "path": "..." }`. Absolute or workspace-relative. | `200 {"status":"opened"}` / `404 {"status":"not_found"}` / `409 {"status":"no_workspace"}` |
-| `/close` | POST | Close the current doc and return to the welcome view. | `200 {"status":"closed"}` / `409 {"status":"no_workspace"}` |
+| `/close` | POST | Close the current doc and return to the welcome view. Drops unsaved changes. | `200 {"status":"closed"}` / `409 {"status":"no_workspace"}` |
+| `/save` | POST | Run the same save as Ctrl+S. | `200 {"status":"saved"}` / `200 {"status":"nothing_to_save"}` / `409 {"status":"confirm_overwrite"}` (the dialog is showing) / `409 {"status":"no_document"}` / `500 {"status":"failed"}` |
 | `/input` | POST | Inject text or a key chord | `ok` / `400` |
 | `/click` | POST | Click at client-area coords | `ok` / `400` |
 
@@ -73,6 +74,8 @@ All endpoints on `http://127.0.0.1:7878`. On Windows use `Invoke-RestMethod` / `
 `/state` does **not** distinguish heading levels or expose plugin attrs — read the persisted `.md` for those.
 
 With a document open, `notes` reports the notes drawer. Unlike block text, `notes.text` is the live buffer, so `/input`-typed notes appear in `/state` immediately. `path` can lag a slug rename until the next document or notes change; check the file on disk when it matters.
+
+`dirty` is true when the post has edits that aren't on disk, including typed text not yet committed. `disk` is `unchanged`, `changed` or `missing`: how the open post and notes compare with what was last read or written. `disk` updates within about 250 ms of an outside change.
 
 ## POST /action — document mutations
 
@@ -227,7 +230,7 @@ Remove-Item -Recurse -Force $site -ErrorAction SilentlyContinue
 `/input`-typed text lands in the **inline editor's live buffer** and is visible immediately in `/screenshot`, but it does **not** appear in `/state` until the edit is committed to the document model (the editor commits on structural actions; a plain blur may not). So:
 
 - After `/input` text/keys, verify with `/screenshot`, not `/state`.
-- Use `/action` when you need a change reflected in `/state` and persisted to disk.
+- Use `/action` when you need a change reflected in `/state`, then `/save` to write it to disk.
 
 ## Troubleshooting
 
@@ -263,7 +266,7 @@ When an endpoint behaves unexpectedly, run these in order:
 - **Checking `/state` after `/input` typing** — buffered edits show in `/screenshot`, not `/state`, until committed.
 - **Typing into an unfocused block** — `/click` the target block first; `/input` types wherever the caret is.
 - **Forgetting the editor blocks the foreground** — `/screenshot`, `/click`, and `/input` briefly reorder/activate the window; that flicker is expected.
-- **Driving a real site or committed fixture** — `/action` and autosave write to disk. Always use a `lopress new` scratch site (see Safety section).
+- **Driving a real site or committed fixture** — `/save` and closing the window write to disk. Always use a `lopress new` scratch site (see Safety section).
 - **Using the old `new_kind` ChangeType payload** — it was replaced by `new_editor` + `new_attrs`; the old form is a `400 parse error`.
 - **Trusting `dispatched` as "it worked"** — `200 dispatched` only means the action reached a real block. Re-fetch `/state` (or screenshot) and confirm the end-state.
 - **Expecting Opaque/plugin content in `/state`** — Opaque blocks report `kind:"Opaque(<type>)"` with empty `text`; verify their content via `/screenshot` and the persisted `.md`.

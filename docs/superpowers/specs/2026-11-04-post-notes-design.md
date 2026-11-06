@@ -4,6 +4,9 @@
 **Date:** 2026-11-04
 **Issue:** #64
 
+Saving has since changed: `2026-11-05-manual-save-design.md` replaces the autosave
+described here.
+
 ## Problem
 
 There is nowhere to think about a post before it is an article. Ideas, links,
