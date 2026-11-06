@@ -1,6 +1,7 @@
 //! Root UI module. Switches between Welcome and Editing views based on `AppState`.
 
 pub mod blocks;
+pub mod confirm_dialog;
 pub mod disk_bar;
 pub mod dnd;
 pub mod editing;
@@ -308,6 +309,7 @@ fn editing_view(
     // registered on focus by `mount_block_editor`, consumed by the doc-switch
     // flush below. See `ActiveCommitSlot`.
     let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
+    let confirm: crate::ui::confirm_dialog::ConfirmSlot = RwSignal::new(None);
     // Pane-stable like `link_edit`: a toolbar style click or Ctrl+S records the
     // selection here so the block editor rebuilt by the commit can re-focus and
     // re-select. See `SelectionRestore`.
@@ -325,10 +327,11 @@ fn editing_view(
         undo_stack,
         edit_rev: save.edit_rev,
         restore_selection,
+        confirm,
     };
     let on_save: save_pipeline::SaveSink = {
         let ctx = save_ctx.clone();
-        Rc::new(move |restore| save_pipeline::save_now(&ctx, restore, false))
+        Rc::new(move |restore| save_pipeline::request_save(&ctx, restore, None))
     };
     save_sink.set(Some(Rc::clone(&on_save)));
     let save_hooks = crate::ui::blocks::env::SaveHooks {
@@ -336,25 +339,30 @@ fn editing_view(
         on_buffer_edit: Rc::new(move || status.dirty.set(true)),
     };
 
-    let editing_for_open = Rc::clone(&editing);
     let ctx_for_open = save_ctx.clone();
     let on_open: Rc<dyn Fn(DocumentRef)> = Rc::new(move |doc_ref: DocumentRef| {
-        // Flush the focused editor's buffer and persist unsaved edits before
-        // the switch discards them; abort when the dirty doc can't be saved.
-        if !save_pipeline::flush_pending_edits(&ctx_for_open) {
+        // Clicking the open post's own row has nothing to switch to.
+        let same_doc = current_path.with_untracked(|p| p.as_ref() == Some(&doc_ref.path));
+        if same_doc && (status.dirty.get_untracked() || notes.dirty.get_untracked()) {
             return;
         }
-        {
-            let mut guard = editing_for_open.borrow_mut();
-            let Some(state) = guard.as_mut() else {
-                return;
-            };
-            state.open_document(&doc_ref);
-            current_doc.set(state.current_doc.clone());
-            current_path.set(Some(doc_ref.path));
-        }
-        // After the guard drops: it borrows `editing`.
-        save_pipeline::after_doc_loaded(status, notes, undo_stack, &editing_for_open);
+        let ctx = ctx_for_open.clone();
+        save_pipeline::guard_switch(
+            &ctx_for_open,
+            Rc::new(move || {
+                {
+                    let mut guard = ctx.editing.borrow_mut();
+                    let Some(state) = guard.as_mut() else {
+                        return;
+                    };
+                    state.open_document(&doc_ref);
+                    current_doc.set(state.current_doc.clone());
+                    current_path.set(Some(doc_ref.path.clone()));
+                }
+                // After the guard drops: it borrows `editing`.
+                save_pipeline::after_doc_loaded(status, notes, undo_stack, &ctx.editing);
+            }),
+        );
     });
 
     let on_new_post = new_doc::make_new_doc_action(save_ctx.clone(), new_doc::DocKind::Post);
@@ -610,33 +618,38 @@ fn editing_view(
 
     let on_refresh: Rc<dyn Fn()> = {
         let ctx = save_ctx.clone();
-        Rc::new(move || {
-            // Discarding unsaved edits needs a dialog, which comes later.
-            if !status.dirty.get_untracked() && !notes.dirty.get_untracked() {
-                save_pipeline::refresh_from_disk(&ctx);
-            }
-        })
+        Rc::new(move || save_pipeline::request_refresh(&ctx))
     };
     let disk_bar = crate::ui::disk_bar::disk_bar_view(status, on_refresh);
 
     let editing_for_close = Rc::clone(&editing);
-    stack((columns, notes_drawer, link_bar, disk_bar, footer, nav_modal))
-        .style(|s| s.flex_col().width_full().height_full())
-        .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
-            // Force-flush any unsaved edits before the window dies. Notes go
-            // first: a clean post returns early below.
-            let _ = notes::save_notes(notes, &editing_for_close);
-            if !status.dirty.get_untracked() {
-                return;
-            }
-            let doc = match current_doc.with_untracked(|d| d.clone()) {
-                Some(d) => d,
-                None => return,
-            };
-            if let Some(state) = editing_for_close.borrow_mut().as_mut() {
-                let _ = state.save_doc(&doc);
-            }
-        })
+    let confirm_layer = crate::ui::confirm_dialog::confirm_dialog_view(confirm);
+
+    stack((
+        columns,
+        notes_drawer,
+        link_bar,
+        disk_bar,
+        footer,
+        nav_modal,
+        confirm_layer,
+    ))
+    .style(|s| s.flex_col().width_full().height_full())
+    .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
+        // Force-flush any unsaved edits before the window dies. Notes go
+        // first: a clean post returns early below.
+        let _ = notes::save_notes(notes, &editing_for_close);
+        if !status.dirty.get_untracked() {
+            return;
+        }
+        let doc = match current_doc.with_untracked(|d| d.clone()) {
+            Some(d) => d,
+            None => return,
+        };
+        if let Some(state) = editing_for_close.borrow_mut().as_mut() {
+            let _ = state.save_doc(&doc);
+        }
+    })
 }
 
 /// Lightweight discriminant so `dyn_container` can derive equality cheaply.

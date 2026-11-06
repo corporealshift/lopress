@@ -8,8 +8,11 @@
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
 use crate::ui::blocks::inline_editor::{ActiveCommitSlot, SelectionRestore, SelectionRestoreSlot};
+use crate::ui::confirm_dialog::{ConfirmChoice, ConfirmRequest, ConfirmSlot};
 use crate::ui::editing::notes::{reload_notes, save_notes, NotesState};
-use crate::ui::editing::save_rules::{decide_save, SaveStep};
+use crate::ui::editing::save_rules::{
+    decide_refresh, decide_save, decide_switch, RefreshStep, SaveStep, SwitchStep,
+};
 use crate::undo::UndoStack;
 use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
@@ -263,6 +266,7 @@ pub struct SaveCtx {
     pub undo_stack: RwSignal<UndoStack>,
     pub edit_rev: RwSignal<u64>,
     pub restore_selection: SelectionRestoreSlot,
+    pub confirm: ConfirmSlot,
 }
 
 impl SaveCtx {
@@ -371,7 +375,7 @@ pub fn save_now(ctx: &SaveCtx, restore: Option<SelectionRestore>, overwrite: boo
 
 /// Replace the open document and its notes with what's on disk. If the file
 /// can't be loaded, the open document stays and the error goes in the bar.
-pub fn refresh_from_disk(ctx: &SaveCtx) {
+fn refresh_from_disk(ctx: &SaveCtx) {
     let reloaded = {
         let mut guard = ctx.editing.borrow_mut();
         let Some(state) = guard.as_mut() else {
@@ -395,17 +399,80 @@ pub fn refresh_from_disk(ctx: &SaveCtx) {
     }
 }
 
-/// Flush pending edits before a doc-switch path replaces `current_doc`.
-///
-/// Two loss windows close here. First, the focused editor's
-/// typed-but-uncommitted buffer. Second, committed-but-unsaved edits: the
-/// debounced save reads `current_doc` at fire time, which after a switch is
-/// already the *new* doc, so anything dirty must be saved synchronously now.
-///
-/// Returns `false` when a dirty document could not be saved — callers must
-/// abort the switch, otherwise the unsaved edits are discarded. The error is
-/// left in `save_error_sig` for the footer to display.
-pub fn flush_pending_edits(ctx: &SaveCtx) -> bool {
+/// Save, asking first if that would replace an outside change. `then` runs
+/// once the post is safely on disk.
+pub fn request_save(
+    ctx: &SaveCtx,
+    restore: Option<SelectionRestore>,
+    then: Option<Rc<dyn Fn()>>,
+) -> SaveOutcome {
+    let outcome = save_now(ctx, restore, false);
+    match outcome {
+        SaveOutcome::Saved | SaveOutcome::NothingToSave => {
+            if let Some(then) = then {
+                then();
+            }
+        }
+        SaveOutcome::NeedsOverwrite => {
+            let ctx_for_overwrite = ctx.clone();
+            ctx.confirm.set(Some(ConfirmRequest {
+                message: "This file changed on disk. Overwrite those changes?",
+                choices: vec![
+                    ConfirmChoice::new("Overwrite", move || {
+                        let saved = save_now(&ctx_for_overwrite, None, true);
+                        if let (SaveOutcome::Saved, Some(then)) = (saved, &then) {
+                            then();
+                        }
+                    }),
+                    ConfirmChoice::cancel(),
+                ],
+            }));
+        }
+        SaveOutcome::Failed | SaveOutcome::NoDocument => {}
+    }
+    outcome
+}
+
+/// Run `then`, which replaces the open document, once any unsaved work has
+/// been dealt with.
+pub fn guard_switch(ctx: &SaveCtx, then: Rc<dyn Fn()>) {
     commit_focused(ctx, None);
-    write_unsaved(ctx)
+    match decide_switch(ctx.unsaved()) {
+        SwitchStep::Proceed => then(),
+        SwitchStep::Confirm => {
+            let ctx_for_save = ctx.clone();
+            let then_after_save = Rc::clone(&then);
+            ctx.confirm.set(Some(ConfirmRequest {
+                message: "Save changes to this post?",
+                choices: vec![
+                    ConfirmChoice::new("Save", move || {
+                        request_save(&ctx_for_save, None, Some(Rc::clone(&then_after_save)));
+                    }),
+                    ConfirmChoice::new("Don't save", move || then()),
+                    ConfirmChoice::cancel(),
+                ],
+            }));
+        }
+    }
+}
+
+/// Load the outside changes, asking first if that discards unsaved edits.
+pub fn request_refresh(ctx: &SaveCtx) {
+    commit_focused(ctx, None);
+    match decide_refresh(ctx.unsaved(), ctx.status.disk.get_untracked()) {
+        RefreshStep::Unavailable => {}
+        RefreshStep::Reload => refresh_from_disk(ctx),
+        RefreshStep::ConfirmDiscard => {
+            let ctx_for_refresh = ctx.clone();
+            ctx.confirm.set(Some(ConfirmRequest {
+                message: "Refreshing will discard your unsaved changes.",
+                choices: vec![
+                    ConfirmChoice::new("Discard and refresh", move || {
+                        refresh_from_disk(&ctx_for_refresh);
+                    }),
+                    ConfirmChoice::cancel(),
+                ],
+            }));
+        }
+    }
 }

@@ -1,6 +1,6 @@
 //! "+ New post" / "+ New page" sidebar actions.
 
-use crate::ui::editing::save_pipeline::{after_doc_loaded, flush_pending_edits, SaveCtx};
+use crate::ui::editing::save_pipeline::{after_doc_loaded, guard_switch, SaveCtx};
 use crate::ui::sidebar::{new_doc_stub, unique_doc_path};
 use floem::reactive::SignalUpdate;
 use lopress_gui_host::DocumentRef;
@@ -24,60 +24,61 @@ impl DocKind {
 
 /// Build the closure the sidebar invokes for "+ New post" / "+ New page".
 ///
-/// The closure: flushes pending edits on the currently open doc (it's about
-/// to be replaced), picks a slug-based filename from the default title (e.g.
+/// The closure deals with any unsaved work on the open doc (it's about to be
+/// replaced), picks a slug-based filename from the default title (e.g.
 /// `new-post.md`), writes the stub markdown, rescans the workspace, then opens
 /// the new doc through
 /// `EditingState::open_document` so the editor pane and current_path signal
 /// stay in sync with the sidebar.
 pub fn make_new_doc_action(ctx: SaveCtx, kind: DocKind) -> Rc<dyn Fn()> {
     Rc::new(move || {
-        // Flush the focused editor's buffer and persist unsaved edits before
-        // the switch discards them; abort when the dirty doc can't be saved.
-        if !flush_pending_edits(&ctx) {
+        let ctx_for_create = ctx.clone();
+        guard_switch(&ctx, Rc::new(move || create_doc(&ctx_for_create, kind)));
+    })
+}
+
+/// Write the stub and open it.
+fn create_doc(ctx: &SaveCtx, kind: DocKind) {
+    {
+        let mut guard = ctx.editing.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let dir = match kind {
+            DocKind::Post => state.session.posts_dir(),
+            DocKind::Page => state.session.pages_dir(),
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("failed to create {}: {e}", dir.display());
             return;
         }
-        {
-            let mut guard = ctx.editing.borrow_mut();
-            let Some(state) = guard.as_mut() else {
-                return;
-            };
-            let dir = match kind {
-                DocKind::Post => state.session.posts_dir(),
-                DocKind::Page => state.session.pages_dir(),
-            };
-            if let Err(e) = std::fs::create_dir_all(&dir) {
-                eprintln!("failed to create {}: {e}", dir.display());
-                return;
-            }
-            let path = unique_doc_path(&dir, &lopress_core::slugify(kind.default_title()));
-            if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
-                eprintln!("failed to write {}: {e}", path.display());
-                return;
-            }
-
-            let summary = state.session.rescan();
-            let doc_ref = summary
-                .posts
-                .iter()
-                .chain(summary.pages.iter())
-                .find(|d| d.path == path)
-                .cloned()
-                .unwrap_or_else(|| DocumentRef {
-                    path: path.clone(),
-                    title: kind.default_title().to_string(),
-                    slug: String::new(),
-                    date: None,
-                    is_draft: true,
-                    has_parse_error: false,
-                });
-
-            state.open_document(&doc_ref);
-            ctx.current_doc.set(state.current_doc.clone());
-            ctx.current_path.set(Some(doc_ref.path));
-            ctx.workspace_signal.set(summary);
+        let path = unique_doc_path(&dir, &lopress_core::slugify(kind.default_title()));
+        if let Err(e) = std::fs::write(&path, new_doc_stub(kind.default_title())) {
+            eprintln!("failed to write {}: {e}", path.display());
+            return;
         }
-        // After the guard drops: it borrows `editing`.
-        after_doc_loaded(ctx.status, ctx.notes, ctx.undo_stack, &ctx.editing);
-    })
+
+        let summary = state.session.rescan();
+        let doc_ref = summary
+            .posts
+            .iter()
+            .chain(summary.pages.iter())
+            .find(|d| d.path == path)
+            .cloned()
+            .unwrap_or_else(|| DocumentRef {
+                path: path.clone(),
+                title: kind.default_title().to_string(),
+                slug: String::new(),
+                date: None,
+                is_draft: true,
+                has_parse_error: false,
+            });
+
+        state.open_document(&doc_ref);
+        ctx.current_doc.set(state.current_doc.clone());
+        ctx.current_path.set(Some(doc_ref.path));
+        ctx.workspace_signal.set(summary);
+    }
+    // After the guard drops: it borrows `editing`.
+    after_doc_loaded(ctx.status, ctx.notes, ctx.undo_stack, &ctx.editing);
 }
