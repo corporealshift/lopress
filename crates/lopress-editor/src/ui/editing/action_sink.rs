@@ -19,7 +19,7 @@ use std::time::Duration;
 /// - `focus_target`: signal set by focus resolution after each action.
 /// - `slash_menu_open`: signal tracking the open slash-menu block id.
 /// - `undo_stack`: the undo/redo stack.
-/// - `mark_dirty`: callback to mark the document dirty (triggers save debounce).
+/// - `mark_dirty`: callback to mark the document dirty.
 pub fn build_action_sink(
     current_doc: RwSignal<Option<EditorDoc>>,
     focus_target: RwSignal<Option<BlockId>>,

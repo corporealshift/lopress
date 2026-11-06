@@ -15,8 +15,9 @@ use crate::actions::BlockAction;
 use crate::model::descriptor;
 use crate::model::markdown_wrap::toggle_markdown_wrap;
 use crate::model::types::{BlockBody, BlockId, EditorBlock};
-use crate::ui::blocks::env::BlockEnv;
+use crate::ui::blocks::env::{BlockEnv, FieldHooks};
 use crate::ui::blocks::inline_editor::{accept_visual_lines, block_height_px, ActionSink};
+use crate::ui::blocks::inline_editor::{is_save_key, CommitClosure};
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
 use floem::keyboard::{Key, Modifiers};
 use floem::peniko::Color;
@@ -36,6 +37,7 @@ use floem::views::{
 use floem::{AnyView, IntoView};
 use lopress_plugin::{AttrDecl, AttrType};
 use serde_json::Value;
+use std::rc::Rc;
 
 const HEADER_BG: Color = Color::rgb8(238, 234, 250);
 const HEADER_FG: Color = Color::rgb8(80, 60, 130);
@@ -70,7 +72,13 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
 
     let attrs_sig: RwSignal<serde_json::Map<String, Value>> = RwSignal::new(meta.attrs.clone());
     let on_action_for_attrs = env.on_action.clone();
-    let form = build_attr_form(&meta.attr_decls, attrs_sig, block_id, on_action_for_attrs);
+    let form = build_attr_form(
+        &meta.attr_decls,
+        attrs_sig,
+        block_id,
+        on_action_for_attrs,
+        &env.field_hooks(),
+    );
 
     // Attr-form plugins (e.g. `lopress:callout`) keep ALL their content in attrs
     // (the form) and have no block-body content concept, so render header + form
@@ -105,6 +113,7 @@ fn build_attr_form(
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
+    hooks: &FieldHooks,
 ) -> AnyView {
     if decls.is_empty() {
         return floem::views::empty().into_any();
@@ -122,6 +131,7 @@ fn build_attr_form(
             attrs_sig,
             block_id,
             on_action.clone(),
+            hooks,
         ));
     }
     v_stack_from_iter(rows)
@@ -137,6 +147,7 @@ fn attr_row(
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
+    hooks: &FieldHooks,
 ) -> AnyView {
     let lbl_text = decl.label.clone().unwrap_or(name.clone());
     let lbl = label(move || lbl_text.clone()).style(|s| {
@@ -169,15 +180,30 @@ fn attr_row(
             attrs_sig,
             block_id,
             on_action.clone(),
+            hooks,
         )
         .into_any(),
-        (AttrType::Number, _) | (_, "number") => {
-            attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), true).into_any()
-        }
+        (AttrType::Number, _) | (_, "number") => attr_text(
+            name.clone(),
+            attrs_sig,
+            block_id,
+            on_action.clone(),
+            true,
+            hooks,
+        )
+        .into_any(),
         (_, "textarea") => {
-            attr_textarea(name.clone(), attrs_sig, block_id, on_action.clone()).into_any()
+            attr_textarea(name.clone(), attrs_sig, block_id, on_action.clone(), hooks).into_any()
         }
-        _ => attr_text(name.clone(), attrs_sig, block_id, on_action.clone(), false).into_any(),
+        _ => attr_text(
+            name.clone(),
+            attrs_sig,
+            block_id,
+            on_action.clone(),
+            false,
+            hooks,
+        )
+        .into_any(),
     };
 
     // One layout for every row: fixed label column left, growing field
@@ -201,6 +227,7 @@ fn attr_text(
     block_id: BlockId,
     on_action: ActionSink,
     numeric: bool,
+    hooks: &FieldHooks,
 ) -> impl IntoView {
     let initial: String = attrs_sig.with_untracked(|m| {
         m.get(&name)
@@ -210,32 +237,50 @@ fn attr_text(
             })
             .unwrap_or_default()
     });
+    let committed: RwSignal<String> = RwSignal::new(initial.clone());
     let buf: RwSignal<String> = RwSignal::new(initial);
     let name_for_commit = name.clone();
     let attrs_for_commit = attrs_sig;
     let on_action_for_commit = on_action;
+    hooks.watch(buf);
+    let commit: CommitClosure = Rc::new(move || {
+        // The slot outlives the column, so this can run after a rebuild.
+        if buf.try_with_untracked(|b| b.is_none()) {
+            return;
+        }
+        let s = buf.get_untracked();
+        if s == committed.get_untracked() {
+            return;
+        }
+        committed.set(s.clone());
+        let parsed = if numeric {
+            s.parse::<f64>()
+                .map(|n| {
+                    serde_json::Number::from_f64(n)
+                        .map(Value::Number)
+                        .unwrap_or(Value::String(s.clone()))
+                })
+                .unwrap_or(Value::String(s.clone()))
+        } else {
+            Value::String(s)
+        };
+        attrs_for_commit.update(|m| {
+            m.insert(name_for_commit.clone(), parsed);
+        });
+        let new_attrs = attrs_for_commit.get_untracked();
+        on_action_for_commit(BlockAction::EditAttrs {
+            block_id,
+            new_attrs: Box::new(new_attrs),
+        });
+    });
+    let commit_for_blur = Rc::clone(&commit);
+    let hooks_for_focus = hooks.clone();
     text_input(buf)
+        .on_event_cont(floem::event::EventListener::FocusGained, move |_| {
+            hooks_for_focus.register(&commit);
+        })
         .on_event(floem::event::EventListener::FocusLost, move |_| {
-            let s = buf.get_untracked();
-            let parsed = if numeric {
-                s.parse::<f64>()
-                    .map(|n| {
-                        serde_json::Number::from_f64(n)
-                            .map(Value::Number)
-                            .unwrap_or(Value::String(s.clone()))
-                    })
-                    .unwrap_or(Value::String(s.clone()))
-            } else {
-                Value::String(s)
-            };
-            attrs_for_commit.update(|m| {
-                m.insert(name_for_commit.clone(), parsed);
-            });
-            let new_attrs = attrs_for_commit.get_untracked();
-            on_action_for_commit(BlockAction::EditAttrs {
-                block_id,
-                new_attrs: Box::new(new_attrs),
-            });
+            commit_for_blur();
             floem::event::EventPropagation::Continue
         })
         // `width_full` (not a min_width): floem's text_input clips visible
@@ -253,6 +298,7 @@ fn attr_textarea(
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
+    hooks: &FieldHooks,
 ) -> impl IntoView {
     use floem::reactive::{create_effect, create_memo};
     use floem::views::text_editor_keys;
@@ -268,7 +314,12 @@ fn attr_textarea(
     });
     let rope = Rope::from(initial.as_str());
 
-    let text_ed = text_editor_keys(rope, |editor_sig, kp, ms| {
+    let on_save = Rc::clone(&hooks.save.on_save);
+    let text_ed = text_editor_keys(rope, move |editor_sig, kp, ms| {
+        if is_save_key(kp, ms) {
+            on_save(None);
+            return CommandExecuted::Yes;
+        }
         if let Some(marker) = markdown_shortcut(kp, ms) {
             toggle_marker(editor_sig, marker);
             return CommandExecuted::Yes;
@@ -292,15 +343,13 @@ fn attr_textarea(
     let name_for_commit = name.clone();
     let attrs_for_commit = attrs_sig;
     let on_action_for_commit = on_action;
-    create_effect(move |prev: Option<()>| {
-        focus_lost.track();
-        // The effect runs once at creation; skip that and only react to real
-        // focus-loss notifications.
-        if prev.is_none() {
+    let commit: CommitClosure = Rc::new(move || {
+        // The slot outlives the column, so this can run after a rebuild.
+        if attrs_for_commit.try_with_untracked(|m| m.is_none()) {
             return;
         }
-        // `TextDocument::text()` reads untracked, so this doesn't subscribe the
-        // effect to per-keystroke changes — only `focus_lost` drives re-runs.
+        // `TextDocument::text()` reads untracked, so a caller's effect isn't
+        // subscribed to per-keystroke changes.
         let s = String::from(&editor_for_commit.doc().text());
         let changed = attrs_for_commit.with_untracked(|m| {
             m.get(&name_for_commit).and_then(Value::as_str) != Some(s.as_str())
@@ -316,6 +365,25 @@ fn attr_textarea(
             });
         }
     });
+    let commit_for_blur = Rc::clone(&commit);
+    create_effect(move |prev: Option<()>| {
+        focus_lost.track();
+        // The effect runs once at creation; skip that and only react to real
+        // focus-loss notifications.
+        if prev.is_some() {
+            commit_for_blur();
+        }
+    });
+
+    // A save reaches this field's text through the commit slot.
+    let focused = editor.editor_view_focused;
+    let hooks_for_focus = hooks.clone();
+    create_effect(move |prev: Option<()>| {
+        focused.track();
+        if prev.is_some() {
+            hooks_for_focus.register(&commit);
+        }
+    });
 
     // Grow to fit the wrapped content, so the field never has an inner scroll
     // (whose offset reset during the post-edit relayout, jumping the view to
@@ -324,6 +392,13 @@ fn attr_textarea(
     // rather than `viewport`, read the width guard untracked so our own height
     // writes can't re-trigger it, and reject stale collapsed counts.
     let doc_rev = text_ed.doc().cache_rev();
+    let on_buffer_edit = Rc::clone(&hooks.save.on_buffer_edit);
+    create_effect(move |prev: Option<()>| {
+        doc_rev.get();
+        if prev.is_some() {
+            on_buffer_edit();
+        }
+    });
     let ed_for_height = editor.clone();
     let visual_lines = create_memo(move |prev: Option<&u16>| {
         doc_rev.get();
@@ -434,6 +509,7 @@ fn attr_select(
     attrs_sig: RwSignal<serde_json::Map<String, Value>>,
     block_id: BlockId,
     on_action: ActionSink,
+    hooks: &FieldHooks,
 ) -> impl IntoView {
     // No stock dropdown in Floem 0.2 — render a row of small toggle buttons.
     // The currently-selected option highlights.
@@ -444,7 +520,7 @@ fn attr_select(
     let mut buttons: Vec<AnyView> = Vec::with_capacity(opts.len().max(1));
     if opts.is_empty() {
         // No options declared: fall back to a free-text field.
-        return attr_text(name, attrs_sig, block_id, on_action, false).into_any();
+        return attr_text(name, attrs_sig, block_id, on_action, false, hooks).into_any();
     }
     for opt in opts {
         let opt_for_btn = opt.clone();

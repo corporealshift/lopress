@@ -211,6 +211,7 @@ impl Session {
                 path: path.to_path_buf(),
                 front_matter: doc.front_matter,
                 blocks: doc.blocks,
+                raw,
                 dirty: false,
                 dirty_at: None,
                 last_written: path.metadata().and_then(|m| m.modified()).ok(),
@@ -224,11 +225,12 @@ impl Session {
         }
     }
 
-    /// Serialize and atomically write a document to disk.
+    /// Serialize and atomically write a document to disk. Returns the text
+    /// written, so the caller can compare it with the file later.
     ///
     /// # Errors
     /// Returns `SaveError` on I/O failure.
-    pub fn save(&self, doc: &LoadedDocument) -> Result<(), SaveError> {
+    pub fn save(&self, doc: &LoadedDocument) -> Result<String, SaveError> {
         let content = {
             let _t = perf::span("editor.save.serialize");
             serialize(&Document {
@@ -240,7 +242,7 @@ impl Session {
             let _t = perf::span("editor.save.write");
             atomic_write(&doc.path, content.as_bytes())?;
         }
-        Ok(())
+        Ok(content)
     }
 
     /// The notes file for `doc`, if it is a post or page.

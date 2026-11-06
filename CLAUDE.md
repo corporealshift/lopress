@@ -24,5 +24,5 @@ Desktop blog-authoring tool: a Gutenberg-style block editor (Floem GUI) + static
 ## Working on the editor GUI
 
 - To see, drive, or verify the running editor, use the `driving-lopress-editor` skill (debug HTTP control server on 127.0.0.1:7878: `/state`, `/screenshot`, `/action`, `/input`, `/click`).
-- **Never drive edits against a real site or committed fixture** — `/action` and autosave persist to disk. Scaffold a scratch site with `cargo run --quiet -- new $env:TEMP\lopress-scratch` first.
+- **Never drive edits against a real site or committed fixture** — `/save` writes to disk, and closing the window saves unsaved edits. Scaffold a scratch site with `cargo run --quiet -- new $env:TEMP\lopress-scratch` first.
 - Run with plain `cargo run` from the repo root (debug build; the control server is compiled out of `--release`, and `cargo run -p lopress-editor` fails — it's a library).

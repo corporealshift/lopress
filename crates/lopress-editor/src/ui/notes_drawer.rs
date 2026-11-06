@@ -5,15 +5,17 @@
 //! history survive. Floem clears focus on every pointer down, so clicking the
 //! header blurs the editor; opening the drawer hands focus back.
 
-use crate::state::EditingState;
-use crate::ui::editing::notes::{save_notes, NotesState};
+use crate::ui::blocks::inline_editor::is_save_key;
+use crate::ui::editing::notes::NotesState;
+use crate::ui::editing::save_pipeline::SaveSink;
 use floem::peniko::Color;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
-use floem::views::{dyn_container, empty, h_stack, label, text_editor, v_stack, Decorators};
+use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::{dyn_container, empty, h_stack, label, text_editor_keys, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
-use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -29,13 +31,13 @@ const ERR_FG: Color = Color::rgb8(170, 40, 40);
 pub fn notes_drawer_view(
     notes: NotesState,
     current_path: RwSignal<Option<PathBuf>>,
-    editing: Rc<RefCell<Option<EditingState>>>,
+    on_save: SaveSink,
 ) -> impl IntoView {
     // Keyed on the generation, not `current_path`: a slug rename must not
     // rebuild the editor under someone typing in it.
     let body = dyn_container(
         move || notes.doc_generation.get(),
-        move |_| notes_editor(notes, Rc::clone(&editing)),
+        move |_| notes_editor(notes, Rc::clone(&on_save)),
     )
     .style(move |s| {
         s.width_full()
@@ -104,14 +106,20 @@ fn header(notes: NotesState) -> impl IntoView {
 
 /// The text editor for the current document's notes. Nothing is mounted after
 /// a load failure, so an empty buffer can't overwrite the real notes.
-fn notes_editor(notes: NotesState, editing: Rc<RefCell<Option<EditingState>>>) -> AnyView {
+fn notes_editor(notes: NotesState, on_save: SaveSink) -> AnyView {
     if notes.load_error.with_untracked(Option::is_some) {
         return empty().into_any();
     }
 
     let initial = notes.text.get_untracked();
-    let text_ed =
-        text_editor(Rope::from(initial.as_str())).placeholder("Notes for this post\u{2026}");
+    let text_ed = text_editor_keys(Rope::from(initial.as_str()), move |editor_sig, kp, ms| {
+        if is_save_key(kp, ms) {
+            on_save(None);
+            return CommandExecuted::Yes;
+        }
+        default_key_handler(editor_sig)(kp, ms)
+    })
+    .placeholder("Notes for this post\u{2026}");
     let editor = text_ed.editor().clone();
 
     // Mirror every edit into the buffer. `cache_rev` is the same trigger the
@@ -125,7 +133,6 @@ fn notes_editor(notes: NotesState, editing: Rc<RefCell<Option<EditingState>>>) -
         if notes.text.with_untracked(|t| *t != live) {
             notes.text.set(live);
             notes.dirty.set(true);
-            notes.edits.update(|n| *n = n.wrapping_add(1));
         }
     });
 
@@ -139,16 +146,6 @@ fn notes_editor(notes: NotesState, editing: Rc<RefCell<Option<EditingState>>>) -
             if let Some(view_id) = editor_for_focus.editor_view_id.get_untracked() {
                 view_id.request_focus();
             }
-        }
-    });
-
-    // Save on blur. `FocusLost` on the outer view never fires, so use the
-    // inner editor's trigger, skipping the effect's first run.
-    let focus_lost = editor.editor_view_focus_lost;
-    create_effect(move |prev: Option<()>| {
-        focus_lost.track();
-        if prev.is_some() {
-            save_notes(notes, &editing);
         }
     });
 

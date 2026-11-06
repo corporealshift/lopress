@@ -73,12 +73,11 @@ pub struct FocusPublisher {
 /// Pane-stable slot holding the focused block editor's commit closure.
 ///
 /// `mount_block_editor` registers a disposal-guarded commit here on
-/// FocusGained. Doc-switch paths (sidebar row click, "+ New post/page")
-/// invoke it before replacing `current_doc`, flushing typed-but-uncommitted
-/// text that would otherwise be silently dropped: sidebar rows are not
-/// focusable, so clicking them never blurs the editor, and the FocusLost
-/// commit either never fires or fires after the switch and is rejected by
-/// its own stale-block check.
+/// FocusGained, as do the fields that commit on blur. Every save, and every
+/// path that replaces `current_doc`, invokes it first, flushing typed text
+/// that hasn't reached the document. Ctrl+S doesn't blur the editor, and on a
+/// switch a FocusLost commit could fire too late and be rejected by its own
+/// stale-block check.
 ///
 /// The slot is *not* cleared on FocusLost — a redundant flush is a no-op
 /// (`apply_edit_block_body` drops identical bodies), and not clearing avoids
@@ -194,6 +193,13 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
         style_rev,
         text_sig,
     }
+}
+
+/// True for Ctrl+S, or Cmd+S on macOS.
+pub fn is_save_key(kp: &KeyPress, ms: floem::keyboard::Modifiers) -> bool {
+    use floem::keyboard::Key;
+    (ms.control() || ms.meta())
+        && matches!(&kp.key, KeyInput::Keyboard(Key::Character(s), _) if s.eq_ignore_ascii_case("s"))
 }
 
 /// Caller-provided structural-key callback. Invoked first on every keypress;
@@ -317,6 +323,17 @@ pub fn mount_block_editor(
     let handle_focus_target = env.focus_target;
     let handle_on_undo = env.on_undo.clone();
     let handle_on_redo = env.on_redo.clone();
+    let handle_on_save = Rc::clone(&env.save.on_save);
+
+    // Typed text stays in the buffer until a commit, so say it's unsaved now.
+    // `text_sig` is only written for edits made through an editor.
+    let on_buffer_edit = Rc::clone(&env.save.on_buffer_edit);
+    create_effect(move |prev: Option<()>| {
+        text_sig.with(|_| ());
+        if prev.is_some() {
+            on_buffer_edit();
+        }
+    });
 
     // Build the default command handler once (arrows, backspace, etc).
     let default_kp_handler = default_key_handler(editor_sig);
@@ -341,6 +358,7 @@ pub fn mount_block_editor(
             handle_current_doc,
             &handle_on_undo,
             &handle_on_redo,
+            &handle_on_save,
             &commit_for_key,
             slash_eligible,
             link_edit,
@@ -590,6 +608,7 @@ fn handle_key(
     current_doc: RwSignal<Option<EditorDoc>>,
     on_undo: &Rc<dyn Fn()>,
     on_redo: &Rc<dyn Fn()>,
+    on_save: &crate::ui::editing::save_pipeline::SaveSink,
     commit: &CommitClosure,
     slash_eligible: bool,
     link_edit: RwSignal<Option<crate::ui::link_bar::LinkEdit>>,
@@ -600,6 +619,21 @@ fn handle_key(
     let ctrl_or_cmd = ms.control() || ms.meta();
 
     // ── Ctrl/Cmd shortcuts ───────────────────────────────────────────────────
+    if is_save_key(kp, ms) {
+        // The commit rebuilds the column, so hand the caret to the rebuilt editor.
+        let (start, end) = editor_sig.with_untracked(|ed| {
+            ed.cursor.with_untracked(|c| match &c.mode {
+                CursorMode::Insert(sel) => (sel.min_offset(), sel.max_offset()),
+                _ => (c.offset(), c.offset()),
+            })
+        });
+        on_save(Some(SelectionRestore {
+            block_id,
+            start,
+            end,
+        }));
+        return CommandExecuted::Yes;
+    }
     if ctrl_or_cmd {
         if let KeyInput::Keyboard(Key::Character(ref s), _) = kp.key {
             match s.as_str() {

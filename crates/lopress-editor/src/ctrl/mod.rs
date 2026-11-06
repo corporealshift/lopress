@@ -16,6 +16,7 @@ use serde::Deserialize;
 use crate::actions::BlockAction;
 use crate::model::descriptor;
 use crate::model::types::{BlockBody, BlockId, EditorBlock, EditorDoc, InlineRun};
+use crate::ui::editing::save_pipeline::SaveOutcome;
 
 // ── Public handle ─────────────────────────────────────────────────────────────
 
@@ -342,6 +343,20 @@ impl CtrlCloseResult {
 /// `if let Some((tx,)) = ...` pattern below won't destructure.
 pub(crate) type CtrlOpenEnvelope = (String, crossbeam_channel::Sender<CtrlOpenResult>);
 pub(crate) type CtrlCloseEnvelope = (crossbeam_channel::Sender<CtrlCloseResult>,);
+/// Same one-element shape as `CtrlCloseEnvelope`, for `/save`.
+pub(crate) type CtrlSaveEnvelope = (crossbeam_channel::Sender<SaveOutcome>,);
+
+/// Status code and JSON body for a `/save` reply.
+fn save_http_parts(outcome: SaveOutcome) -> (u16, String) {
+    let (code, status) = match outcome {
+        SaveOutcome::Saved => (200, "saved"),
+        SaveOutcome::NothingToSave => (200, "nothing_to_save"),
+        SaveOutcome::NeedsOverwrite => (409, "confirm_overwrite"),
+        SaveOutcome::NoDocument => (409, "no_document"),
+        SaveOutcome::Failed => (500, "failed"),
+    };
+    (code, format!(r#"{{"status":"{status}"}}"#))
+}
 
 // ── Doc state serialization ───────────────────────────────────────────────────
 
@@ -354,10 +369,26 @@ pub(crate) struct NotesSnapshot {
     pub save_error: Option<String>,
 }
 
+/// The save fields reported by `/state`.
+pub(crate) struct StatusSnapshot {
+    pub dirty: bool,
+    pub disk: lopress_gui_host::DiskState,
+}
+
+fn disk_label(disk: lopress_gui_host::DiskState) -> &'static str {
+    use lopress_gui_host::DiskState::{Changed, Missing, Unchanged};
+    match disk {
+        Unchanged => "unchanged",
+        Changed => "changed",
+        Missing => "missing",
+    }
+}
+
 pub(crate) fn serialize_state(
     doc: Option<&EditorDoc>,
     path: Option<&std::path::Path>,
     notes: &NotesSnapshot,
+    status: &StatusSnapshot,
 ) -> String {
     let Some(doc) = doc else {
         return r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string();
@@ -435,6 +466,8 @@ pub(crate) fn serialize_state(
     serde_json::json!({
         "doc_open": true,
         "path": path.map(|p| p.to_string_lossy().to_string()),
+        "dirty": status.dirty,
+        "disk": disk_label(status.disk),
         "blocks": blocks,
         "notes": {
             "open": notes.open,
@@ -454,6 +487,7 @@ pub(crate) fn start() -> (
     crossbeam_channel::Receiver<CtrlActionEnvelope>,
     crossbeam_channel::Receiver<CtrlOpenEnvelope>,
     crossbeam_channel::Receiver<CtrlCloseEnvelope>,
+    crossbeam_channel::Receiver<CtrlSaveEnvelope>,
 ) {
     let snapshot: Arc<Mutex<String>> = Arc::new(Mutex::new(
         r#"{"doc_open":false,"path":null,"blocks":[]}"#.to_string(),
@@ -461,6 +495,7 @@ pub(crate) fn start() -> (
     let (action_tx, action_rx) = crossbeam_channel::unbounded::<CtrlActionEnvelope>();
     let (open_tx, open_rx) = crossbeam_channel::unbounded::<CtrlOpenEnvelope>();
     let (close_tx, close_rx) = crossbeam_channel::unbounded::<CtrlCloseEnvelope>();
+    let (save_tx, save_rx) = crossbeam_channel::unbounded::<CtrlSaveEnvelope>();
 
     let handle = CtrlHandle {
         snapshot: Arc::clone(&snapshot),
@@ -470,10 +505,10 @@ pub(crate) fn start() -> (
 
     let server_snapshot = Arc::clone(&snapshot);
     std::thread::spawn(move || {
-        serve(server_snapshot, action_tx, open_tx, close_tx);
+        serve(server_snapshot, action_tx, open_tx, close_tx, save_tx);
     });
 
-    (handle, action_rx, open_rx, close_rx)
+    (handle, action_rx, open_rx, close_rx, save_rx)
 }
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
@@ -483,6 +518,7 @@ fn serve(
     action_tx: Sender<CtrlActionEnvelope>,
     open_tx: Sender<CtrlOpenEnvelope>,
     close_tx: Sender<CtrlCloseEnvelope>,
+    save_tx: Sender<CtrlSaveEnvelope>,
 ) {
     let server = match tiny_http::Server::http("127.0.0.1:7878") {
         Ok(s) => s,
@@ -505,11 +541,14 @@ fn serve(
             &action_tx,
             &open_tx,
             &close_tx,
+            &save_tx,
         );
         let _ = request.respond(response);
     }
 }
 
+// One sender per route; a bundle would exist only to shorten this signature.
+#[allow(clippy::too_many_arguments)]
 fn handle_request(
     request: &mut tiny_http::Request,
     method: &str,
@@ -518,6 +557,7 @@ fn handle_request(
     action_tx: &Sender<CtrlActionEnvelope>,
     open_tx: &Sender<CtrlOpenEnvelope>,
     close_tx: &Sender<CtrlCloseEnvelope>,
+    save_tx: &Sender<CtrlSaveEnvelope>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     match (method, url) {
         ("GET", "/ping") => text_response("ok", 200),
@@ -622,6 +662,22 @@ fn handle_request(
             match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
                 Ok(result) => {
                     let (code, json) = result.http_parts();
+                    tiny_http::Response::from_string(json)
+                        .with_header(json_header())
+                        .with_status_code(code)
+                }
+                Err(_) => text_response("editor did not respond", 504),
+            }
+        }
+
+        ("POST", "/save") => {
+            let (reply_tx, reply_rx) = crossbeam_channel::bounded::<SaveOutcome>(1);
+            if save_tx.send((reply_tx,)).is_err() {
+                return text_response("editor channel closed", 503);
+            }
+            match reply_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                Ok(outcome) => {
+                    let (code, json) = save_http_parts(outcome);
                     tiny_http::Response::from_string(json)
                         .with_header(json_header())
                         .with_status_code(code)
@@ -1115,13 +1171,43 @@ mod tests {
             load_error: None,
             save_error: Some("disk full".to_string()),
         };
+        let status = StatusSnapshot {
+            dirty: true,
+            disk: lopress_gui_host::DiskState::Changed,
+        };
         let json: serde_json::Value =
-            serde_json::from_str(&serialize_state(Some(&doc), None, &notes)).unwrap();
+            serde_json::from_str(&serialize_state(Some(&doc), None, &notes, &status)).unwrap();
+        assert_eq!(json["dirty"], true);
+        assert_eq!(json["disk"], "changed");
         assert_eq!(json["notes"]["open"], true);
         assert_eq!(json["notes"]["dirty"], true);
         assert_eq!(json["notes"]["text"], "an idea");
         assert_eq!(json["notes"]["load_error"], serde_json::Value::Null);
         assert_eq!(json["notes"]["save_error"], "disk full");
+    }
+
+    #[test]
+    fn save_outcome_http_parts() {
+        assert_eq!(
+            save_http_parts(SaveOutcome::Saved),
+            (200, r#"{"status":"saved"}"#.to_string()),
+        );
+        assert_eq!(
+            save_http_parts(SaveOutcome::NothingToSave),
+            (200, r#"{"status":"nothing_to_save"}"#.to_string()),
+        );
+        assert_eq!(
+            save_http_parts(SaveOutcome::NeedsOverwrite),
+            (409, r#"{"status":"confirm_overwrite"}"#.to_string()),
+        );
+        assert_eq!(
+            save_http_parts(SaveOutcome::NoDocument),
+            (409, r#"{"status":"no_document"}"#.to_string()),
+        );
+        assert_eq!(
+            save_http_parts(SaveOutcome::Failed),
+            (500, r#"{"status":"failed"}"#.to_string()),
+        );
     }
 
     #[test]

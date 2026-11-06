@@ -17,8 +17,6 @@ pub struct NotesState {
     /// Live buffer, written on every edit. The single source for saves.
     pub text: RwSignal<String>,
     pub dirty: RwSignal<bool>,
-    /// Bumped on every edit; the debounced save watches it.
-    pub edits: RwSignal<u64>,
     pub load_error: RwSignal<Option<String>>,
     /// Separate from the footer's `save_error_sig`, which a successful post
     /// save clears.
@@ -32,7 +30,6 @@ impl NotesState {
             open: RwSignal::new(false),
             text: RwSignal::new(String::new()),
             dirty: RwSignal::new(false),
-            edits: RwSignal::new(0),
             load_error: RwSignal::new(None),
             save_error: RwSignal::new(None),
         }
@@ -75,7 +72,7 @@ pub fn save_notes(notes: NotesState, editing: &Rc<RefCell<Option<EditingState>>>
         return true;
     }
     let text = notes.text.get_untracked();
-    let result = editing.borrow().as_ref().map(|s| s.save_notes(&text));
+    let result = editing.borrow_mut().as_mut().map(|s| s.save_notes(&text));
     match result {
         // No session: nothing to save into.
         None => true,

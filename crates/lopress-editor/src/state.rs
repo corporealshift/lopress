@@ -6,7 +6,8 @@ use crate::model::types::EditorDoc;
 use crate::settings::Settings;
 use lopress_core::perf;
 use lopress_core::{Document, FrontMatter};
-use lopress_gui_host::{DocumentRef, LoadedDocument, Session};
+use lopress_gui_host::disk;
+use lopress_gui_host::{DiskBaseline, DiskStamp, DiskState, DocumentRef, LoadedDocument, Session};
 use lopress_plugin::PluginRegistry;
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,8 @@ pub struct EditingState {
     pub current_ref: Option<DocumentRef>,
     /// Last error encountered while editing.
     pub last_error: Option<String>,
+    /// The post and notes text last read from or written to disk.
+    baseline: Option<DiskBaseline>,
 }
 
 impl EditingState {
@@ -70,6 +73,7 @@ impl EditingState {
             current_doc: None,
             current_ref: None,
             last_error: None,
+            baseline: None,
         }
     }
 
@@ -79,7 +83,7 @@ impl EditingState {
     /// Takes the doc to save by reference rather than reading
     /// `self.current_doc` because the live edit state lives in a UI signal,
     /// not in `EditingState` (which only stores the doc as opened).
-    pub fn save_doc(&self, doc: &EditorDoc) -> Result<(), String> {
+    pub fn save_doc(&mut self, doc: &EditorDoc) -> Result<(), String> {
         let path = self
             .current_ref
             .as_ref()
@@ -90,12 +94,15 @@ impl EditingState {
             path,
             front_matter: core.front_matter,
             blocks: core.blocks,
+            raw: String::new(),
             dirty: false,
             dirty_at: None,
             last_written: None,
             last_save_error: None,
         };
-        self.session.save(&loaded).map_err(|e| e.to_string())
+        let written = self.session.save(&loaded).map_err(|e| e.to_string())?;
+        self.baseline.get_or_insert_with(Default::default).post = written;
+        Ok(())
     }
 
     /// Read the open document's notes. No open document reads as empty.
@@ -108,7 +115,7 @@ impl EditingState {
 
     /// Save notes for the open document. The path comes from `current_ref` at
     /// call time, so a save always follows a rename.
-    pub fn save_notes(&self, text: &str) -> Result<(), String> {
+    pub fn save_notes(&mut self, text: &str) -> Result<(), String> {
         let path = self
             .current_ref
             .as_ref()
@@ -116,7 +123,25 @@ impl EditingState {
             .ok_or_else(|| "no document open".to_string())?;
         self.session
             .save_notes(path, text)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        self.baseline.get_or_insert_with(Default::default).notes = text.to_string();
+        Ok(())
+    }
+
+    /// How the files on disk relate to what was last read or written, or
+    /// `None` with no document open.
+    pub fn disk_state(&self) -> Option<std::io::Result<DiskState>> {
+        let path = &self.current_ref.as_ref()?.path;
+        let baseline = self.baseline.as_ref()?;
+        let notes = self.session.notes_path_for(path);
+        Some(disk::compare(path, notes.as_deref(), baseline))
+    }
+
+    /// A cheap fingerprint of the open files, or `None` with no document open.
+    pub fn disk_stamp(&self) -> Option<DiskStamp> {
+        let path = &self.current_ref.as_ref()?.path;
+        let notes = self.session.notes_path_for(path);
+        Some(DiskStamp::read(path, notes.as_deref()))
     }
 
     /// Rename the open document's file so its stem matches `front_matter`'s
@@ -165,25 +190,49 @@ impl EditingState {
             self.session.load_document(&doc_ref.path)
         };
         match load_result {
-            Ok(loaded) => {
-                let core_doc = Document {
-                    front_matter: loaded.front_matter,
-                    blocks: loaded.blocks,
-                };
-                let editor_doc = {
-                    let _t = perf::span("editor.open_document.from_core");
-                    doc_from_core(&core_doc, &self.plugin_registry)
-                };
-                self.current_doc = Some(editor_doc);
-                self.current_ref = Some(doc_ref.clone());
-                self.last_error = None;
-            }
+            Ok(loaded) => self.adopt(loaded, doc_ref),
             Err(e) => {
                 self.current_doc = None;
                 self.current_ref = Some(doc_ref.clone());
+                self.baseline = None;
                 self.last_error = Some(e.to_string());
             }
         }
+    }
+
+    /// Reload the open document from disk. Unlike `open_document`, a failure
+    /// leaves the open document alone, so a broken file can't cost unsaved
+    /// work.
+    pub fn reload_current(&mut self) -> Result<(), String> {
+        let doc_ref = self
+            .current_ref
+            .clone()
+            .ok_or_else(|| "no document open".to_string())?;
+        let loaded = self
+            .session
+            .load_document(&doc_ref.path)
+            .map_err(|e| e.to_string())?;
+        self.adopt(loaded, &doc_ref);
+        Ok(())
+    }
+
+    /// Make `loaded` the open document.
+    fn adopt(&mut self, loaded: LoadedDocument, doc_ref: &DocumentRef) {
+        self.baseline = Some(DiskBaseline {
+            post: loaded.raw,
+            notes: self.session.load_notes(&doc_ref.path).unwrap_or_default(),
+        });
+        let core_doc = Document {
+            front_matter: loaded.front_matter,
+            blocks: loaded.blocks,
+        };
+        let editor_doc = {
+            let _t = perf::span("editor.open_document.from_core");
+            doc_from_core(&core_doc, &self.plugin_registry)
+        };
+        self.current_doc = Some(editor_doc);
+        self.current_ref = Some(doc_ref.clone());
+        self.last_error = None;
     }
 }
 

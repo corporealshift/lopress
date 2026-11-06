@@ -3,18 +3,20 @@
 //! Reactive inputs:
 //! - `build_status` — driven by a 250 ms poll on `Session::build_status()`
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.
-//! - `dirty` and `save_error` — set by the save-debounce machinery in Task 21.
+//! - `status` and `save_error` — set by the save pipeline.
 //! - `current_doc` — for word count.
 //! - `serve_status` — driven by a 250 ms poll on `Session::serve_status()`
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.
 
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, empty, h_stack, label, Decorators};
+use floem::views::{button, dyn_container, empty, h_stack, label, Decorators};
 use floem::{AnyView, Clipboard, IntoView};
-use lopress_gui_host::{BuildStatus, ServeStatus};
+use lopress_gui_host::{BuildStatus, DiskState, ServeStatus};
 
 use crate::model::types::{BlockBody, EditorBlock, EditorDoc};
+use crate::ui::editing::notes::NotesState;
+use crate::ui::editing::save_pipeline::{DocStatus, SaveSink};
 
 const FOOTER_HEIGHT: f64 = 28.0;
 const BG: Color = Color::rgb8(245, 245, 245);
@@ -28,20 +30,37 @@ const ERR: Color = Color::rgb8(170, 40, 40);
 /// Build the footer view.
 pub fn footer_view(
     build_status: RwSignal<BuildStatus>,
-    dirty: RwSignal<bool>,
+    status: DocStatus,
     save_error: RwSignal<Option<String>>,
     current_doc: RwSignal<Option<EditorDoc>>,
     serve_status: RwSignal<ServeStatus>,
+    notes: NotesState,
+    on_save: SaveSink,
 ) -> impl IntoView {
+    let dirty = status.dirty;
     let build_label = dyn_container(
         move || build_status.get(),
         move |status| build_status_view(&status).into_any(),
     );
 
     let save_label = dyn_container(
-        move || (dirty.get(), save_error.get()),
+        move || (dirty.get() || notes.dirty.get(), save_error.get()),
         move |(d, err)| save_state_view(d, err).into_any(),
     );
+
+    let save_button = button(label(|| "Save".to_string()))
+        .action(move || {
+            on_save(None);
+        })
+        .disabled(move || {
+            !(dirty.get() || notes.dirty.get() || status.disk.get() == DiskState::Missing)
+        })
+        .style(|s| {
+            s.font_size(12.)
+                .padding_horiz(8.)
+                .padding_vert(0.)
+                .margin_left(6.)
+        });
 
     let word_label = label(move || {
         let n = current_doc.with(|maybe| maybe.as_ref().map(word_count).unwrap_or(0));
@@ -57,6 +76,7 @@ pub fn footer_view(
     h_stack((
         build_label.style(|s| s.padding_horiz(10.)),
         sep(),
+        save_button,
         save_label.style(|s| s.padding_horiz(10.)),
         sep(),
         word_label.style(|s| s.padding_horiz(10.)),
