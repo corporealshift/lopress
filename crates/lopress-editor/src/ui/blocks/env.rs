@@ -62,9 +62,9 @@ pub struct BlockEnv {
     /// `focus_pub`, so the bar survives the focus-loss rebuild.
     pub link_edit: RwSignal<Option<LinkEdit>>, // Copy
     /// Pane-stable slot holding the focused block editor's commit closure,
-    /// flushed by doc-switch paths before `current_doc` is replaced. Like
+    /// run before every save and before `current_doc` is replaced. Like
     /// `link_edit`, it lives in `editing_view` (not the rebuilt column) so
-    /// the flush survives focus-loss rebuilds. See `ActiveCommitSlot`.
+    /// it survives focus-loss rebuilds. See `ActiveCommitSlot`.
     pub active_commit: ActiveCommitSlot, // Copy
     /// Pane-stable selection for a block editor to re-take after the
     /// focus-loss rebuild a toolbar style click causes. See `SelectionRestore`.

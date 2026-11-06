@@ -73,12 +73,11 @@ pub struct FocusPublisher {
 /// Pane-stable slot holding the focused block editor's commit closure.
 ///
 /// `mount_block_editor` registers a disposal-guarded commit here on
-/// FocusGained. Doc-switch paths (sidebar row click, "+ New post/page")
-/// invoke it before replacing `current_doc`, flushing typed-but-uncommitted
-/// text that would otherwise be silently dropped: sidebar rows are not
-/// focusable, so clicking them never blurs the editor, and the FocusLost
-/// commit either never fires or fires after the switch and is rejected by
-/// its own stale-block check.
+/// FocusGained, as do the fields that commit on blur. Every save, and every
+/// path that replaces `current_doc`, invokes it first, flushing typed text
+/// that hasn't reached the document. Ctrl+S doesn't blur the editor, and on a
+/// switch a FocusLost commit could fire too late and be rejected by its own
+/// stale-block check.
 ///
 /// The slot is *not* cleared on FocusLost — a redundant flush is a no-op
 /// (`apply_edit_block_body` drops identical bodies), and not clearing avoids

@@ -3,7 +3,7 @@
 //! Reactive inputs:
 //! - `build_status` — driven by a 250 ms poll on `Session::build_status()`
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.
-//! - `dirty` and `save_error` — set by the save-debounce machinery in Task 21.
+//! - `status` and `save_error` — set by the save pipeline.
 //! - `current_doc` — for word count.
 //! - `serve_status` — driven by a 250 ms poll on `Session::serve_status()`
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.

@@ -1,9 +1,9 @@
-//! Save pipeline: debounce signals, dirty tracking, status polling, and
-//! the debounced save+rebuild closure.
+//! Save pipeline: manual saving, dirty tracking and status polling.
 //!
-//! `SavePipeline` is a plain bag of signals (no methods that hold state).
-//! `start_save_pipeline` bundles the signal creation, starts the debounce
-//! timer, and kicks off the build/serve status polls.
+//! Nothing is written until something asks: Ctrl+S, the Save button, a dialog,
+//! or the window closing. `save_now` is the one path that writes;
+//! `request_save`, `guard_switch` and `request_refresh` put dialogs in front of
+//! it. `start_save_pipeline` creates the signals and starts the status polls.
 
 use crate::model::types::EditorDoc;
 use crate::state::EditingState;
@@ -11,10 +11,10 @@ use crate::ui::blocks::inline_editor::{ActiveCommitSlot, SelectionRestore, Selec
 use crate::ui::confirm_dialog::{ConfirmChoice, ConfirmRequest, ConfirmSlot};
 use crate::ui::editing::notes::{reload_notes, save_notes, NotesState};
 use crate::ui::editing::save_rules::{
-    decide_refresh, decide_save, decide_switch, RefreshStep, SaveStep, SwitchStep,
+    decide_close, decide_refresh, decide_save, decide_switch, CloseStep, RefreshStep, SaveStep,
+    SwitchStep,
 };
 use crate::undo::UndoStack;
-use floem::action::debounce_action;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use lopress_gui_host::{BuildStatus, DiskStamp, DiskState, ServeStatus, WorkspaceSummary};
 use std::cell::RefCell;
@@ -80,8 +80,8 @@ pub enum SaveOutcome {
 /// rebuilds the block column; only a block editor can supply one.
 pub type SaveSink = Rc<dyn Fn(Option<SelectionRestore>) -> SaveOutcome>;
 
-/// Bag of save-pipeline signals exposed to `editing_view` for the footer
-/// and the debounced save closure.
+/// Bag of save-pipeline signals exposed to `editing_view` for the footer and
+/// the action sink.
 pub struct SavePipeline {
     pub mark_dirty: Rc<dyn Fn()>,
     /// Bumped by every change to the document.
@@ -91,31 +91,21 @@ pub struct SavePipeline {
     pub serve_status_sig: RwSignal<ServeStatus>,
 }
 
-/// Create the save-pipeline signals, start the debounce timer, and kick off
-/// the build/serve status polls.
+/// Create the save-pipeline signals and start the status polls.
 ///
 /// Returns a `SavePipeline` that `editing_view` passes to the footer and
 /// uses for the `on_action` mark_dirty callback.
 pub fn start_save_pipeline(
     editing: Rc<RefCell<Option<EditingState>>>,
-    current_doc: RwSignal<Option<EditorDoc>>,
-    current_path: RwSignal<Option<PathBuf>>,
-    workspace_signal: RwSignal<WorkspaceSummary>,
-    notes: NotesState,
     status: DocStatus,
 ) -> SavePipeline {
-    // ── Save-debounce signals ────────────────────────────────────────
-    // `dirty_counter` bumps on every legitimate edit; `debounce_action`
-    // watches it and runs the save closure 500 ms after the last bump.
-    // `status.dirty` / `save_error_sig` drive the footer's status display.
     let build_status_sig: RwSignal<BuildStatus> = RwSignal::new(BuildStatus::Idle);
-    let dirty_sig = status.dirty;
     let save_error_sig: RwSignal<Option<String>> = RwSignal::new(None);
-    let dirty_counter: RwSignal<u64> = RwSignal::new(0);
+    let edit_rev: RwSignal<u64> = RwSignal::new(0);
 
     let mark_dirty: Rc<dyn Fn()> = Rc::new(move || {
-        dirty_sig.set(true);
-        dirty_counter.update(|n| *n = n.wrapping_add(1));
+        status.dirty.set(true);
+        edit_rev.update(|n| *n = n.wrapping_add(1));
     });
 
     // Status polls — read session status and update the signals.
@@ -145,61 +135,11 @@ pub fn start_save_pipeline(
         crate::ui::footer::start_serve_status_poll(serve_reader, serve_status_sig);
     }
 
-    start_disk_poll(Rc::clone(&editing), status);
-
-    // Debounced save+rebuild. `debounce_action` resets its internal timer on
-    // every counter bump and fires the closure 500 ms after the last bump.
-    {
-        let editing_for_save = Rc::clone(&editing);
-        let dc = dirty_counter;
-        let ds = dirty_sig;
-        let ses = save_error_sig;
-        let cp = current_path;
-        let ws = workspace_signal;
-        debounce_action(dc, Duration::from_millis(500), move || {
-            let result = current_doc.with_untracked(|d| {
-                let doc = d.as_ref()?;
-                let mut guard = editing_for_save.borrow_mut();
-                let state = guard.as_mut()?;
-                Some(state.save_doc(doc))
-            });
-            let result = match result {
-                Some(r) => r,
-                None => return,
-            };
-            match result {
-                Ok(()) => {
-                    ds.set(false);
-                    ses.set(None);
-                    crate::ui::editing::filename_sync::sync_filename_and_update(
-                        &editing_for_save,
-                        current_doc,
-                        cp,
-                        ws,
-                        notes,
-                    );
-                    if let Some(state) = editing_for_save.borrow().as_ref() {
-                        state.session.rebuild();
-                    }
-                }
-                Err(msg) => {
-                    ses.set(Some(msg));
-                }
-            }
-        });
-    }
-
-    // Notes save on their own timer, with no rebuild: they don't affect the site.
-    {
-        let editing_for_notes = Rc::clone(&editing);
-        debounce_action(notes.edits, Duration::from_millis(500), move || {
-            save_notes(notes, &editing_for_notes);
-        });
-    }
+    start_disk_poll(editing, status);
 
     SavePipeline {
         mark_dirty,
-        edit_rev: dirty_counter,
+        edit_rev,
         save_error_sig,
         build_status_sig,
         serve_status_sig,
@@ -311,7 +251,7 @@ fn commit_focused(ctx: &SaveCtx, restore: Option<SelectionRestore>) {
 
 /// Write whatever is unsaved. Notes go first, so a clean post still saves its
 /// notes, and a notes-only save skips the rebuild: they don't affect the site.
-fn write_unsaved(ctx: &SaveCtx) -> bool {
+fn write_unsaved(ctx: &SaveCtx, rebuild: Rebuild) -> bool {
     if !save_notes(ctx.notes, &ctx.editing) {
         return false;
     }
@@ -337,7 +277,7 @@ fn write_unsaved(ctx: &SaveCtx) -> bool {
                 ctx.workspace_signal,
                 ctx.notes,
             );
-            if let Some(state) = ctx.editing.borrow().as_ref() {
+            if let (Rebuild::Yes, Some(state)) = (rebuild, ctx.editing.borrow().as_ref()) {
                 state.session.rebuild();
             }
             true
@@ -347,6 +287,14 @@ fn write_unsaved(ctx: &SaveCtx) -> bool {
             false
         }
     }
+}
+
+/// Whether a write should rebuild the site afterwards.
+#[derive(Clone, Copy)]
+enum Rebuild {
+    Yes,
+    /// The app is closing. The next launch builds anyway.
+    No,
 }
 
 /// Save the open document. `overwrite` skips the check for outside changes.
@@ -364,7 +312,7 @@ pub fn save_now(ctx: &SaveCtx, restore: Option<SelectionRestore>, overwrite: boo
         (SaveStep::NothingToDo, _) => SaveOutcome::NothingToSave,
         (SaveStep::ConfirmOverwrite, false) => SaveOutcome::NeedsOverwrite,
         (SaveStep::ConfirmOverwrite, true) | (SaveStep::Write, _) => {
-            if write_unsaved(ctx) {
+            if write_unsaved(ctx, Rebuild::Yes) {
                 SaveOutcome::Saved
             } else {
                 SaveOutcome::Failed
@@ -396,6 +344,18 @@ fn refresh_from_disk(ctx: &SaveCtx) {
             after_doc_loaded(ctx.status, ctx.notes, ctx.undo_stack, &ctx.editing);
         }
         Err(e) => ctx.status.refresh_error.set(Some(e)),
+    }
+}
+
+/// Save on the way out. floem can't stop or delay a close, so nothing can be
+/// asked: see `decide_close` for what happens to unsaved work.
+pub fn save_on_close(ctx: &SaveCtx) {
+    commit_focused(ctx, None);
+    match decide_close(ctx.unsaved(), ctx.disk_now()) {
+        CloseStep::Nothing => {}
+        CloseStep::Save => {
+            write_unsaved(ctx, Rebuild::No);
+        }
     }
 }
 

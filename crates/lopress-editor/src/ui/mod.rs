@@ -37,7 +37,7 @@ use crate::ui::dnd::DndState;
 #[cfg(debug_assertions)]
 use crate::ui::editing::ctrl_wire;
 use crate::ui::editing::new_doc;
-use crate::ui::editing::notes::{self, NotesState};
+use crate::ui::editing::notes::NotesState;
 use crate::ui::editing::save_pipeline;
 use crate::ui::editing::{action_sink, undo_redo};
 use crate::ui::footer::footer_view;
@@ -294,20 +294,12 @@ fn editing_view(
     );
 
     // ── Save pipeline ────────────────────────────────────────────────────
-    // Created before the doc-switch closures below: they flush pending edits
-    // through it before replacing `current_doc`.
-    let save = save_pipeline::start_save_pipeline(
-        Rc::clone(&editing),
-        current_doc,
-        current_path,
-        workspace_signal,
-        notes,
-        status,
-    );
+    // Created before the doc-switch closures below, which save through it.
+    let save = save_pipeline::start_save_pipeline(Rc::clone(&editing), status);
 
     // Pane-stable slot holding the focused block editor's commit closure;
-    // registered on focus by `mount_block_editor`, consumed by the doc-switch
-    // flush below. See `ActiveCommitSlot`.
+    // registered on focus by `mount_block_editor`, run before every save and
+    // switch. See `ActiveCommitSlot`.
     let active_commit: crate::ui::blocks::inline_editor::ActiveCommitSlot = RwSignal::new(None);
     let confirm: crate::ui::confirm_dialog::ConfirmSlot = RwSignal::new(None);
     // Pane-stable like `link_edit`: a toolbar style click or Ctrl+S records the
@@ -613,8 +605,7 @@ fn editing_view(
             .width_full()
     });
 
-    let notes_drawer =
-        notes_drawer::notes_drawer_view(notes, current_path, Rc::clone(&editing), on_save);
+    let notes_drawer = notes_drawer::notes_drawer_view(notes, current_path, on_save);
 
     let on_refresh: Rc<dyn Fn()> = {
         let ctx = save_ctx.clone();
@@ -622,7 +613,6 @@ fn editing_view(
     };
     let disk_bar = crate::ui::disk_bar::disk_bar_view(status, on_refresh);
 
-    let editing_for_close = Rc::clone(&editing);
     let confirm_layer = crate::ui::confirm_dialog::confirm_dialog_view(confirm);
 
     stack((
@@ -636,19 +626,7 @@ fn editing_view(
     ))
     .style(|s| s.flex_col().width_full().height_full())
     .on_event_stop(EventListener::WindowClosed, move |_e: &Event| {
-        // Force-flush any unsaved edits before the window dies. Notes go
-        // first: a clean post returns early below.
-        let _ = notes::save_notes(notes, &editing_for_close);
-        if !status.dirty.get_untracked() {
-            return;
-        }
-        let doc = match current_doc.with_untracked(|d| d.clone()) {
-            Some(d) => d,
-            None => return,
-        };
-        if let Some(state) = editing_for_close.borrow_mut().as_mut() {
-            let _ = state.save_doc(&doc);
-        }
+        save_pipeline::save_on_close(&save_ctx);
     })
 }
 
