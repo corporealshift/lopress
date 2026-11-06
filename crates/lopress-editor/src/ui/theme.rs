@@ -5,7 +5,12 @@
 //! See `docs/superpowers/specs/2026-11-06-paper-theme-design.md`.
 
 use floem::peniko::Color;
-use floem::text::FONT_SYSTEM;
+use floem::style::{CursorColor, Style};
+use floem::text::{Weight, FONT_SYSTEM};
+use floem::views::editor::view::EditorViewClass;
+use floem::views::editor::SelectionColor;
+use floem::views::scroll::{self, ScrollCustomStyle};
+use floem::views::{ButtonClass, CheckboxClass, PlaceholderTextClass, TextInputClass};
 
 // ── Colours ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +62,10 @@ pub const WARN: Color = Color::rgb8(0x8A, 0x5A, 0x12);
 
 /// Text selection: `ACCENT` at 20%.
 pub const SELECTION: Color = Color::rgba8(0xA6, 0x3A, 0x2A, 51);
+/// Caret and selection in a `text_input`, which floem paints in one colour, with
+/// the selection on top of the text. `ACCENT` at 50%, so it's strong enough for
+/// a 1px caret and leaves selected text readable.
+pub const INPUT_CURSOR: Color = Color::rgba8(0xA6, 0x3A, 0x2A, 128);
 /// Toolbar, menu and dialog shadows.
 pub const SHADOW: Color = Color::rgba8(60, 45, 25, 41);
 /// Behind a dialog.
@@ -94,6 +103,91 @@ pub const CORNER_SM: f32 = 5.0;
 pub const CORNER_MD: f32 = 6.0;
 /// Toolbar, menus and dialogs.
 pub const CORNER_LG: f32 = 8.0;
+
+// ── Global styling ──────────────────────────────────────────────────────────
+
+/// Scrollbar handle thickness.
+const SCROLL_HANDLE: f32 = 6.0;
+
+/// The look of every control, set once on the root view. A view's own style
+/// still wins over these.
+pub fn root_style(s: Style) -> Style {
+    s.color(TEXT)
+        .font_size(UI)
+        .class(ButtonClass, quiet_button)
+        .class(TextInputClass, |s| {
+            s.background(FIELD_BG)
+                .border(0.0)
+                .border_radius(CORNER_MD)
+                .padding_horiz(SPACE_10)
+                .padding_vert(SPACE_6)
+                .outline_color(ACCENT_TINT)
+                .set(CursorColor, INPUT_CURSOR)
+                .hover(|s| s.background(FIELD_BG))
+                .focus(|s| s.hover(|s| s.background(FIELD_BG)))
+        })
+        .class(PlaceholderTextClass, |s| s.color(PLACEHOLDER).font_size(UI))
+        .class(CheckboxClass, |s| {
+            s.background(FIELD_BG)
+                .color(ACCENT)
+                .border_color(RULE)
+                .border_radius(CORNER_SM)
+                .outline_color(ACCENT_TINT)
+                .hover(|s| s.background(ROW_HOVER_BG))
+                .focus(|s| s.border_color(RULE).hover(|s| s.background(ROW_HOVER_BG)))
+                .active(|s| s.background(ROW_ACTIVE_BG))
+        })
+        .apply_custom(
+            ScrollCustomStyle::new()
+                .handle_background(RULE)
+                .handle_thickness(SCROLL_HANDLE)
+                .handle_rounded(true)
+                .handle_border_radius(SCROLL_HANDLE / 2.0)
+                .track_background(Color::TRANSPARENT),
+        )
+        .class(scroll::Handle, |s| {
+            s.hover(|s| s.background(ROW_ACTIVE_BG))
+                .active(|s| s.background(TEXT_MUTED))
+        })
+        .class(scroll::Track, |s| {
+            s.hover(|s| s.background(Color::TRANSPARENT))
+        })
+        .class(EditorViewClass, |s| {
+            s.set(SelectionColor, SELECTION).set(CursorColor, TEXT)
+        })
+}
+
+/// Shared by both button styles: no border, and a keyboard focus ring that
+/// suits the page.
+fn button_base(s: Style) -> Style {
+    s.border(0.0)
+        .border_radius(CORNER_MD)
+        .padding_horiz(SPACE_10)
+        .padding_vert(SPACE_6)
+        .outline_color(ACCENT_TINT)
+}
+
+/// The default button: no fill until hovered.
+pub fn quiet_button(s: Style) -> Style {
+    button_base(s)
+        .background(Color::TRANSPARENT)
+        .color(TEXT_SOFT)
+        .hover(|s| s.background(ROW_HOVER_BG))
+        .focus(|s| s.hover(|s| s.background(ROW_HOVER_BG)))
+        .active(|s| s.background(ROW_ACTIVE_BG).color(TEXT))
+        .disabled(|s| s.background(Color::TRANSPARENT).color(PLACEHOLDER))
+}
+
+/// The main action on a screen.
+pub fn primary_button(s: Style) -> Style {
+    button_base(s)
+        .background(ACCENT)
+        .color(ON_ACCENT)
+        .font_weight(Weight::MEDIUM)
+        .hover(|s| s.background(ACCENT_HOVER))
+        .focus(|s| s.hover(|s| s.background(ACCENT_HOVER)))
+        .active(|s| s.background(ACCENT_HOVER).color(ON_ACCENT))
+}
 
 // ── Fonts ───────────────────────────────────────────────────────────────────
 

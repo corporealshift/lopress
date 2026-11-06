@@ -178,7 +178,7 @@ pub(crate) fn root_view(
             .into_any(),
         },
     )
-    .style(|s| s.width_full().height_full())
+    .style(|s| theme::root_style(s.width_full().height_full()))
     // floem offers the main view any key the focused view left unprocessed.
     .on_event(EventListener::KeyDown, move |e| {
         if let Event::KeyDown(key_event) = e {
