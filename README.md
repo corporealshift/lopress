@@ -142,3 +142,5 @@ Dedicated `lopress build <site>` and `lopress serve <site>` CLI subcommands are 
 ## License
 
 TBD.
+
+The editor bundles [Newsreader](https://github.com/productiontype/Newsreader) and [Instrument Sans](https://github.com/Instrument/instrument-sans), both under the SIL Open Font License. The licences are in `assets/fonts/`, and `scripts/build-fonts.py` regenerates the font files.

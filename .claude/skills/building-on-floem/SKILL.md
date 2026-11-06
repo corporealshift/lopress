@@ -26,6 +26,10 @@ Because `dyn_container` rebuilds wholesale, **where you put it decides what surv
 - The whole block column rebuilds on **every** `current_doc.update()` — including the commit that fires when an inline editor loses focus. Consequence: clicking any button blurs the editor → commit → rebuild → the per-block UI you clicked is destroyed before it can act. **UI that must survive interaction with a focused block must be pane-level** (see `ui/link_bar.rs`), capturing its target/selection at click time.
 - Per-block widgets own their local signals (runs, caret); those die on rebuild. Anything that must persist across edits belongs in pane-level signals threaded down via `BlockEnv` (`ui/blocks/env.rs`).
 
+## Colours and fonts
+
+Every colour, text size, spacing value and corner comes from `ui/theme.rs`, and `tests/theme_tests.rs` fails on a colour literal anywhere else under `ui/`. `theme::root_style` sets the look of every button, input and scrollbar, so a new control usually needs no colours of its own. Block text takes a `TextRole`.
+
 ## Layout rules
 
 - `width_full()` is a **percentage** — it needs a definite parent width to resolve against. A `scroll` child's width is *indefinite*, so `width_full` there collapses to min-content unless **every intermediate container** (especially `dyn_container`) also sets `width_full`. This is load-bearing in `editor_pane.rs` and caused the collapsed-editor-width bug.
@@ -52,6 +56,9 @@ floem 0.2 does **not** hit-test absolutely-positioned children that overflow abo
 | Clicking a button destroys the UI it targets | Blur → commit → `current_doc.update()` → pane rebuild | Make the UI pane-level; capture target at click time |
 | Focused block renders enormously tall | Height cached from a width-0 layout pass | Height memo ignores width<1 readings |
 | `text_input` clips long values | Auto width sizes the text, not the box | Explicit `width_full`/`width(px)` |
+| A fixed-height bar gets squeezed on a long document | Flex items default to `flex_shrink(1)`, so when the columns overflow every sibling gives up a share | `flex_shrink(0)` on the bar. Same for fixed-width columns |
+| An opaque input selection hides the text | `text_input` paints caret and selection in one colour, `CursorColor`, with the selection over the text | Keep it translucent. See `INPUT_CURSOR` |
+| `text_input` text sits high in a tall box | It draws from the top of its content box | Use a larger `padding_top` to centre it |
 | Text in a bundled family renders in a system font | cosmic-text only uses a face from a named family when weight and style match exactly | Every combination needs a file in `ui/theme.rs` `FACES`. The test there checks the table |
 | Heading weight has no effect in a block editor | `Editor::new_text_layout` never reads `Styling::weight`, so block text defaults to 400 | Bake the weight into the face. See Newsreader Display in `scripts/build-fonts.py` |
 | A window-wide shortcut misses when an editor has focus | floem offers a key to the focused view, then the main view only if unprocessed, and block editors stop every key | Handle it in `handle_key` and in each `text_editor_keys`, plus a `KeyDown` listener on the root view. See Ctrl+S |

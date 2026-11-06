@@ -128,7 +128,9 @@ except the ones marked new, which the mockup doesn't cover.
 | `OK` | `#4C7A4F` | Build status dot |
 | `WARN` | `#8A5A12` | Unsaved (new) |
 | `SELECTION` | `ACCENT` at 20% | Text selection (new) |
+| `INPUT_CURSOR` | `ACCENT` at 50% | Caret and selection in text inputs (new). floem paints both in one colour, with the selection over the text |
 | `SHADOW` | `rgba(60,45,25,.16)` | Toolbar, menus, dialogs |
+| `SCRIM` | `rgba(38,34,29,.25)` | Behind a dialog (new) |
 
 Errors use `ACCENT`, because Paper has one accent colour.
 
@@ -142,6 +144,8 @@ Errors use `ACCENT`, because Paper has one accent colour.
 | `H3` to `H6` | 21, 19, 17, 15, line height 1.3 | Newsreader Display |
 | `UI` | 13 | Instrument Sans |
 | `UI_SMALL` | 12 | Instrument Sans |
+| `UI_TINY` | 11 | Instrument Sans. Hints, and the sidebar's Draft marker (new) |
+| `CODE` | 14, line height 1.5 | System monospace. Code blocks (new) |
 
 The mockup's 19px body replaces today's 15px. `BODY_FONT_SIZE` and the heading sizes
 are replaced by a `TextRole` (size, family, line height) that `build_block_editor`
@@ -150,7 +154,7 @@ and `line_height` from it. Anything that renders runs read-only uses the same ro
 
 ### Spacing and corners
 
-Spacing tokens cover the values the mockup uses: 2, 4, 6, 8, 10, 12, 16, 18, 24.
+Spacing tokens cover the values the mockup uses: 2, 4, 6, 8, 10, 12, 14, 16, 18, 24, 28.
 Corners are 5 (toolbar buttons), 6 (controls, rows) and 8 (toolbar, menus, dialogs).
 
 ### Why constants
