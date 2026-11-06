@@ -14,6 +14,7 @@ pub mod nav_editor;
 pub mod notes_drawer;
 pub mod sidebar;
 pub mod slash_menu;
+pub mod theme;
 pub mod toolbar;
 pub mod welcome;
 

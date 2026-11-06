@@ -1,0 +1,171 @@
+//! The Paper theme: every colour, text size, spacing value and corner radius in
+//! the editor, plus the bundled fonts.
+//!
+//! `tests/theme_tests.rs` fails on a colour literal anywhere else under `ui/`.
+//! See `docs/superpowers/specs/2026-11-06-paper-theme-design.md`.
+
+use floem::peniko::Color;
+use floem::text::FONT_SYSTEM;
+
+// ── Colours ─────────────────────────────────────────────────────────────────
+
+/// Sidebar, inspector and footer.
+pub const CHROME_BG: Color = Color::rgb8(0xEF, 0xEA, 0xE0);
+/// Article column and welcome screen.
+pub const PAGE_BG: Color = Color::rgb8(0xFB, 0xF8, 0xF2);
+/// Notes drawer, and cards inside the article.
+pub const DRAWER_BG: Color = Color::rgb8(0xF5, 0xF0, 0xE6);
+/// Text inputs.
+pub const FIELD_BG: Color = Color::rgb8(0xF8, 0xF4, 0xEB);
+/// Toolbar, menus and dialogs.
+pub const SURFACE: Color = Color::rgb8(0xFF, 0xFF, 0xFF);
+/// The focused block.
+pub const BLOCK_FOCUS_BG: Color = Color::rgb8(0xF3, 0xED, 0xE1);
+/// The open document in the sidebar.
+pub const ROW_ACTIVE_BG: Color = Color::rgb8(0xE2, 0xDA, 0xCA);
+/// Hovered rows and quiet buttons.
+pub const ROW_HOVER_BG: Color = Color::rgb8(0xE8, 0xE1, 0xD3);
+
+/// Main text.
+pub const TEXT: Color = Color::rgb8(0x26, 0x22, 0x1D);
+/// Quiet buttons and the toolbar.
+pub const TEXT_SOFT: Color = Color::rgb8(0x4F, 0x48, 0x3F);
+/// Labels and the footer.
+pub const TEXT_MUTED: Color = Color::rgb8(0x6B, 0x63, 0x58);
+/// Placeholders.
+pub const PLACEHOLDER: Color = Color::rgb8(0x6F, 0x66, 0x5A);
+/// Text on a filled accent button.
+pub const ON_ACCENT: Color = Color::rgb8(0xFF, 0xFF, 0xFF);
+
+/// Drawer and footer rules.
+pub const RULE: Color = Color::rgb8(0xDD, 0xD5, 0xC7);
+/// Toolbar dividers and list rules.
+pub const RULE_SOFT: Color = Color::rgb8(0xE6, 0xDF, 0xD2);
+
+/// Primary button, Draft, active toggles and delete. Errors too: Paper has one
+/// accent colour.
+pub const ACCENT: Color = Color::rgb8(0xA6, 0x3A, 0x2A);
+/// Primary button hover, and links.
+pub const ACCENT_HOVER: Color = Color::rgb8(0x7E, 0x2A, 0x1D);
+/// Pressed toolbar button and the disk bar.
+pub const ACCENT_TINT: Color = Color::rgb8(0xF3, 0xE4, 0xDF);
+
+/// Build status dot.
+pub const OK: Color = Color::rgb8(0x4C, 0x7A, 0x4F);
+/// Unsaved state.
+pub const WARN: Color = Color::rgb8(0x8A, 0x5A, 0x12);
+
+/// Text selection: `ACCENT` at 20%.
+pub const SELECTION: Color = Color::rgba8(0xA6, 0x3A, 0x2A, 51);
+/// Toolbar, menu and dialog shadows.
+pub const SHADOW: Color = Color::rgba8(60, 45, 25, 41);
+/// Behind a dialog.
+pub const SCRIM: Color = Color::rgba8(38, 34, 29, 64);
+
+// ── Text ────────────────────────────────────────────────────────────────────
+
+/// UI text size.
+pub const UI: f32 = 13.0;
+/// Small UI text: labels, the footer and the toolbar.
+pub const UI_SMALL: f32 = 12.0;
+
+/// Article paragraphs, lists and tables.
+pub const SERIF_FAMILY: &str = "Newsreader";
+/// Headings and the welcome title.
+pub const DISPLAY_FAMILY: &str = "Newsreader Display";
+/// All UI text. Set as the default sans-serif by `load_fonts`.
+pub const SANS_FAMILY: &str = "Instrument Sans";
+
+// ── Spacing and corners ─────────────────────────────────────────────────────
+
+pub const SPACE_2: f32 = 2.0;
+pub const SPACE_4: f32 = 4.0;
+pub const SPACE_6: f32 = 6.0;
+pub const SPACE_8: f32 = 8.0;
+pub const SPACE_10: f32 = 10.0;
+pub const SPACE_12: f32 = 12.0;
+pub const SPACE_16: f32 = 16.0;
+pub const SPACE_18: f32 = 18.0;
+pub const SPACE_24: f32 = 24.0;
+
+/// Toolbar buttons.
+pub const CORNER_SM: f32 = 5.0;
+/// Controls and rows.
+pub const CORNER_MD: f32 = 6.0;
+/// Toolbar, menus and dialogs.
+pub const CORNER_LG: f32 = 8.0;
+
+// ── Fonts ───────────────────────────────────────────────────────────────────
+
+/// Every face the editor uses. cosmic-text only picks a face from a named
+/// family when the weight and style match exactly, and silently falls back to a
+/// system font otherwise, so a style can only use what's listed here.
+const FACES: &[&[u8]] = &[
+    include_bytes!("../../../../assets/fonts/Newsreader-Regular.ttf"),
+    include_bytes!("../../../../assets/fonts/Newsreader-Italic.ttf"),
+    include_bytes!("../../../../assets/fonts/Newsreader-Bold.ttf"),
+    include_bytes!("../../../../assets/fonts/Newsreader-BoldItalic.ttf"),
+    include_bytes!("../../../../assets/fonts/NewsreaderDisplay-Regular.ttf"),
+    include_bytes!("../../../../assets/fonts/NewsreaderDisplay-Italic.ttf"),
+    include_bytes!("../../../../assets/fonts/NewsreaderDisplay-Bold.ttf"),
+    include_bytes!("../../../../assets/fonts/NewsreaderDisplay-BoldItalic.ttf"),
+    include_bytes!("../../../../assets/fonts/InstrumentSans-Regular.ttf"),
+    include_bytes!("../../../../assets/fonts/InstrumentSans-Italic.ttf"),
+    include_bytes!("../../../../assets/fonts/InstrumentSans-Medium.ttf"),
+    include_bytes!("../../../../assets/fonts/InstrumentSans-SemiBold.ttf"),
+    include_bytes!("../../../../assets/fonts/InstrumentSans-Bold.ttf"),
+];
+
+/// Load the bundled fonts and make Instrument Sans the default sans-serif, which
+/// covers every label, input and `text_editor` that doesn't name a family.
+///
+/// Call once, before any view is built.
+pub fn load_fonts() {
+    let mut font_system = FONT_SYSTEM.lock();
+    let db = font_system.db_mut();
+    for face in FACES {
+        db.load_font_data(face.to_vec());
+    }
+    db.set_sans_serif_family(SANS_FAMILY);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use floem::text::fontdb::{Database, Style, Weight};
+
+    /// The family, weight and style each face must report, from the spec.
+    const EXPECTED: &[(&str, u16, Style)] = &[
+        (SERIF_FAMILY, 400, Style::Normal),
+        (SERIF_FAMILY, 400, Style::Italic),
+        (SERIF_FAMILY, 700, Style::Normal),
+        (SERIF_FAMILY, 700, Style::Italic),
+        (DISPLAY_FAMILY, 400, Style::Normal),
+        (DISPLAY_FAMILY, 400, Style::Italic),
+        (DISPLAY_FAMILY, 700, Style::Normal),
+        (DISPLAY_FAMILY, 700, Style::Italic),
+        (SANS_FAMILY, 400, Style::Normal),
+        (SANS_FAMILY, 400, Style::Italic),
+        (SANS_FAMILY, 500, Style::Normal),
+        (SANS_FAMILY, 600, Style::Normal),
+        (SANS_FAMILY, 700, Style::Normal),
+    ];
+
+    #[test]
+    fn every_face_loads_with_the_exact_family_weight_and_style() {
+        let mut db = Database::new();
+        for face in FACES {
+            db.load_font_data(face.to_vec());
+        }
+        assert_eq!(db.len(), EXPECTED.len());
+
+        for (family, weight, style) in EXPECTED {
+            let found = db.faces().any(|info| {
+                info.families.iter().any(|(name, _)| name == family)
+                    && info.weight == Weight(*weight)
+                    && info.style == *style
+            });
+            assert!(found, "no face for {family} {weight} {style:?}");
+        }
+    }
+}

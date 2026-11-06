@@ -52,6 +52,8 @@ floem 0.2 does **not** hit-test absolutely-positioned children that overflow abo
 | Clicking a button destroys the UI it targets | Blur → commit → `current_doc.update()` → pane rebuild | Make the UI pane-level; capture target at click time |
 | Focused block renders enormously tall | Height cached from a width-0 layout pass | Height memo ignores width<1 readings |
 | `text_input` clips long values | Auto width sizes the text, not the box | Explicit `width_full`/`width(px)` |
+| Text in a bundled family renders in a system font | cosmic-text only uses a face from a named family when weight and style match exactly | Every combination needs a file in `ui/theme.rs` `FACES`. The test there checks the table |
+| Heading weight has no effect in a block editor | `Editor::new_text_layout` never reads `Styling::weight`, so block text defaults to 400 | Bake the weight into the face. See Newsreader Display in `scripts/build-fonts.py` |
 | A window-wide shortcut misses when an editor has focus | floem offers a key to the focused view, then the main view only if unprocessed, and block editors stop every key | Handle it in `handle_key` and in each `text_editor_keys`, plus a `KeyDown` listener on the root view. See Ctrl+S |
 | Can't warn before the window closes | floem 0.2 destroys the window on `CloseRequested` with no hook | `WindowClosed` runs too late to cancel. `WindowCloseRequested` exists only on floem main |
 
