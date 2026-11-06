@@ -27,17 +27,10 @@ const ALLOWED: &[&str] = &[
     "blocks/separator.rs",
     "blocks/table.rs",
     "confirm_dialog.rs",
-    "disk_bar.rs",
     "dnd.rs",
-    "footer.rs",
-    "inspector.rs",
-    "link_bar.rs",
     "mod.rs",
     "nav_editor.rs",
-    "notes_drawer.rs",
-    "sidebar.rs",
     "slash_menu.rs",
-    "toolbar.rs",
     "welcome.rs",
 ];
 

@@ -8,7 +8,7 @@ use floem::peniko::Color;
 use floem::style::{CursorColor, Style};
 use floem::text::{FamilyOwned, Weight, FONT_SYSTEM};
 use floem::views::editor::view::EditorViewClass;
-use floem::views::editor::SelectionColor;
+use floem::views::editor::{PlaceholderColor, SelectionColor};
 use floem::views::scroll::{self, ScrollCustomStyle};
 use floem::views::{ButtonClass, CheckboxClass, PlaceholderTextClass, TextInputClass};
 
@@ -77,6 +77,8 @@ pub const SCRIM: Color = Color::rgba8(38, 34, 29, 64);
 pub const UI: f32 = 13.0;
 /// Small UI text: labels, the footer and the toolbar.
 pub const UI_SMALL: f32 = 12.0;
+/// The smallest UI text: hints and the sidebar's Draft marker.
+pub const UI_TINY: f32 = 11.0;
 
 /// Article paragraphs, lists and tables.
 pub const SERIF_FAMILY: &str = "Newsreader";
@@ -189,6 +191,7 @@ pub const SPACE_6: f32 = 6.0;
 pub const SPACE_8: f32 = 8.0;
 pub const SPACE_10: f32 = 10.0;
 pub const SPACE_12: f32 = 12.0;
+pub const SPACE_14: f32 = 14.0;
 pub const SPACE_16: f32 = 16.0;
 pub const SPACE_18: f32 = 18.0;
 pub const SPACE_24: f32 = 24.0;
@@ -217,6 +220,7 @@ pub fn root_style(s: Style) -> Style {
                 .border_radius(CORNER_MD)
                 .padding_horiz(SPACE_10)
                 .padding_vert(SPACE_6)
+                .font_size(UI)
                 .outline_color(ACCENT_TINT)
                 .set(CursorColor, INPUT_CURSOR)
                 .hover(|s| s.background(FIELD_BG))
@@ -249,7 +253,9 @@ pub fn root_style(s: Style) -> Style {
             s.hover(|s| s.background(Color::TRANSPARENT))
         })
         .class(EditorViewClass, |s| {
-            s.set(SelectionColor, SELECTION).set(CursorColor, TEXT)
+            s.set(SelectionColor, SELECTION)
+                .set(CursorColor, TEXT)
+                .set(PlaceholderColor, PLACEHOLDER)
         })
 }
 
@@ -279,7 +285,7 @@ pub fn primary_button(s: Style) -> Style {
     button_base(s)
         .background(ACCENT)
         .color(ON_ACCENT)
-        .font_weight(Weight::MEDIUM)
+        .font_weight(Weight::SEMIBOLD)
         .hover(|s| s.background(ACCENT_HOVER))
         .focus(|s| s.hover(|s| s.background(ACCENT_HOVER)))
         .active(|s| s.background(ACCENT_HOVER).color(ON_ACCENT))

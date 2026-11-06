@@ -17,9 +17,10 @@ use crate::model::types::{BlockId, EditorBlock};
 use crate::ui::blocks::inline_editor::{
     ActionSink, FocusPublisher, SelectionRestore, SelectionRestoreSlot,
 };
+use crate::ui::icons::{self, icon};
 use crate::ui::link_bar::LinkEdit;
+use crate::ui::theme;
 use floem::event::EventListener;
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::{button, h_stack_from_iter, label, Decorators};
@@ -27,6 +28,14 @@ use floem::{AnyView, IntoView};
 use std::rc::Rc;
 
 /// Pre-snapshotted view of the toolbar's inputs at one moment in time.
+const BUTTON_HEIGHT: f64 = 26.0;
+const BUTTON_MIN_WIDTH: f64 = 28.0;
+const DELETE_ICON_SIZE: f32 = 12.0;
+const SEPARATOR_HEIGHT: f64 = 16.0;
+const SEPARATOR_MARGIN: f64 = 5.0;
+const SHADOW_BLUR: f64 = 18.0;
+const SHADOW_OFFSET: f64 = 6.0;
+
 /// Currently only used by tests / external callers — the live toolbar reads
 /// directly from the focused widget's signals via `block_toolbar_for`.
 pub struct ToolbarState {
@@ -105,10 +114,9 @@ pub fn block_toolbar_for(
                 });
             })
             .style(move |s| {
-                let s = s.padding_horiz(6.).padding_vert(2.);
+                let s = toolbar_button(s);
                 if is_current {
-                    s.background(Color::rgb8(210, 220, 240))
-                        .font_weight(Weight::SEMIBOLD)
+                    pressed(s).font_weight(Weight::SEMIBOLD)
                 } else {
                     s
                 }
@@ -140,32 +148,27 @@ pub fn block_toolbar_for(
         .on_event_stop(EventListener::PointerDown, move |_| {
             on_action_for_table(table_insert_action(block_id));
         })
-        .style(|s| s.padding_horiz(6.).padding_vert(2.));
+        .style(toolbar_button);
     buttons.push(table_btn.into_any());
-    buttons.push(separator().into_any());
 
     // Delete.
     let on_action_for_del = on_action.clone();
-    let del_btn = button(label(|| "x".to_string()))
+    let del_btn = button(icon(icons::CLOSE, DELETE_ICON_SIZE, theme::ACCENT))
         .on_event_stop(EventListener::PointerDown, move |_| {
             on_action_for_del(BlockAction::Delete { block_id });
         })
-        .style(|s| {
-            s.padding_horiz(6.)
-                .padding_vert(2.)
-                .color(Color::rgb8(180, 60, 60))
-        });
+        .style(toolbar_button);
     buttons.push(del_btn.into_any());
 
     let button_row = h_stack_from_iter(buttons).style(|s| {
-        s.padding_horiz(8.)
-            .padding_vert(4.)
-            .gap(4.)
-            .background(Color::rgb8(252, 252, 254))
-            .border(1.)
-            .border_color(Color::rgb8(220, 220, 226))
-            .border_radius(6.)
-            .margin_bottom(6.)
+        s.padding(theme::SPACE_4)
+            .gap(1.)
+            .items_center()
+            .background(theme::SURFACE)
+            .border_radius(theme::CORNER_LG)
+            .box_shadow_blur(SHADOW_BLUR)
+            .box_shadow_v_offset(SHADOW_OFFSET)
+            .box_shadow_color(theme::SHADOW)
     });
 
     // The URL entry UI is the pane-level `link_bar` (see `ui::link_bar`); it
@@ -187,15 +190,7 @@ fn toggle_button(
 ) -> impl IntoView {
     let lbl_owned = lbl.to_string();
 
-    let lbl_view = label(move || lbl_owned.clone()).style(move |s| {
-        let active = flag_active(focus_pub, flag);
-        if active {
-            s.background(Color::rgb8(210, 220, 240))
-                .font_weight(Weight::BOLD)
-        } else {
-            s
-        }
-    });
+    let lbl_view = label(move || lbl_owned.clone());
 
     button(lbl_view)
         .on_event_stop(EventListener::PointerDown, move |_| {
@@ -224,7 +219,39 @@ fn toggle_button(
                 }
             }
         })
-        .style(|s| s.padding_horiz(6.).padding_vert(2.))
+        .style(move |s| {
+            let s = toolbar_button(s);
+            // Instrument Sans has no semibold italic, so a pressed I keeps its
+            // weight. Asking for that face would fall back to a system font.
+            let s = match flag {
+                InlineFlag::Bold => s.font_weight(Weight::BOLD),
+                InlineFlag::Italic => s.font_style(floem::text::Style::Italic),
+                InlineFlag::Code | InlineFlag::Link => s,
+            };
+            if flag_active(focus_pub, flag) {
+                pressed(s)
+            } else {
+                s
+            }
+        })
+}
+
+/// A toolbar button at rest. Colours and hover come from the root style.
+fn toolbar_button(s: floem::style::Style) -> floem::style::Style {
+    s.height(BUTTON_HEIGHT)
+        .min_width(BUTTON_MIN_WIDTH)
+        .padding_horiz(theme::SPACE_6)
+        .padding_vert(0.)
+        .border_radius(theme::CORNER_SM)
+        .font_size(theme::UI_SMALL)
+}
+
+/// The look of the current block type and of an active inline style.
+fn pressed(s: floem::style::Style) -> floem::style::Style {
+    s.background(theme::ACCENT_TINT)
+        .color(theme::ACCENT)
+        .hover(|s| s.background(theme::ACCENT_TINT))
+        .focus(|s| s.hover(|s| s.background(theme::ACCENT_TINT)))
 }
 
 /// True if every style span inside the current editor selection has `flag` set.
@@ -299,9 +326,9 @@ fn separator() -> impl IntoView {
     use floem::views::empty;
     empty().style(|s| {
         s.width(1.)
-            .height(16.)
-            .margin_horiz(4.)
-            .background(Color::rgb8(210, 210, 215))
+            .height(SEPARATOR_HEIGHT)
+            .margin_horiz(SEPARATOR_MARGIN)
+            .background(theme::RULE_SOFT)
     })
 }
 

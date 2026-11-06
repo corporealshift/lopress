@@ -7,6 +7,7 @@ pub mod dnd;
 pub mod editing;
 pub mod editor_pane;
 pub mod footer;
+pub mod icons;
 pub mod inspector;
 pub mod link_bar;
 
@@ -15,6 +16,7 @@ pub mod notes_drawer;
 pub mod sidebar;
 pub mod slash_menu;
 pub mod theme;
+pub mod toggle;
 pub mod toolbar;
 pub mod welcome;
 
@@ -469,7 +471,12 @@ fn editing_view(
         restore_selection,
         save_hooks,
     )
-    .style(|s| s.flex_grow(1.0f32).height_full().min_height(0.));
+    .style(|s| {
+        s.flex_grow(1.0f32)
+            .height_full()
+            .min_height(0.)
+            .min_width(0.)
+    });
 
     let inspector = inspector_view(current_doc, current_path, on_action.clone());
 

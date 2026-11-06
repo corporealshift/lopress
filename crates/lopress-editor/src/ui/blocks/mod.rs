@@ -147,7 +147,11 @@ fn wrap_block(
         )
         .style(move |s| {
             if focus_block.get() == Some(block_id) {
-                s.width_full().height(TOOLBAR_HEIGHT_PX)
+                // Padding, not a margin: a margin on the toolbar would move
+                // its paint but not its hit box.
+                s.width_full()
+                    .height(TOOLBAR_HEIGHT_PX)
+                    .padding_left(HANDLE_WIDTH - theme::SPACE_6)
             } else {
                 s.height(0.)
             }
