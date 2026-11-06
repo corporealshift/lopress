@@ -9,11 +9,13 @@
     )
 )]
 
+pub mod disk;
 pub mod document;
 pub mod error;
 pub mod notes;
 pub mod session;
 
+pub use disk::{DiskBaseline, DiskStamp, DiskState};
 pub use document::LoadedDocument;
 pub use error::{LoadError, OpenError, SaveError};
 pub use session::{BuildStatus, DocumentRef, ServeStatus, Session, WorkspaceSummary};

@@ -89,8 +89,10 @@ fn load_and_save_document_roundtrip() {
     if let Some(b) = doc.blocks.iter_mut().find(|b| b.r#type == "paragraph") {
         b.text = Some("Edited paragraph.".into());
     }
-    session.save(&doc).unwrap();
+    let written = session.save(&doc).unwrap();
+    assert_eq!(written, std::fs::read_to_string(&post_path).unwrap());
     let doc2 = session.load_document(&post_path).unwrap();
+    assert_eq!(doc2.raw, written);
     assert!(doc2
         .blocks
         .iter()

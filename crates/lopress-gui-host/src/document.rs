@@ -12,6 +12,8 @@ pub struct LoadedDocument {
     /// Full block tree. Only paragraph and heading blocks are editable
     /// in the UI; others are treated as opaque read-only placeholders.
     pub blocks: Vec<Block>,
+    /// The file's text as read. Empty for a document built in memory.
+    pub raw: String,
     /// True when the in-memory state differs from the last write.
     pub dirty: bool,
     /// Timestamp of the last edit, used for the 500 ms debounce.

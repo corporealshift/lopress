@@ -90,12 +90,16 @@ impl EditingState {
             path,
             front_matter: core.front_matter,
             blocks: core.blocks,
+            raw: String::new(),
             dirty: false,
             dirty_at: None,
             last_written: None,
             last_save_error: None,
         };
-        self.session.save(&loaded).map_err(|e| e.to_string())
+        self.session
+            .save(&loaded)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// Read the open document's notes. No open document reads as empty.
