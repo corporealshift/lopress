@@ -18,8 +18,8 @@ use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
-use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
 use crate::ui::editing::focus::defer_focus;
+use crate::ui::theme;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::core::cursor::CursorAffinity;
@@ -148,8 +148,10 @@ pub fn editable_list_view(
                     if is_empty {
                         label(|| EMPTY_ITEM_PLACEHOLDER.to_string())
                             .style(|s| {
-                                s.color(floem::peniko::Color::rgb8(160, 160, 160))
-                                    .font_size(15.)
+                                s.color(theme::PLACEHOLDER)
+                                    .font_family(theme::SERIF_FAMILY.to_string())
+                                    .font_size(theme::BODY.font_size_px())
+                                    .line_height(theme::BODY.line_height)
                                     .padding_horiz(2.)
                                     .position(floem::style::Position::Absolute)
                                     .inset_left(0.)
@@ -163,7 +165,12 @@ pub fn editable_list_view(
             );
 
             h_stack((
-                text(prefix).style(|s| s.width(24.).font_size(15.)),
+                text(prefix).style(|s| {
+                    s.width(28.)
+                        .font_family(theme::SERIF_FAMILY.to_string())
+                        .font_size(theme::BODY.font_size_px())
+                        .line_height(theme::BODY.line_height)
+                }),
                 floem::views::stack((
                     editor.style(|s| s.flex_grow(1.0f32).width_full()),
                     placeholder_overlay,
@@ -183,11 +190,7 @@ pub fn editable_list_view(
 /// with a list-specific structural-key callback (per spec section 2) and a
 /// batched-commit closure that constructs a complete `BlockBody::List`
 /// from every item's live buffer on demand.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::too_many_arguments)]
 fn list_item_editor(
     runs: &[InlineRun],
     list_block_id: BlockId,
@@ -199,7 +202,7 @@ fn list_item_editor(
     env: &BlockEnv,
 ) -> (AnyView, RwSignal<Editor>) {
     let cx = Scope::current();
-    let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
+    let state = build_block_editor(cx, runs, theme::BODY);
     let editor_sig = state.editor_sig;
     let spans_sig = state.spans_sig;
 

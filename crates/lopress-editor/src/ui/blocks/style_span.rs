@@ -1,4 +1,5 @@
-use floem::peniko::Color;
+use std::borrow::Cow;
+
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::text::{Attrs, AttrsList, FamilyOwned, Style, Weight};
 use floem::views::editor::id::EditorId;
@@ -8,8 +9,7 @@ use floem::views::editor::EditorStyle;
 use lapce_xi_rope::Rope;
 
 use crate::model::style_span::StyleSpan;
-
-const LINK_COLOR: Color = Color::rgb8(0x22, 0x7C, 0xBB);
+use crate::ui::theme::{self, TextRole};
 
 /// Implements Floem's `Styling` trait to apply `Vec<StyleSpan>` attributes
 /// (bold/italic/code/link) to the native editor's text layout.
@@ -24,7 +24,9 @@ pub struct InlineRunStyling {
     pub spans: RwSignal<Vec<StyleSpan>>,
     pub text: RwSignal<Rope>,
     pub rev: RwSignal<u64>,
-    pub font_size: usize,
+    pub role: TextRole,
+    /// `role`'s families, built once because `font_family` hands out a borrow.
+    pub families: Vec<FamilyOwned>,
 }
 
 impl Styling for InlineRunStyling {
@@ -33,7 +35,15 @@ impl Styling for InlineRunStyling {
     }
 
     fn font_size(&self, _edid: EditorId, _line: usize) -> usize {
-        self.font_size
+        self.role.font_size()
+    }
+
+    fn line_height(&self, _edid: EditorId, _line: usize) -> f32 {
+        self.role.line_height_px()
+    }
+
+    fn font_family(&self, _edid: EditorId, _line: usize) -> Cow<'_, [FamilyOwned]> {
+        Cow::Borrowed(&self.families)
     }
 
     fn apply_attr_styles(
@@ -85,10 +95,12 @@ impl Styling for InlineRunStyling {
                 a = a.style(Style::Italic);
             }
             if span.code {
-                a = a.family(&mono_family);
+                a = a
+                    .family(&mono_family)
+                    .font_size(self.role.code_run_size_px());
             }
             if span.link.is_some() {
-                a = a.color(LINK_COLOR);
+                a = a.color(theme::ACCENT_HOVER);
             }
             attrs.add_span(local_start..local_end, a);
         }

@@ -5,34 +5,25 @@
 use crate::model::types::{BlockId, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline};
-use floem::peniko::Color;
+use crate::ui::theme::{self, RoleFamily, TextRole};
 use floem::reactive::Scope;
 use floem::style::FlexWrap;
 use floem::text::Weight;
 use floem::views::{container, h_stack_from_iter, text, Decorators};
 use floem::IntoView;
 
-/// Body font size (logical px) for paragraphs and list items.
-pub const BODY_FONT_SIZE: f32 = 15.0;
-
 /// Monospace font family used for inline `code` runs and code blocks.
 pub const MONO_FAMILY: &str = "monospace";
 
-/// Theme link color (read-only — no link interaction yet).
-pub const LINK_COLOR: Color = Color::rgb8(70, 110, 200);
-
 /// Editable paragraph: backed by the inline-runs editor widget so the user
 /// can click in and type. Used by the block dispatcher in `blocks::mod`.
-// `BODY_FONT_SIZE` is a small positive integer-valued constant, so the
-// f32->usize conversion is exact.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn render_paragraph_editable(
     runs: &[InlineRun],
     block_id: BlockId,
     env: &BlockEnv,
 ) -> impl IntoView {
     let cx = Scope::current();
-    let state = build_block_editor(cx, runs, BODY_FONT_SIZE as usize);
+    let state = build_block_editor(cx, runs, theme::BODY);
     // The inner editor carries a rigid `height`; the block's vertical padding
     // goes on an outer container so it cannot squeeze the editor's content
     // box (which would let the text overflow into the next block).
@@ -43,31 +34,29 @@ pub fn render_paragraph_editable(
 /// Read-only render of a slice of inline runs as a wrapping flex row.
 /// Used inside list items (and other contexts that don't need editing yet).
 pub fn render_paragraph(runs: &[InlineRun]) -> impl IntoView {
-    render_runs_with_size(runs, BODY_FONT_SIZE, false)
+    render_runs(runs, theme::BODY)
 }
 
-/// Render `InlineRun`s at a custom font size, optionally bold.
+/// Render `InlineRun`s in a text role.
 /// Used by `heading::render_heading` so heading runs share inline styling.
-pub fn render_runs_with_size(
-    runs: &[InlineRun],
-    font_size: f32,
-    force_bold: bool,
-) -> impl IntoView {
-    let spans: Vec<_> = runs
-        .iter()
-        .map(|r| run_span(r, font_size, force_bold))
-        .collect();
+pub fn render_runs(runs: &[InlineRun], role: TextRole) -> impl IntoView {
+    let spans: Vec<_> = runs.iter().map(|r| run_span(r, role)).collect();
     h_stack_from_iter(spans).style(|s| s.flex_wrap(FlexWrap::Wrap))
 }
 
-fn run_span(run: &InlineRun, font_size: f32, force_bold: bool) -> impl IntoView {
+fn run_span(run: &InlineRun, role: TextRole) -> impl IntoView {
     let txt = run.text.clone();
-    let bold = run.bold || force_bold;
+    let bold = run.bold;
     let italic = run.italic;
     let code = run.code;
     let is_link = run.link.is_some();
     text(txt).style(move |mut s| {
-        s = s.font_size(font_size);
+        s = s
+            .font_size(role.font_size_px())
+            .line_height(role.line_height);
+        if let RoleFamily::Named(name) = role.family {
+            s = s.font_family(name.to_string());
+        }
         if bold {
             s = s.font_weight(Weight::BOLD);
         }
@@ -77,12 +66,13 @@ fn run_span(run: &InlineRun, font_size: f32, force_bold: bool) -> impl IntoView 
         if code {
             s = s
                 .font_family(MONO_FAMILY.to_string())
-                .background(Color::rgb8(240, 240, 240))
+                .font_size(role.code_run_size_px())
+                .background(theme::DRAWER_BG)
                 .padding_horiz(3.)
                 .border_radius(3.);
         }
         if is_link {
-            s = s.color(LINK_COLOR);
+            s = s.color(theme::ACCENT_HOVER);
         }
         s
     })

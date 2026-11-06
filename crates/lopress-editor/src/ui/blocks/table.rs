@@ -18,7 +18,7 @@ use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, FocusPublisher,
     StructuralKey,
 };
-use crate::ui::blocks::paragraph::BODY_FONT_SIZE;
+use crate::ui::theme;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
@@ -120,10 +120,7 @@ pub fn table_editor_widget(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         let mut cell_views: Vec<AnyView> = Vec::with_capacity(row.cells.len());
         for (c, cell) in row.cells.iter().enumerate() {
             let cx = Scope::current();
-            // `BODY_FONT_SIZE` is a small positive integer-valued constant,
-            // so the cast to `usize` is always safe and never loses data.
-            #[allow(clippy::cast_sign_loss)]
-            let state = build_block_editor(cx, &cell.runs, BODY_FONT_SIZE as usize);
+            let state = build_block_editor(cx, &cell.runs, theme::BODY);
             let editor_sig = state.editor_sig;
             let spans_sig = state.spans_sig;
             handles.borrow_mut().push((r, c, editor_sig, spans_sig));

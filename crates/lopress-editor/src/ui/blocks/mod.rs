@@ -25,15 +25,13 @@ use crate::model::descriptor;
 use crate::model::types::{BlockId, EditorBlock};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::dnd::{drag_handle, DndState, HANDLE_WIDTH};
+use crate::ui::theme;
 use crate::ui::toolbar::block_toolbar_for;
 use floem::event::{EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, empty, h_stack, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
-
-/// Border color for the block that currently holds focus.
-const FOCUS_BORDER: floem::peniko::Color = floem::peniko::Color::rgb8(150, 180, 230);
 
 /// Fixed height of the in-flow toolbar slot above the focused block. The
 /// focused block is pulled up by exactly this amount (see `wrap_block`) so the
@@ -45,11 +43,6 @@ const TOOLBAR_HEIGHT_PX: f32 = 36.;
 /// Small vertical breathing room between blocks, so they don't sit flush
 /// against each other.
 const BLOCK_GAP_PX: f64 = 8.;
-
-/// Background tint for the block under the pointer. Subtle so it reads as a
-/// hover hint, not a selection — its main job is making empty blocks (which
-/// have no text to see) visible when the mouse is over them.
-const HOVER_BG: floem::peniko::Color = floem::peniko::Color::rgb8(244, 244, 246);
 
 /// Dispatch one editor block to its renderer. Inline-bodied blocks
 /// (paragraph, heading) become editable widgets backed by reactive signals;
@@ -96,11 +89,18 @@ fn wrap_block(
     let handle = drag_handle(block_id, dnd, hover)
         .style(|s| s.width(HANDLE_WIDTH).flex_shrink(0.0f32).items_center());
 
+    // Padding the right by the handle's width centres the text in the column.
+    // Focus and hover only change the fill, so neither moves the text.
     let row = h_stack((handle, body.style(|s| s.flex_grow(1.0f32))))
         .style(move |s| {
-            let s = s.width_full().border_radius(4.);
-            if hover.get() {
-                s.background(HOVER_BG)
+            let s = s
+                .width_full()
+                .padding_right(HANDLE_WIDTH)
+                .border_radius(theme::CORNER_MD);
+            if focus_block.get() == Some(block_id) {
+                s.background(theme::BLOCK_FOCUS_BG)
+            } else if hover.get() {
+                s.background(theme::DRAWER_BG)
             } else {
                 s
             }
@@ -113,16 +113,6 @@ fn wrap_block(
             hover.set(false);
             EventPropagation::Continue
         });
-
-    let row_with_border = row.style(move |s| {
-        let focused = focus_block.get() == Some(block_id);
-        let s = s.width_full().border(1.0).border_radius(4.0);
-        if focused {
-            s.border_color(FOCUS_BORDER)
-        } else {
-            s.border_color(floem::peniko::Color::TRANSPARENT)
-        }
-    });
 
     // Toolbar slot: an in-flow first row that mounts the toolbar only when this
     // block is focused (a fixed-height box then; zero-height otherwise). It must
@@ -164,7 +154,7 @@ fn wrap_block(
         })
     };
 
-    v_stack((toolbar_slot, row_with_border))
+    v_stack((toolbar_slot, row))
         .style(move |s| {
             // Keep an 8px gap between blocks. When this block is focused, the
             // in-flow toolbar would push everything below it down by its height;

@@ -13,8 +13,8 @@ use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
-use crate::ui::blocks::paragraph::MONO_FAMILY;
 use crate::ui::editing::focus::defer_focus;
+use crate::ui::theme;
 use floem::event::EventListener;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
@@ -27,9 +27,6 @@ use floem::views::editor::Editor;
 use floem::views::{empty, h_stack, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
-
-/// Code-specific font size (logical px) for the code body.
-const CODE_FONT_SIZE: usize = 13;
 
 /// Commit closure for the code widget. Reads the editor buffer, compares
 /// against the model's current body for `block_id`, and emits
@@ -238,7 +235,7 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
     // Code has no inline styles, so InlineRun::plain (default bold/italic/
     // code = false, link = None) is exactly right.
     let runs = vec![InlineRun::plain(body)];
-    let state = build_block_editor(cx, &runs, CODE_FONT_SIZE);
+    let state = build_block_editor(cx, &runs, theme::CODE);
     let editor_sig = state.editor_sig;
     let text_sig = state.text_sig;
 
@@ -359,8 +356,6 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
         #[allow(clippy::cast_precision_loss)]
         let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f64;
         s.class(GutterClass, |s| s.hide())
-            .font_family(MONO_FAMILY.to_string())
-            .font_size(13.)
             .padding(10.)
             .width_full()
             .height(lines * line_height + 20.)

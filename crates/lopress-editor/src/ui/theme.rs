@@ -6,7 +6,7 @@
 
 use floem::peniko::Color;
 use floem::style::{CursorColor, Style};
-use floem::text::{Weight, FONT_SYSTEM};
+use floem::text::{FamilyOwned, Weight, FONT_SYSTEM};
 use floem::views::editor::view::EditorViewClass;
 use floem::views::editor::SelectionColor;
 use floem::views::scroll::{self, ScrollCustomStyle};
@@ -84,6 +84,102 @@ pub const SERIF_FAMILY: &str = "Newsreader";
 pub const DISPLAY_FAMILY: &str = "Newsreader Display";
 /// All UI text. Set as the default sans-serif by `load_fonts`.
 pub const SANS_FAMILY: &str = "Instrument Sans";
+
+/// Article text width at full column width.
+pub const TEXT_MEASURE: f32 = 620.0;
+
+/// Where a text role's font comes from.
+#[derive(Clone, Copy)]
+pub enum RoleFamily {
+    /// A bundled family, by name.
+    Named(&'static str),
+    /// The system monospace font.
+    Monospace,
+}
+
+/// How one kind of article text is set. Block editors and read-only runs both
+/// take their size, family and line height from here.
+#[derive(Clone, Copy)]
+pub struct TextRole {
+    pub size: u16,
+    /// A multiple of `size`.
+    pub line_height: f32,
+    pub family: RoleFamily,
+}
+
+impl TextRole {
+    /// Size in the form floem's `Styling` wants.
+    pub fn font_size(self) -> usize {
+        usize::from(self.size)
+    }
+
+    pub fn font_size_px(self) -> f32 {
+        f32::from(self.size)
+    }
+
+    /// Whole pixels, so lines stay evenly spaced down a block.
+    pub fn line_height_px(self) -> f32 {
+        (self.font_size_px() * self.line_height).round()
+    }
+
+    pub fn families(self) -> Vec<FamilyOwned> {
+        match self.family {
+            RoleFamily::Named(name) => vec![FamilyOwned::Name(name.to_string())],
+            RoleFamily::Monospace => vec![FamilyOwned::Monospace],
+        }
+    }
+
+    /// Inline code runs use the system monospace, which sits larger than the
+    /// serif, so they're set a little smaller to keep lines evenly spaced.
+    pub fn code_run_size_px(self) -> f32 {
+        self.font_size_px() * CODE_RUN_SCALE
+    }
+}
+
+const CODE_RUN_SCALE: f32 = 0.88;
+
+const fn serif(size: u16, line_height: f32) -> TextRole {
+    TextRole {
+        size,
+        line_height,
+        family: RoleFamily::Named(SERIF_FAMILY),
+    }
+}
+
+const fn display(size: u16, line_height: f32) -> TextRole {
+    TextRole {
+        size,
+        line_height,
+        family: RoleFamily::Named(DISPLAY_FAMILY),
+    }
+}
+
+/// Paragraphs, list items and table cells.
+pub const BODY: TextRole = serif(19, 1.6);
+pub const H1: TextRole = display(40, 1.15);
+pub const H2: TextRole = display(25, 1.25);
+pub const H3: TextRole = display(21, 1.3);
+pub const H4: TextRole = display(19, 1.3);
+pub const H5: TextRole = display(17, 1.3);
+pub const H6: TextRole = display(15, 1.3);
+/// Code blocks.
+pub const CODE: TextRole = TextRole {
+    size: 14,
+    line_height: 1.5,
+    family: RoleFamily::Monospace,
+};
+
+/// The role for a heading level. Anything past 6 is set as 6.
+pub const fn heading_role(level: u8) -> TextRole {
+    match level {
+        1 => H1,
+        2 => H2,
+        3 => H3,
+        4 => H4,
+        5 => H5,
+        _ => H6,
+    }
+}
 
 // ── Spacing and corners ─────────────────────────────────────────────────────
 
