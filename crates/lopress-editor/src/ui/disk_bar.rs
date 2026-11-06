@@ -2,7 +2,7 @@
 //! read or written. In flow rather than an overlay, like the notes drawer.
 
 use crate::ui::editing::save_pipeline::DocStatus;
-use floem::peniko::Color;
+use crate::ui::theme;
 use floem::reactive::{SignalGet, SignalWith};
 use floem::views::{button, empty, h_stack, label, Decorators};
 use floem::IntoView;
@@ -10,10 +10,7 @@ use lopress_gui_host::DiskState;
 use std::rc::Rc;
 
 const BAR_HEIGHT: f64 = 32.0;
-const BG: Color = Color::rgb8(255, 244, 214);
-const BORDER: Color = Color::rgb8(230, 210, 160);
-const FG: Color = Color::rgb8(100, 72, 0);
-const ERR_FG: Color = Color::rgb8(170, 40, 40);
+const BUTTON_HEIGHT: f64 = 24.0;
 
 /// Build the bar. `on_refresh` is what the Refresh button runs.
 pub fn disk_bar_view(status: DocStatus, on_refresh: Rc<dyn Fn()>) -> impl IntoView {
@@ -22,20 +19,24 @@ pub fn disk_bar_view(status: DocStatus, on_refresh: Rc<dyn Fn()>) -> impl IntoVi
         DiskState::Changed => "Changed on disk".to_string(),
         DiskState::Missing => "This file is no longer on disk".to_string(),
     })
-    .style(|s| s.font_size(12.).color(FG));
+    .style(|s| s.font_size(theme::UI_SMALL).color(theme::TEXT));
 
     let refresh = button(label(|| "Refresh".to_string()))
         .action(move || on_refresh())
         .style(move |s| {
-            s.font_size(12.)
-                .padding_horiz(8.)
+            s.font_size(theme::UI_SMALL)
+                .height(BUTTON_HEIGHT)
+                .padding_horiz(theme::SPACE_8)
                 .padding_vert(0.)
+                .color(theme::ACCENT)
+                .hover(|s| s.background(theme::SURFACE))
+                .focus(|s| s.hover(|s| s.background(theme::SURFACE)))
                 .apply_if(status.disk.get() != DiskState::Changed, |s| s.hide())
         });
 
     let error = label(move || status.refresh_error.get().unwrap_or_default()).style(move |s| {
-        s.font_size(12.)
-            .color(ERR_FG)
+        s.font_size(theme::UI_SMALL)
+            .color(theme::ACCENT)
             .apply_if(status.refresh_error.with(Option::is_none), |s| s.hide())
     });
 
@@ -50,11 +51,11 @@ pub fn disk_bar_view(status: DocStatus, on_refresh: Rc<dyn Fn()>) -> impl IntoVi
             .height(BAR_HEIGHT)
             .flex_shrink(0.0f32)
             .items_center()
-            .gap(10.)
-            .padding_horiz(10.)
-            .background(BG)
+            .gap(theme::SPACE_10)
+            .padding_horiz(theme::SPACE_16)
+            .background(theme::ACCENT_TINT)
             .border_top(1.)
-            .border_color(BORDER)
+            .border_color(theme::RULE)
             .apply_if(status.disk.get() == DiskState::Unchanged, |s| s.hide())
     })
 }

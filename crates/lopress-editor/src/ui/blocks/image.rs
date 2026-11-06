@@ -9,7 +9,7 @@
 use crate::actions::BlockAction;
 use crate::model::types::EditorBlock;
 use crate::ui::blocks::env::BlockEnv;
-use floem::peniko::Color;
+use crate::ui::theme;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{h_stack, label, text_input, v_stack, Decorators};
 use floem::{AnyView, IntoView};
@@ -82,15 +82,12 @@ fn build_placeholder_preview(src: &str, alt: &str) -> AnyView {
             format!("🖼 {filename} — {alt_owned}")
         }
     })
-    .style(|s| s.font_size(12.));
+    .style(|s| s.font_size(theme::UI_SMALL).color(theme::TEXT_MUTED));
     h_stack((lbl,))
         .style(|s| {
-            s.border(1.)
-                .border_color(Color::rgb8(210, 210, 215))
-                .border_radius(4.)
-                .padding(8.)
+            theme::card(s)
+                .padding(theme::SPACE_8)
                 .width_full()
-                .background(Color::rgb8(248, 248, 250))
                 .items_center()
         })
         .into_any()
@@ -141,15 +138,15 @@ fn attr_field(
             commit_for_blur();
             floem::event::EventPropagation::Continue
         })
-        .style(|s| s.font_size(12.).padding_horiz(4.).min_width(160.))
+        .style(|s| s.min_width(160.))
 }
 
 /// Build a simple label + field row.
 fn labeled(label_text: &'static str, field: impl IntoView + 'static) -> impl IntoView + 'static {
     let lbl = label(|| label_text.to_string()).style(|s| {
         s.min_width(70.)
-            .color(Color::rgb8(110, 100, 130))
-            .font_size(12.)
+            .color(theme::TEXT_MUTED)
+            .font_size(theme::UI_SMALL)
     });
     h_stack((lbl, field)).style(|s| s.gap(8.).items_center())
 }

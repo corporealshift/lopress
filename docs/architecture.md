@@ -472,7 +472,7 @@ Spawns a background thread that watches the workspace directory. On file changes
 
 | Module | Purpose |
 |--------|---------|
-| `lib.rs` | App entry point — loads settings, creates Floem application. |
+| `lib.rs` | App entry point — loads the bundled fonts and settings, creates Floem application. |
 | `state.rs` | `AppContext`, `AppState` (Welcome/Editing), `EditingState`. |
 | `actions.rs` | `BlockAction` enum + `apply()` chokepoint. |
 | `undo.rs` | `UndoStack` — stores action/inverse pairs. |
@@ -485,6 +485,9 @@ Spawns a background thread that watches the workspace directory. On file changes
 | `model/inline.rs` | Inline text parsing/serialization. |
 | `model/style_span.rs` | `StyleSpan` — inline formatting spans. |
 | `ui/mod.rs` | Root view — switches Welcome/Editing, builds three-column layout. |
+| `ui/theme.rs` | The Paper theme: every colour, text role, spacing value and corner, `root_style` for the control look, and the bundled fonts. `tests/theme_tests.rs` fails on a colour literal anywhere else under `ui/`. |
+| `ui/icons.rs` | Line icons as inline SVG, plus the status dot. |
+| `ui/toggle.rs` | The on/off switch used for Draft and plugin bool fields. |
 | `ui/blocks/mod.rs` | Per-block rendering dispatch. |
 | `ui/blocks/inline_editor.rs` | Editable paragraph/heading widget (uses Floem's native editor). |
 | `ui/blocks/code_editor.rs` | Editable code block widget. |

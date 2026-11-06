@@ -8,7 +8,6 @@
 //! - `serve_status` — driven by a 250 ms poll on `Session::serve_status()`
 //!   set up in `mod.rs`. Background thread writes the mutex; we just read.
 
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{button, dyn_container, empty, h_stack, label, Decorators};
 use floem::{AnyView, Clipboard, IntoView};
@@ -17,15 +16,11 @@ use lopress_gui_host::{BuildStatus, DiskState, ServeStatus};
 use crate::model::types::{BlockBody, EditorBlock, EditorDoc};
 use crate::ui::editing::notes::NotesState;
 use crate::ui::editing::save_pipeline::{DocStatus, SaveSink};
+use crate::ui::icons::dot;
+use crate::ui::theme;
 
 const FOOTER_HEIGHT: f64 = 28.0;
-const BG: Color = Color::rgb8(245, 245, 245);
-const BORDER: Color = Color::rgb8(220, 220, 220);
-const FG: Color = Color::rgb8(60, 60, 70);
-const MUTED: Color = Color::rgb8(120, 120, 130);
-const OK: Color = Color::rgb8(40, 130, 60);
-const WARN: Color = Color::rgb8(180, 100, 0);
-const ERR: Color = Color::rgb8(170, 40, 40);
+const SAVE_BUTTON_HEIGHT: f64 = 22.0;
 
 /// Build the footer view.
 pub fn footer_view(
@@ -56,17 +51,17 @@ pub fn footer_view(
             !(dirty.get() || notes.dirty.get() || status.disk.get() == DiskState::Missing)
         })
         .style(|s| {
-            s.font_size(12.)
-                .padding_horiz(8.)
+            s.font_size(theme::UI_SMALL)
+                .height(SAVE_BUTTON_HEIGHT)
+                .padding_horiz(theme::SPACE_8)
                 .padding_vert(0.)
-                .margin_left(6.)
         });
 
     let word_label = label(move || {
         let n = current_doc.with(|maybe| maybe.as_ref().map(word_count).unwrap_or(0));
         format!("{n} words")
     })
-    .style(|s| s.color(MUTED).font_size(12.));
+    .style(muted_text);
 
     let url_view = dyn_container(
         move || serve_status.get(),
@@ -74,70 +69,73 @@ pub fn footer_view(
     );
 
     h_stack((
-        build_label.style(|s| s.padding_horiz(10.)),
-        sep(),
-        save_button,
-        save_label.style(|s| s.padding_horiz(10.)),
-        sep(),
-        word_label.style(|s| s.padding_horiz(10.)),
+        build_label,
+        h_stack((save_button, save_label)).style(|s| s.gap(theme::SPACE_6).items_center()),
+        word_label,
         empty().style(|s| s.flex_grow(1.0f32)),
-        url_view.style(|s| s.padding_horiz(10.)),
+        url_view,
     ))
     .style(|s| {
+        // Without `flex_shrink(0)`, a long document squeezes the footer: the
+        // columns above overflow and every sibling gives up a share.
         s.width_full()
             .height(FOOTER_HEIGHT)
-            .background(BG)
+            .flex_shrink(0.0f32)
+            .padding_horiz(theme::SPACE_16)
+            .gap(theme::SPACE_16)
+            .background(theme::CHROME_BG)
             .border_top(1.)
-            .border_color(BORDER)
+            .border_color(theme::RULE)
             .items_center()
     })
 }
 
-fn sep() -> AnyView {
-    empty()
-        .style(|s| s.width(1.).height(14.).background(BORDER))
-        .into_any()
+fn muted_text(s: floem::style::Style) -> floem::style::Style {
+    s.color(theme::TEXT_MUTED).font_size(theme::UI_SMALL)
 }
 
 fn build_status_view(status: &BuildStatus) -> AnyView {
     let (text, color) = match status {
-        BuildStatus::Idle => ("idle".to_string(), MUTED),
-        BuildStatus::Building => ("building…".to_string(), WARN),
+        BuildStatus::Idle => ("idle".to_string(), theme::TEXT_MUTED),
+        BuildStatus::Building => ("building…".to_string(), theme::WARN),
         BuildStatus::Ok {
             pages_rendered,
             pages_skipped,
             duration_ms,
         } => (
             format!("ok · {pages_rendered}+{pages_skipped} pages · {duration_ms} ms"),
-            OK,
+            theme::OK,
         ),
-        BuildStatus::Failed { message } => (format!("build failed: {message}"), ERR),
+        BuildStatus::Failed { message } => (format!("build failed: {message}"), theme::ACCENT),
     };
-    label(move || text.clone())
-        .style(move |s| s.color(color).font_size(12.))
-        .into_any()
+    let failed = matches!(status, BuildStatus::Failed { .. });
+    h_stack((
+        dot(color),
+        label(move || text.clone())
+            .style(move |s| muted_text(s).apply_if(failed, |s| s.color(theme::ACCENT))),
+    ))
+    .style(|s| s.gap(theme::SPACE_6).items_center())
+    .into_any()
 }
 
 fn save_state_view(dirty: bool, error: Option<String>) -> AnyView {
     if let Some(msg) = error {
         return label(move || format!("save error: {msg}"))
-            .style(|s| s.color(ERR).font_size(12.))
+            .style(|s| s.color(theme::ACCENT).font_size(theme::UI_SMALL))
             .into_any();
     }
     if dirty {
-        return label(|| "unsaved".to_string())
-            .style(|s| s.color(WARN).font_size(12.))
+        return label(|| "Unsaved".to_string())
+            .style(|s| s.color(theme::WARN).font_size(theme::UI_SMALL))
             .into_any();
     }
-    label(|| "saved".to_string())
-        .style(|s| s.color(MUTED).font_size(12.))
-        .into_any()
+    label(|| "Saved".to_string()).style(muted_text).into_any()
 }
 
 fn serve_status_view(status: &ServeStatus) -> AnyView {
     match status {
         ServeStatus::Starting => label(|| "starting preview…".to_string())
-            .style(|s| s.color(MUTED).font_size(12.))
+            .style(muted_text)
             .into_any(),
         ServeStatus::Listening { url } => {
             let url_for_label = url.clone();
@@ -147,15 +145,14 @@ fn serve_status_view(status: &ServeStatus) -> AnyView {
                     let _ = Clipboard::set_contents(url_for_click.clone());
                 })
                 .style(|s| {
-                    s.color(MUTED)
-                        .font_size(12.)
+                    muted_text(s)
                         .cursor(floem::style::CursorStyle::Pointer)
-                        .hover(|s| s.color(FG))
+                        .hover(|s| s.color(theme::TEXT))
                 })
                 .into_any()
         }
         ServeStatus::Unavailable { .. } => label(|| "no preview".to_string())
-            .style(|s| s.color(MUTED).font_size(12.))
+            .style(muted_text)
             .into_any(),
     }
 }

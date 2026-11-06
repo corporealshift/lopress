@@ -11,9 +11,9 @@ use crate::actions::BlockAction;
 use crate::model::sync::set_link_on_range;
 use crate::model::types::{BlockBody, BlockId, EditorDoc};
 use crate::ui::blocks::inline_editor::ActionSink;
+use crate::ui::theme;
 use floem::event::{Event, EventListener};
 use floem::keyboard::{Key, NamedKey};
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::Position;
 use floem::views::{button, dyn_container, empty, h_stack, label, text_input, Decorators};
@@ -24,6 +24,9 @@ use std::rc::Rc;
 const FOOTER_HEIGHT: f64 = 28.0;
 /// Fixed height of the link bar itself.
 const BAR_HEIGHT: f64 = 38.0;
+const CONTROL_HEIGHT: f64 = 26.0;
+/// text_input draws from the top of its content box, so this centres the text.
+const INPUT_TEXT_TOP: f64 = 7.0;
 
 /// An in-progress link edit: which block, which byte range within that block's
 /// flattened inline text, and the URL buffer seed. Captured at the moment the
@@ -96,7 +99,11 @@ pub fn link_bar_view(
                 let cancel = move || link_edit.set(None);
 
                 h_stack((
-                    label(|| "Link URL".to_string()).style(|s| s.font_size(13.).margin_right(4.)),
+                    label(|| "Link URL".to_string()).style(|s| {
+                        s.font_size(theme::UI_SMALL)
+                            .color(theme::TEXT_MUTED)
+                            .margin_right(theme::SPACE_4)
+                    }),
                     text_input(url_buf)
                         .placeholder("https://\u{2026}")
                         .on_event_stop(EventListener::KeyDown, move |e: &Event| {
@@ -112,23 +119,36 @@ pub fn link_bar_view(
                         // target, so a pre-filled URL shows only its first ~20
                         // chars even though the box fills the bar. A percentage
                         // width makes the clip track the real (flex-grown) width.
-                        .style(|s| s.flex_grow(1.0f32).width_full().font_size(13.)),
+                        .style(|s| {
+                            s.flex_grow(1.0f32)
+                                .width_full()
+                                .height(CONTROL_HEIGHT)
+                                .padding_top(INPUT_TEXT_TOP)
+                                .padding_bottom(0.)
+                        }),
                     button(label(|| "Apply".to_string()))
-                        .on_event_stop(EventListener::PointerDown, move |_| apply()),
+                        .on_event_stop(EventListener::PointerDown, move |_| apply())
+                        .style(|s| {
+                            theme::primary_button(s)
+                                .height(CONTROL_HEIGHT)
+                                .padding_vert(0.)
+                        }),
                     button(label(|| "Remove".to_string()))
-                        .on_event_stop(EventListener::PointerDown, move |_| remove()),
+                        .on_event_stop(EventListener::PointerDown, move |_| remove())
+                        .style(|s| s.height(CONTROL_HEIGHT).padding_vert(0.)),
                     button(label(|| "Cancel".to_string()))
-                        .on_event_stop(EventListener::PointerDown, move |_| cancel()),
+                        .on_event_stop(EventListener::PointerDown, move |_| cancel())
+                        .style(|s| s.height(CONTROL_HEIGHT).padding_vert(0.)),
                 ))
                 .style(|s| {
                     s.width_full()
                         .height(BAR_HEIGHT)
-                        .gap(6.)
+                        .gap(theme::SPACE_6)
                         .items_center()
-                        .padding_horiz(10.)
-                        .background(Color::rgb8(250, 250, 252))
+                        .padding_horiz(theme::SPACE_16)
+                        .background(theme::DRAWER_BG)
                         .border_top(1.)
-                        .border_color(Color::rgb8(220, 220, 226))
+                        .border_color(theme::RULE)
                 })
                 .into_any()
             }

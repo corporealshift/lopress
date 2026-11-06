@@ -11,18 +11,13 @@
 //! `on_close()` so the editor pane can clear its `slash_menu_open` flag.
 
 use crate::model::descriptor;
+use crate::ui::theme;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
-use floem::peniko::Color;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_container, label, v_stack, v_stack_from_iter, Decorators};
 use floem::{AnyView, IntoView, View};
 use std::rc::Rc;
-
-const HIGHLIGHT_BG: Color = Color::rgb8(210, 220, 240);
-const POPUP_BG: Color = Color::rgb8(252, 252, 254);
-const BORDER: Color = Color::rgb8(210, 210, 215);
-const MUTED: Color = Color::rgb8(140, 140, 150);
 
 /// A slash-menu selection.
 #[derive(Debug, Clone)]
@@ -214,10 +209,10 @@ where
         }
     })
     .style(|s| {
-        s.padding_horiz(8.)
-            .padding_vert(4.)
-            .font_size(11.)
-            .color(MUTED)
+        s.padding_horiz(theme::SPACE_10)
+            .padding_vert(theme::SPACE_6)
+            .font_size(theme::UI_TINY)
+            .color(theme::TEXT_MUTED)
     });
 
     // Rows rebuild whenever the query changes; each row's highlight styling is
@@ -231,7 +226,11 @@ where
             let filtered = fuzzy_filter(items_for_rows.clone(), &query.get_untracked());
             if filtered.is_empty() {
                 return label(|| "No matching blocks".to_string())
-                    .style(|s| s.padding_horiz(8.).padding_vert(4.).color(MUTED))
+                    .style(|s| {
+                        s.padding_horiz(theme::SPACE_10)
+                            .padding_vert(theme::SPACE_6)
+                            .color(theme::TEXT_MUTED)
+                    })
                     .into_any();
             }
             let mut rows: Vec<AnyView> = Vec::with_capacity(filtered.len());
@@ -250,18 +249,23 @@ where
                         EventPropagation::Continue
                     })
                     .style(move |s| {
-                        let s = s.padding_horiz(8.).padding_vert(4.).width_full();
+                        let s = s
+                            .padding_horiz(theme::SPACE_10)
+                            .padding_vert(theme::SPACE_6)
+                            .width_full()
+                            .border_radius(theme::CORNER_SM);
                         if highlight.get() == i {
-                            s.background(HIGHLIGHT_BG)
+                            s.background(theme::ROW_HOVER_BG)
                         } else {
                             s
                         }
                     });
                 rows.push(row.into_any());
             }
-            v_stack_from_iter(rows).into_any()
+            v_stack_from_iter(rows).style(|s| s.width_full()).into_any()
         },
-    );
+    )
+    .style(|s| s.width_full());
 
     let items_for_key = items;
     let on_select_for_key = on_select;
@@ -329,13 +333,7 @@ where
                 _ => EventPropagation::Continue,
             }
         })
-        .style(|s| {
-            s.background(POPUP_BG)
-                .border(1.)
-                .border_color(BORDER)
-                .border_radius(4.)
-                .min_width(200.)
-        });
+        .style(|s| theme::floating(s).padding(theme::SPACE_4).min_width(200.));
 
     let popup_id = popup.id();
     create_effect(move |_| {

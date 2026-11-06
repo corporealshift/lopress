@@ -8,24 +8,24 @@
 use crate::ui::blocks::inline_editor::is_save_key;
 use crate::ui::editing::notes::NotesState;
 use crate::ui::editing::save_pipeline::SaveSink;
-use floem::peniko::Color;
+use crate::ui::icons::{self, dot};
+use crate::ui::theme;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::keypress::default_key_handler;
-use floem::views::{dyn_container, empty, h_stack, label, text_editor_keys, v_stack, Decorators};
+use floem::views::{
+    container, dyn_container, empty, h_stack, label, svg, text_editor_keys, v_stack, Decorators,
+};
 use floem::{AnyView, IntoView};
 use lapce_xi_rope::Rope;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-const HEADER_HEIGHT: f64 = 28.0;
+const HEADER_HEIGHT: f64 = 34.0;
+const CHEVRON_SIZE: f64 = 10.0;
 /// Share of the window the drawer takes when open.
 const OPEN_HEIGHT_PCT: f64 = 40.0;
-const BG: Color = Color::rgb8(250, 250, 250);
-const BORDER: Color = Color::rgb8(220, 220, 220);
-const LABEL_FG: Color = Color::rgb8(110, 110, 120);
-const ERR_FG: Color = Color::rgb8(170, 40, 40);
 
 /// Build the drawer. Hidden when no document is open.
 pub fn notes_drawer_view(
@@ -51,8 +51,8 @@ pub fn notes_drawer_view(
         s.width_full()
             .flex_shrink(0.0f32)
             .border_top(1.)
-            .border_color(BORDER)
-            .background(BG)
+            .border_color(theme::RULE)
+            .background(theme::DRAWER_BG)
             .apply_if(open, |s| s.height_pct(OPEN_HEIGHT_PCT))
             .apply_if(!open, |s| s.height(HEADER_HEIGHT))
             .apply_if(current_path.get().is_none(), |s| s.hide())
@@ -61,27 +61,28 @@ pub fn notes_drawer_view(
 
 /// The always-visible bar: toggle, "has notes" marker, and any error.
 fn header(notes: NotesState) -> impl IntoView {
-    let title = label(move || {
-        if notes.open.get() {
-            "\u{25be} Notes".to_string()
-        } else {
-            "\u{25b8} Notes".to_string()
-        }
-    })
-    .style(|s| {
-        s.font_size(12.)
-            .font_weight(Weight::SEMIBOLD)
-            .color(LABEL_FG)
+    let chevron = svg(icons::CHEVRON_RIGHT)
+        .update_value(move || {
+            if notes.open.get() {
+                icons::CHEVRON_DOWN
+            } else {
+                icons::CHEVRON_RIGHT
+            }
+        })
+        .style(|s| {
+            s.width(CHEVRON_SIZE)
+                .height(CHEVRON_SIZE)
+                .color(theme::TEXT_SOFT)
+        });
+
+    let title = label(|| "Notes".to_string()).style(|s| {
+        s.font_size(theme::UI)
+            .font_weight(Weight::MEDIUM)
+            .color(theme::TEXT_SOFT)
     });
 
-    let marker = label(move || {
-        if notes.text.with(|t| t.trim().is_empty()) {
-            String::new()
-        } else {
-            "\u{25cf}".to_string()
-        }
-    })
-    .style(|s| s.font_size(9.).color(LABEL_FG));
+    let marker = container(dot(theme::ACCENT))
+        .style(move |s| s.apply_if(notes.text.with(|t| t.trim().is_empty()), |s| s.hide()));
 
     let error = label(move || {
         notes
@@ -90,16 +91,21 @@ fn header(notes: NotesState) -> impl IntoView {
             .or_else(|| notes.save_error.get())
             .unwrap_or_default()
     })
-    .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0f32));
+    .style(|s| {
+        s.font_size(theme::UI_TINY)
+            .color(theme::ACCENT)
+            .flex_grow(1.0f32)
+    });
 
-    h_stack((title, marker, error))
+    h_stack((chevron, title, marker, error))
         .style(|s| {
             s.width_full()
                 .height(HEADER_HEIGHT)
                 .flex_shrink(0.0f32)
                 .items_center()
-                .gap(6.)
-                .padding_horiz(10.)
+                .gap(theme::SPACE_8)
+                .padding_horiz(theme::SPACE_16)
+                .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| notes.open.update(|open| *open = !*open))
 }
@@ -151,6 +157,12 @@ fn notes_editor(notes: NotesState, on_save: SaveSink) -> AnyView {
 
     text_ed
         .editor_style(|s| s.hide_gutter(true))
-        .style(|s| s.width_full().height_full().font_size(13.).padding(8.))
+        .style(|s| {
+            s.width_full()
+                .height_full()
+                .font_size(theme::UI)
+                .padding_horiz(theme::SPACE_16)
+                .padding_vert(theme::SPACE_8)
+        })
         .into_any()
 }

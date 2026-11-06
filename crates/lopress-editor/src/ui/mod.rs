@@ -7,6 +7,7 @@ pub mod dnd;
 pub mod editing;
 pub mod editor_pane;
 pub mod footer;
+pub mod icons;
 pub mod inspector;
 pub mod link_bar;
 
@@ -14,15 +15,15 @@ pub mod nav_editor;
 pub mod notes_drawer;
 pub mod sidebar;
 pub mod slash_menu;
+pub mod theme;
+pub mod toggle;
 pub mod toolbar;
 pub mod welcome;
 
 use floem::event::{Event, EventListener, EventPropagation};
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::Position;
 use floem::text::Weight;
-use floem::unit::PxPctAuto;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::{button, dyn_container, empty, h_stack, label, stack, v_stack, Decorators};
 use floem::IntoView;
@@ -34,6 +35,9 @@ use crate::model::types::{BlockId, EditorDoc};
 use crate::settings::{self, Settings};
 use crate::state::{AppContext, AppState, EditingState, WelcomeState};
 use crate::ui::dnd::DndState;
+
+/// Space above the site settings panel.
+const SETTINGS_TOP_PADDING: f64 = 60.0;
 #[cfg(debug_assertions)]
 use crate::ui::editing::ctrl_wire;
 use crate::ui::editing::new_doc;
@@ -177,7 +181,7 @@ pub(crate) fn root_view(
             .into_any(),
         },
     )
-    .style(|s| s.width_full().height_full())
+    .style(|s| theme::root_style(s.width_full().height_full()))
     // floem offers the main view any key the focused view left unprocessed.
     .on_event(EventListener::KeyDown, move |e| {
         if let Event::KeyDown(key_event) = e {
@@ -209,7 +213,7 @@ fn favicon_section(
                 .or_else(|| current_favicon.clone())
                 .unwrap_or_else(|| "(none)".to_string());
             label(move || format!("Favicon: {text}"))
-                .style(|s| s.font_size(12.).color(Color::rgb8(100, 100, 110)))
+                .style(|s| s.font_size(theme::UI_SMALL).color(theme::TEXT_MUTED))
                 .into_any()
         },
     );
@@ -224,26 +228,29 @@ fn favicon_section(
             };
             favicon_change.set(FaviconChange::Set(path));
         })
-        .style(|s| s.padding_vert(4.).padding_horiz(10.).font_size(12.));
+        .style(|s| {
+            s.padding_vert(theme::SPACE_4)
+                .padding_horiz(theme::SPACE_10)
+                .font_size(theme::UI_SMALL)
+        });
 
     let remove_btn = button(label(|| "Remove".to_string()))
         .action(move || favicon_change.set(FaviconChange::Remove))
         .style(|s| {
-            s.padding_vert(4.)
-                .padding_horiz(10.)
-                .font_size(12.)
-                .color(Color::rgb8(200, 60, 60))
+            s.padding_vert(theme::SPACE_4)
+                .padding_horiz(theme::SPACE_10)
+                .font_size(theme::UI_SMALL)
+                .color(theme::ACCENT)
         });
 
     let controls = h_stack((choose_btn, remove_btn)).style(|s| s.gap(6.));
 
     v_stack((status, controls))
         .style(|s| {
-            s.gap(4.)
-                .padding(8.)
-                .border(1.)
-                .border_color(Color::rgb8(220, 220, 220))
-                .border_radius(4.)
+            theme::card(s)
+                .gap(theme::SPACE_4)
+                .padding(theme::SPACE_8)
+                .width_full()
         })
         .into_any()
 }
@@ -468,7 +475,12 @@ fn editing_view(
         restore_selection,
         save_hooks,
     )
-    .style(|s| s.flex_grow(1.0f32).height_full().min_height(0.));
+    .style(|s| {
+        s.flex_grow(1.0f32)
+            .height_full()
+            .min_height(0.)
+            .min_width(0.)
+    });
 
     let inspector = inspector_view(current_doc, current_path, on_action.clone());
 
@@ -569,40 +581,52 @@ fn editing_view(
                 move || nav_save_error.get(),
                 move |err| match err {
                     Some(e) => label(move || e.clone())
-                        .style(|s| s.color(Color::rgb8(200, 60, 60)).font_size(12.))
+                        .style(|s| s.color(theme::ACCENT).font_size(theme::UI_SMALL))
                         .into_any(),
                     None => empty().into_any(),
                 },
             );
 
-            v_stack((
-                label(|| "Site settings".to_string())
-                    .style(|s| s.font_size(15.).font_weight(Weight::SEMIBOLD)),
+            let panel = v_stack((
+                label(|| "Site settings".to_string()).style(|s| {
+                    s.font_size(theme::UI)
+                        .font_weight(Weight::SEMIBOLD)
+                        .color(theme::TEXT)
+                }),
                 error_line,
                 favicon_section(favicon_change, current_favicon),
                 nav_editor::nav_editor_view(model_sig, pages, tags, on_save, on_cancel),
             ))
             .style(|s| {
-                s.background(Color::rgb8(255, 255, 255))
-                    .border(1.)
-                    .border_color(Color::rgb8(200, 200, 200))
-                    .border_radius(8.)
-                    .padding(16.)
-                    .margin_top(60.)
-                    .margin_horiz(PxPctAuto::Auto)
-            })
-            .into_any()
+                theme::floating(s)
+                    .padding(theme::SPACE_16)
+                    .gap(theme::SPACE_12)
+            });
+
+            // The scrim's padding places the panel: a margin on the panel would
+            // move its paint but not its hit box.
+            v_stack((panel,))
+                .style(|s| {
+                    s.width_full()
+                        .height_full()
+                        .items_center()
+                        .padding_top(SETTINGS_TOP_PADDING)
+                        .background(theme::SCRIM)
+                })
+                .on_event_stop(EventListener::PointerDown, |_| {})
+                .into_any()
         },
     )
-    // Follow the slash-menu overlay pattern: a full-width, content-height
-    // absolute layer. Omitting `height_full` means the closed (empty) branch
-    // collapses to zero height and does not intercept clicks to the editor
-    // underneath. Cancel/Save close the panel.
-    .style(|s| {
+    // Follow the slash-menu overlay pattern: an absolute layer that's
+    // `height_full` only while open, so the closed (empty) branch collapses to
+    // zero height and does not intercept clicks to the editor underneath.
+    // Cancel/Save close the panel.
+    .style(move |s| {
         s.position(Position::Absolute)
             .inset_top(0.)
             .inset_left(0.)
             .width_full()
+            .apply_if(nav_editor_open.get(), |s| s.height_full())
     });
 
     let notes_drawer = notes_drawer::notes_drawer_view(notes, current_path, on_save);

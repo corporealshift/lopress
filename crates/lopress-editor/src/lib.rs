@@ -40,6 +40,8 @@ pub enum AppError {
 /// # Errors
 /// Returns `AppError::Launch` if the Floem runtime fails to start.
 pub fn run() -> Result<(), AppError> {
+    ui::theme::load_fonts();
+
     // ── Load settings ──────────────────────────────────────────────────────
     let settings = match (settings::default_path(), settings::legacy_recents_path()) {
         (Some(ref s), Some(ref r)) => Settings::load_or_migrate(s, r).unwrap_or_default(),
