@@ -3,18 +3,14 @@
 //! Drawn over the whole window like the site settings modal. A native dialog
 //! would block the event loop and couldn't follow the app's theme.
 
+use crate::ui::theme;
 use floem::event::EventListener;
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::style::Position;
 use floem::unit::PxPctAuto;
 use floem::views::{button, dyn_container, empty, h_stack_from_iter, label, v_stack, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
-
-const BACKDROP: Color = Color::rgba8(0, 0, 0, 60);
-const PANEL_BG: Color = Color::rgb8(255, 255, 255);
-const PANEL_BORDER: Color = Color::rgb8(200, 200, 200);
 
 /// One button in the dialog. The dialog closes before `run` is called.
 #[derive(Clone)]
@@ -78,23 +74,20 @@ fn dialog(slot: ConfirmSlot, request: ConfirmRequest) -> AnyView {
     });
     let message = request.message;
     let panel = v_stack((
-        label(move || message.to_string()).style(|s| s.font_size(14.)),
+        label(move || message.to_string()).style(|s| s.font_size(theme::UI).color(theme::TEXT)),
         h_stack_from_iter(buttons).style(|s| s.gap(8.).justify_end().width_full()),
     ))
     .style(|s| {
-        s.gap(16.)
+        theme::floating(s)
+            .gap(theme::SPACE_16)
             .width(380.)
-            .padding(16.)
+            .padding(theme::SPACE_16)
             .margin_top(120.)
             .margin_horiz(PxPctAuto::Auto)
-            .background(PANEL_BG)
-            .border(1.)
-            .border_color(PANEL_BORDER)
-            .border_radius(8.)
     });
     // Everything under the backdrop waits for an answer.
     v_stack((panel,))
-        .style(|s| s.width_full().height_full().background(BACKDROP))
+        .style(|s| s.width_full().height_full().background(theme::SCRIM))
         .on_event_stop(EventListener::PointerDown, |_| {})
         .into_any()
 }

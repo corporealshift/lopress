@@ -7,13 +7,19 @@ use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
     ActionSink, ActiveCommitSlot, FocusPublisher, SelectionRestoreSlot,
 };
-use crate::ui::dnd::{append_block_button, gap_drop_zone, DndState};
+use crate::ui::dnd::{append_block_button, gap_drop_zone, DndState, HANDLE_WIDTH};
 use crate::ui::slash_menu::{slash_menu, SlashChoice};
+use crate::ui::theme;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{
     button, dyn_container, empty, label, scroll, stack, v_stack_from_iter, Decorators,
 };
 use floem::{AnyView, IntoView};
+
+/// The article column: the text, a handle's width either side of it, and the
+/// column's own padding.
+const COLUMN_WIDTH: f32 = theme::TEXT_MEASURE + 2.0 * HANDLE_WIDTH + 2.0 * theme::SPACE_16;
+const COLUMN_TOP_PADDING: f32 = 56.0;
 use std::rc::Rc;
 
 /// Render the editor pane: vertical scroll container, max content width 720
@@ -61,8 +67,8 @@ pub fn editor_pane(
         None => label(|| "No document open. Pick one from the sidebar.".to_string())
             .style(|s| {
                 s.width_full()
-                    .padding(24.)
-                    .color(floem::peniko::Color::rgb8(140, 140, 140))
+                    .padding(theme::SPACE_24)
+                    .color(theme::TEXT_MUTED)
             })
             .into_any(),
         Some(_) => match current_doc.with_untracked(|d| d.clone()) {
@@ -190,7 +196,12 @@ pub fn editor_pane(
             .width_full()
     });
 
-    stack((scroll_view, menu_overlay)).style(|s| s.width_full().height_full().min_height(0.))
+    stack((scroll_view, menu_overlay)).style(|s| {
+        s.width_full()
+            .height_full()
+            .min_height(0.)
+            .background(theme::PAGE_BG)
+    })
 }
 
 /// Build the centered column of block views for `doc`. Rebuilt by the pane's
@@ -257,10 +268,12 @@ fn block_column(
     }
     v_stack_from_iter(rows)
         .style(|s| {
-            s.max_width(720.)
+            s.max_width(COLUMN_WIDTH)
                 .width_full()
                 .margin_horiz(floem::unit::PxPctAuto::Auto)
-                .padding(24.)
+                .padding_horiz(theme::SPACE_16)
+                .padding_top(COLUMN_TOP_PADDING)
+                .padding_bottom(theme::SPACE_24)
         })
         .into_any()
 }

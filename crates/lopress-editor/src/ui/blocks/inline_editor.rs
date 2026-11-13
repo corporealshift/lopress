@@ -7,6 +7,7 @@ use crate::model::sync::{inline_runs_to_rope_and_spans, rope_and_spans_to_runs};
 use crate::model::types::{BlockId, EditorDoc, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::style_span::InlineRunStyling;
+use crate::ui::theme::TextRole;
 use floem::event::{Event, EventListener};
 use floem::reactive::{
     create_effect, create_memo, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
@@ -26,9 +27,6 @@ use floem::View;
 use lapce_xi_rope::Rope;
 
 use std::rc::Rc;
-
-/// Caret color for inline block editors — dark enough to contrast on white.
-const CARET_COLOR: floem::peniko::Color = floem::peniko::Color::rgb8(40, 40, 40);
 
 /// Callback used by editable widgets to push every block-tree mutation
 /// through the `actions::apply` chokepoint.
@@ -148,7 +146,7 @@ pub(crate) fn accept_visual_lines(
 
 /// Build a `BlockEditorState` for an inline block, initialised from `runs`.
 /// Creates the `TextDocument`, `InlineRunStyling`, and `Editor` in scope `cx`.
-pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> BlockEditorState {
+pub fn build_block_editor(cx: Scope, runs: &[InlineRun], role: TextRole) -> BlockEditorState {
     let (rope, spans) = inline_runs_to_rope_and_spans(runs);
     // Convert 0.4.0 Rope → String so we can pass it to TextDocument::new (which
     // uses xi-rope 0.3.2 internally — a different crate version from the workspace).
@@ -162,7 +160,8 @@ pub fn build_block_editor(cx: Scope, runs: &[InlineRun], font_size: usize) -> Bl
         spans: spans_sig,
         text: text_sig,
         rev: style_rev,
-        font_size,
+        role,
+        families: role.families(),
     });
 
     // Pass `initial_text` (String) — xi-rope 0.3.2 implements `From<T: AsRef<str>>` for Rope,
@@ -382,11 +381,7 @@ pub fn mount_block_editor(
     editor_sig.with_untracked(|ed| ed.editor_view_id.set(Some(view_id)));
 
     let view = view
-        .style(|s| {
-            s.size_full()
-                .cursor(floem::style::CursorStyle::Text)
-                .set(floem::style::CursorColor, CARET_COLOR)
-        })
+        .style(|s| s.size_full().cursor(floem::style::CursorStyle::Text))
         .on_event_cont(EventListener::FocusGained, move |_| {
             focused.set(true);
             editor_sig.with_untracked(|ed| ed.editor_view_focused.notify());

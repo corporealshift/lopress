@@ -1,31 +1,17 @@
-//! Heading rendering. Levels 1..=6 map to 32 / 26 / 22 / 18 / 16 / 14 logical
-//! pixels and render semibold. The editable path wraps the inline-runs
-//! editor at the appropriate font size; the read-only path is preserved for
-//! callers that don't yet need editing.
+//! Heading rendering. Levels 1..=6 map to the heading roles in `ui/theme.rs`.
+//! The editable path wraps the inline-runs editor in the level's role; the
+//! read-only path is preserved for callers that don't yet need editing.
 
 use crate::model::types::{BlockId, InlineRun};
 use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{build_block_editor, editable_inline};
-use crate::ui::blocks::paragraph::render_runs_with_size;
+use crate::ui::blocks::paragraph::render_runs;
+use crate::ui::theme::heading_role;
 use floem::reactive::Scope;
 use floem::views::{container, Decorators};
 use floem::IntoView;
 
-fn font_size_for(level: u8) -> f32 {
-    match level {
-        1 => 32.0,
-        2 => 26.0,
-        3 => 22.0,
-        4 => 18.0,
-        5 => 16.0,
-        _ => 14.0,
-    }
-}
-
-/// Editable heading: inline-runs editor at the level's font size, semibold.
-// Font sizes are small positive integer-valued constants, so the f32->usize
-// conversion is exact.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+/// Editable heading: inline-runs editor in the level's role.
 pub fn render_heading_editable(
     level: u8,
     runs: &[InlineRun],
@@ -33,7 +19,7 @@ pub fn render_heading_editable(
     env: &BlockEnv,
 ) -> impl IntoView {
     let cx = Scope::current();
-    let state = build_block_editor(cx, runs, font_size_for(level) as usize);
+    let state = build_block_editor(cx, runs, heading_role(level));
     // The inner editor carries a rigid `height`; the heading's vertical
     // padding goes on an outer container so it cannot squeeze the editor's
     // content box and let the text overflow into the adjacent block.
@@ -43,6 +29,5 @@ pub fn render_heading_editable(
 
 /// Read-only heading rendering, kept for any non-editable surfaces.
 pub fn render_heading(level: u8, runs: &[InlineRun]) -> impl IntoView {
-    render_runs_with_size(runs, font_size_for(level), true)
-        .style(|s| s.padding_top(16.).padding_bottom(8.))
+    render_runs(runs, heading_role(level)).style(|s| s.padding_top(16.).padding_bottom(8.))
 }

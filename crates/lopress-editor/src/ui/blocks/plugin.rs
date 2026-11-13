@@ -19,8 +19,9 @@ use crate::ui::blocks::env::{BlockEnv, FieldHooks};
 use crate::ui::blocks::inline_editor::{accept_visual_lines, block_height_px, ActionSink};
 use crate::ui::blocks::inline_editor::{is_save_key, CommitClosure};
 use crate::ui::blocks::{code_editor, heading, list, paragraph};
+use crate::ui::theme;
+use crate::ui::toggle::toggle;
 use floem::keyboard::{Key, Modifiers};
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::editor::command::CommandExecuted;
@@ -31,18 +32,14 @@ use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::keypress::press::KeyPress;
 use floem::views::editor::Editor;
-use floem::views::{
-    checkbox, h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators,
-};
+use floem::views::{h_stack_from_iter, label, text_input, v_stack, v_stack_from_iter, Decorators};
 use floem::{AnyView, IntoView};
 use lopress_plugin::{AttrDecl, AttrType};
 use serde_json::Value;
 use std::rc::Rc;
 
-const HEADER_BG: Color = Color::rgb8(238, 234, 250);
-const HEADER_FG: Color = Color::rgb8(80, 60, 130);
-const FORM_BG: Color = Color::rgb8(250, 250, 252);
-const BORDER: Color = Color::rgb8(220, 215, 235);
+/// Matches the inspector's inputs.
+const INPUT_HEIGHT: f64 = 32.0;
 
 /// Build the full plugin block view.
 pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
@@ -61,13 +58,9 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
         move || name.clone()
     })
     .style(|s| {
-        s.padding_horiz(8.)
-            .padding_vert(2.)
-            .background(HEADER_BG)
-            .color(HEADER_FG)
-            .font_size(11.)
+        s.color(theme::TEXT_MUTED)
+            .font_size(theme::UI_SMALL)
             .font_weight(Weight::SEMIBOLD)
-            .border_radius(3.)
     });
 
     let attrs_sig: RwSignal<serde_json::Map<String, Value>> = RwSignal::new(meta.attrs.clone());
@@ -92,12 +85,9 @@ pub fn plugin_block_view(block: &EditorBlock, env: &BlockEnv) -> AnyView {
     let focus_pub = env.focus_pub;
     v_stack((header, form))
         .style(|s| {
-            s.gap(4.)
-                .padding(6.)
-                .border(1.)
-                .border_color(BORDER)
-                .border_radius(4.)
-                .background(FORM_BG)
+            theme::card(s)
+                .gap(theme::SPACE_8)
+                .padding(theme::SPACE_12)
                 .width_full()
         })
         .on_event(floem::event::EventListener::PointerDown, move |_| {
@@ -152,20 +142,19 @@ fn attr_row(
     let lbl_text = decl.label.clone().unwrap_or(name.clone());
     let lbl = label(move || lbl_text.clone()).style(|s| {
         s.min_width(80.)
-            .color(Color::rgb8(110, 100, 130))
-            .font_size(12.)
+            .color(theme::TEXT_MUTED)
+            .font_size(theme::UI_SMALL)
             // Rows are items_start-aligned (help text may sit under the
             // input); nudge the label down to line up with the input text.
-            .padding_top(3.)
+            .padding_top(theme::SPACE_8)
     });
 
     let help_text = decl.help.clone();
     let help_row = help_text.map(|h| {
         label(move || h.clone()).style(|s| {
-            s.font_size(10.)
-                .color(Color::rgb8(140, 130, 160))
-                .padding_top(1.)
-                .padding_horiz(4.)
+            s.font_size(theme::UI_TINY)
+                .color(theme::TEXT_MUTED)
+                .padding_top(theme::SPACE_2)
         })
     });
 
@@ -286,7 +275,14 @@ fn attr_text(
         // `width_full` (not a min_width): floem's text_input clips visible
         // text to a couple dozen chars unless it has an explicit width, even
         // when its box is stretched by flex.
-        .style(|s| s.font_size(12.).padding_horiz(4.).width_full())
+        .style(|s| {
+            // text_input draws from the top of its content box, so this
+            // centres the text.
+            s.width_full()
+                .height(INPUT_HEIGHT)
+                .padding_top(theme::SPACE_10)
+                .padding_bottom(theme::SPACE_6)
+        })
 }
 
 /// Multi-line text input for `ui = "textarea"`. Commits the live document on
@@ -426,15 +422,13 @@ fn attr_textarea(
         .style(move |s| {
             let line_height = ed_for_style.line_height(0);
             let lines = visual_lines.get().max(MIN_LINES);
-            s.font_size(12.)
-                .padding_horiz(4.)
-                .padding_vert(2.)
+            s.font_size(theme::UI_SMALL)
+                .padding_horiz(theme::SPACE_10)
+                .padding_vert(3.)
                 .width_full()
                 .height(block_height_px(lines, line_height) + CHROME_PX)
-                .border(1.)
-                .border_color(Color::rgb8(200, 200, 210))
-                .border_radius(4.)
-                .background(Color::WHITE)
+                .border_radius(theme::CORNER_MD)
+                .background(theme::FIELD_BG)
         })
 }
 
@@ -489,18 +483,20 @@ fn attr_checkbox(
     let checked: RwSignal<bool> = RwSignal::new(
         attrs_sig.with_untracked(|m| m.get(&name).and_then(Value::as_bool).unwrap_or(false)),
     );
-    checkbox(move || checked.get()).on_click_stop(move |_| {
-        let new_value = !checked.get_untracked();
-        checked.set(new_value);
-        attrs_sig.update(|m| {
-            m.insert(name.clone(), Value::Bool(new_value));
-        });
-        let new_attrs = attrs_sig.get_untracked();
-        on_action(BlockAction::EditAttrs {
-            block_id,
-            new_attrs: Box::new(new_attrs),
-        });
-    })
+    toggle(
+        move || checked.get(),
+        move |new_value| {
+            checked.set(new_value);
+            attrs_sig.update(|m| {
+                m.insert(name.clone(), Value::Bool(new_value));
+            });
+            let new_attrs = attrs_sig.get_untracked();
+            on_action(BlockAction::EditAttrs {
+                block_id,
+                new_attrs: Box::new(new_attrs),
+            });
+        },
+    )
 }
 
 fn attr_select(
@@ -540,9 +536,13 @@ fn attr_select(
                 });
             })
             .style(move |s| {
-                let s = s.font_size(11.).padding_horiz(6.).padding_vert(1.);
+                let s = s
+                    .font_size(theme::UI_TINY)
+                    .padding_horiz(theme::SPACE_6)
+                    .padding_vert(1.);
                 if selected.get().as_deref() == Some(opt.as_str()) {
-                    s.background(Color::rgb8(210, 220, 240))
+                    s.background(theme::ACCENT_TINT)
+                        .color(theme::ACCENT)
                         .font_weight(Weight::SEMIBOLD)
                 } else {
                     s

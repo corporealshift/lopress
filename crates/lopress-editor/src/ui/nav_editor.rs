@@ -4,9 +4,8 @@
 //! Floem views. It manages a list of `NavRow` items with add/remove/reorder
 //! operations. The Floem view (`nav_editor_view`) binds the model to inputs.
 
-use floem::peniko::Color;
+use crate::ui::theme;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
-use floem::text::Weight;
 use floem::views::{
     button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, v_stack_from_iter,
     Decorators,
@@ -207,33 +206,28 @@ pub fn nav_editor_view(
             let items = model.get_untracked().to_nav_items();
             on_save(items);
         })
-        .style(|s| {
-            s.padding_horiz(16.)
-                .padding_vert(6.)
-                .font_size(14.)
-                .font_weight(Weight::SEMIBOLD)
-        });
+        .style(|s| theme::primary_button(s).padding_horiz(theme::SPACE_16));
 
     let cancel_btn = button(label(|| "Cancel".to_string()))
         .action(on_cancel)
-        .style(|s| s.padding_horiz(16.).padding_vert(6.).font_size(14.));
+        .style(|s| s.padding_horiz(theme::SPACE_16));
 
     let add_btn = button(label(|| "+ Add link".to_string()))
         .action(move || model.update(|m| m.add_row()))
-        .style(|s| s.padding_vert(4.).font_size(12.));
+        .style(|s| s.padding_vert(theme::SPACE_4).font_size(theme::UI_SMALL));
 
     let page_btn = button(label(|| "Link to page \u{25be}".to_string())) // ▾
         .action(move || {
             tag_picker_open.set(false);
             page_picker_open.update(|v| *v = !*v);
         })
-        .style(|s| s.padding_vert(4.).padding_horiz(8.).font_size(12.));
+        .style(picker_button);
     let tag_btn = button(label(|| "Link to tag \u{25be}".to_string())) // ▾
         .action(move || {
             page_picker_open.set(false);
             tag_picker_open.update(|v| *v = !*v);
         })
-        .style(|s| s.padding_vert(4.).padding_horiz(8.).font_size(12.));
+        .style(picker_button);
 
     let top_row = h_stack((add_btn, page_btn, tag_btn)).style(|s| s.gap(6.).items_center());
 
@@ -298,15 +292,25 @@ pub fn nav_editor_view(
                     for (i, row) in m.rows.iter().enumerate() {
                         rows.push(nav_row_view(model, i, total, row));
                     }
-                    v_stack_from_iter(rows).style(|s| s.gap(4.))
+                    v_stack_from_iter(rows).style(|s| s.gap(theme::SPACE_6).width_full())
                 },
             )
-            .style(|s| s.min_height(150.).max_height(300.)),
+            .style(|s| s.min_height(150.).max_height(300.).width_full()),
         )
-        .style(|s| s.flex_grow(1.0f32)),
+        .style(|s| s.flex_grow(1.0f32).width_full()),
         footer,
     ))
-    .style(|s| s.gap(8.).padding(16.).width(480.))
+    .style(|s| s.gap(theme::SPACE_8).width(480.))
+}
+
+fn picker_button(s: floem::style::Style) -> floem::style::Style {
+    s.padding_vert(theme::SPACE_4)
+        .padding_horiz(theme::SPACE_8)
+        .font_size(theme::UI_SMALL)
+}
+
+fn row_button(s: floem::style::Style) -> floem::style::Style {
+    s.padding(theme::SPACE_4).font_size(theme::UI_SMALL)
 }
 
 /// A popup list of choices for a picker. Each entry shows `labels[i]` and,
@@ -325,9 +329,9 @@ fn picker_popup(
             .action(move || on_sel(val.clone(), lbl.clone()))
             .style(|s| {
                 s.width_full()
-                    .font_size(12.)
-                    .padding_vert(2.)
-                    .padding_horiz(6.)
+                    .font_size(theme::UI_SMALL)
+                    .padding_vert(theme::SPACE_2)
+                    .padding_horiz(theme::SPACE_6)
             });
         entries.push(btn.into_any());
     }
@@ -335,20 +339,18 @@ fn picker_popup(
         entries.push(
             label(|| "(none)".to_string())
                 .style(|s| {
-                    s.font_size(11.)
-                        .padding(4.)
-                        .color(Color::rgb8(150, 150, 160))
+                    s.font_size(theme::UI_TINY)
+                        .padding(theme::SPACE_4)
+                        .color(theme::PLACEHOLDER)
                 })
                 .into_any(),
         );
     }
     v_stack_from_iter(entries)
         .style(|s| {
-            s.gap(2.)
-                .border(1.)
-                .border_color(Color::rgb8(210, 210, 210))
-                .border_radius(4.)
-                .padding(4.)
+            theme::card(s)
+                .gap(theme::SPACE_2)
+                .padding(theme::SPACE_4)
                 .max_height(160.)
         })
         .into_any()
@@ -367,38 +369,41 @@ fn nav_row_view(model: RwSignal<NavModel>, index: usize, total: usize, row: &Nav
             model.update(|m| m.set_label(index, label_buf.get_untracked()));
             floem::event::EventPropagation::Continue
         })
-        .style(|s| s.min_width(120.).font_size(12.));
+        .style(|s| s.width_full());
 
     let href_input = text_input(href_buf)
         .on_event(floem::event::EventListener::FocusLost, move |_| {
             model.update(|m| m.set_href(index, href_buf.get_untracked()));
             floem::event::EventPropagation::Continue
         })
-        .style(|s| s.min_width(120.).font_size(12.));
+        .style(|s| s.width_full());
 
     let up_btn = button(label(|| "\u{2191}".to_string())) // ↑
         .action(move || model.update(|m| m.move_up(index)))
         .disabled(move || index == 0)
-        .style(|s| s.padding(4.).font_size(12.));
+        .style(row_button);
 
     let down_btn = button(label(|| "\u{2193}".to_string())) // ↓
         .action(move || model.update(|m| m.move_down(index)))
         .disabled(move || index + 1 >= total)
-        .style(|s| s.padding(4.).font_size(12.));
+        .style(row_button);
 
     let remove_btn = button(label(|| "\u{2715}".to_string())) // ✕
         .action(move || model.update(|m| m.remove_row(index)))
-        .style(|s| s.padding(4.).font_size(12.).color(Color::rgb8(200, 60, 60)));
+        .style(|s| {
+            s.padding(theme::SPACE_4)
+                .font_size(theme::UI_SMALL)
+                .color(theme::ACCENT)
+        });
 
     let controls = h_stack((up_btn, down_btn, remove_btn)).style(|s| s.gap(2.).items_center());
 
     v_stack((label_input, href_input, controls))
         .style(|s| {
-            s.gap(4.)
-                .padding(6.)
-                .border(1.)
-                .border_color(Color::rgb8(220, 220, 220))
-                .border_radius(4.)
+            theme::card(s)
+                .gap(theme::SPACE_4)
+                .padding(theme::SPACE_8)
+                .width_full()
         })
         .into_any()
 }

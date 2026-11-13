@@ -7,27 +7,25 @@
 //! active (`current_path`), so we can highlight that row.
 
 use chrono::Local;
-use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet};
 use floem::text::Weight;
 use floem::views::{
-    button, dyn_container, h_stack_from_iter, label, scroll, v_stack, v_stack_from_iter, Decorators,
+    button, dyn_container, h_stack, h_stack_from_iter, label, scroll, v_stack, v_stack_from_iter,
+    Decorators,
 };
 use floem::{AnyView, IntoView};
 use lopress_gui_host::{DocumentRef, WorkspaceSummary};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use crate::ui::icons::{self, icon};
+use crate::ui::theme;
+
 const SIDEBAR_WIDTH: f64 = 220.0;
-const BG: Color = Color::rgb8(248, 248, 248);
-const BORDER: Color = Color::rgb8(220, 220, 220);
-const ACTIVE_BG: Color = Color::rgb8(220, 230, 250);
-const HOVER_BG: Color = Color::rgb8(238, 238, 240);
-const GROUP_FG: Color = Color::rgb8(110, 110, 120);
-const PILL_DRAFT_BG: Color = Color::rgb8(255, 240, 200);
-const PILL_DRAFT_FG: Color = Color::rgb8(140, 100, 0);
-const PILL_ERR_BG: Color = Color::rgb8(255, 220, 220);
-const PILL_ERR_FG: Color = Color::rgb8(170, 40, 40);
+const PRIMARY_BUTTON_HEIGHT: f64 = 34.0;
+const QUIET_BUTTON_HEIGHT: f64 = 30.0;
+const ICON_SIZE: f32 = 14.0;
+const ROW_PADDING_VERT: f64 = 7.0;
 
 /// Build the sidebar view.
 ///
@@ -61,36 +59,75 @@ pub fn sidebar_view(
                 on_open_for_lists.clone(),
             );
             v_stack_from_iter(vec![posts_section.into_any(), pages_section.into_any()])
-                .style(|s| s.gap(8.).width_full())
+                .style(|s| s.gap(theme::SPACE_18).width_full())
                 .into_any()
         },
     )
     .style(|s| s.width_full().flex_grow(1.0f32));
 
     let on_new_post_btn = on_new_post.clone();
-    let new_post_btn = button(label(|| "+ New post".to_string()))
-        .action(move || (on_new_post_btn)())
-        .style(|s| s.width_full().padding_vert(4.));
+    let new_post_btn = button(
+        h_stack((
+            icon(icons::PLUS, ICON_SIZE, theme::ON_ACCENT),
+            label(|| "New post".to_string()),
+        ))
+        .style(|s| s.gap(theme::SPACE_6).items_center()),
+    )
+    .action(move || (on_new_post_btn)())
+    .style(|s| {
+        theme::primary_button(s)
+            .width_full()
+            .height(PRIMARY_BUTTON_HEIGHT)
+            .padding_vert(0.)
+            .margin_bottom(theme::SPACE_6)
+    });
     let on_new_page_btn = on_new_page.clone();
-    let new_page_btn = button(label(|| "+ New page".to_string()))
-        .action(move || (on_new_page_btn)())
-        .style(|s| s.width_full().padding_vert(4.));
+    let new_page_btn = quiet_row_button(icons::PLUS, "New page", move || (on_new_page_btn)());
 
     let on_site_settings_btn = on_site_settings.clone();
-    let site_settings_btn = button(label(|| "\u{2699} Site settings".to_string())) // ⚙
-        .action(move || (on_site_settings_btn)())
-        .style(|s| s.width_full().padding_vert(4.));
+    let site_settings_btn = quiet_row_button(icons::SLIDERS, "Site settings", move || {
+        (on_site_settings_btn)()
+    });
 
-    let footer = v_stack((new_post_btn, new_page_btn, site_settings_btn))
-        .style(|s| s.gap(4.).padding(8.).border_top(1.).border_color(BORDER));
+    let footer =
+        v_stack((new_post_btn, new_page_btn, site_settings_btn)).style(|s| s.gap(theme::SPACE_2));
 
-    v_stack((scroll(lists).style(|s| s.flex_grow(1.0f32)), footer)).style(|s| {
+    v_stack((
+        scroll(lists).style(|s| s.flex_grow(1.0f32).min_height(0.).width_full()),
+        footer,
+    ))
+    .style(|s| {
         s.flex_col()
             .width(SIDEBAR_WIDTH)
+            .flex_shrink(0.0f32)
             .height_full()
-            .background(BG)
-            .border_right(1.)
-            .border_color(BORDER)
+            .gap(theme::SPACE_18)
+            .padding_top(theme::SPACE_18)
+            .padding_horiz(theme::SPACE_10)
+            .padding_bottom(theme::SPACE_12)
+            .background(theme::CHROME_BG)
+    })
+}
+
+/// One of the sidebar's left-aligned quiet buttons.
+fn quiet_row_button(
+    markup: &'static str,
+    text: &'static str,
+    action: impl Fn() + 'static,
+) -> impl IntoView {
+    button(
+        h_stack((
+            icon(markup, ICON_SIZE, theme::TEXT_SOFT),
+            label(move || text.to_string()),
+        ))
+        .style(|s| s.gap(theme::SPACE_8).items_center()),
+    )
+    .action(action)
+    .style(|s| {
+        s.width_full()
+            .height(QUIET_BUTTON_HEIGHT)
+            .padding_vert(0.)
+            .justify_start()
     })
 }
 
@@ -101,11 +138,10 @@ fn group(
     on_open: Rc<dyn Fn(DocumentRef)>,
 ) -> AnyView {
     let header = label(move || title.to_string()).style(|s| {
-        s.padding_horiz(8.)
-            .padding_top(8.)
-            .padding_bottom(4.)
-            .color(GROUP_FG)
-            .font_size(11.)
+        s.padding_horiz(theme::SPACE_10)
+            .padding_bottom(theme::SPACE_6)
+            .color(theme::TEXT_MUTED)
+            .font_size(theme::UI_SMALL)
             .font_weight(Weight::SEMIBOLD)
     });
     let mut rows: Vec<AnyView> = Vec::with_capacity(items.len() + 1);
@@ -114,9 +150,9 @@ fn group(
         rows.push(
             label(|| "(none)".to_string())
                 .style(|s| {
-                    s.padding_horiz(12.)
-                        .color(Color::rgb8(160, 160, 170))
-                        .font_size(12.)
+                    s.padding_horiz(theme::SPACE_10)
+                        .color(theme::PLACEHOLDER)
+                        .font_size(theme::UI_SMALL)
                 })
                 .into_any(),
         );
@@ -126,49 +162,59 @@ fn group(
             rows.push(row(item, active, on_open.clone()));
         }
     }
-    v_stack_from_iter(rows).style(|s| s.width_full()).into_any()
+    v_stack_from_iter(rows)
+        .style(|s| s.width_full().gap(theme::SPACE_2))
+        .into_any()
 }
 
 fn row(item: DocumentRef, active: bool, on_open: Rc<dyn Fn(DocumentRef)>) -> AnyView {
     let title = item.title.clone();
-    let title_view = label(move || title.clone()).style(|s| s.flex_grow(1.0f32).font_size(13.));
+    let title_view = label(move || title.clone()).style(move |s| {
+        s.flex_grow(1.0f32)
+            .flex_basis(0.)
+            .min_width(0.)
+            .text_ellipsis()
+            .font_size(theme::UI)
+            .color(theme::TEXT)
+            .apply_if(active, |s| s.font_weight(Weight::MEDIUM))
+    });
 
     let mut elements: Vec<AnyView> = vec![title_view.into_any()];
     if item.is_draft {
-        elements.push(pill("draft", PILL_DRAFT_BG, PILL_DRAFT_FG).into_any());
+        elements.push(marker("Draft").into_any());
     }
     if item.has_parse_error {
-        elements.push(pill("error", PILL_ERR_BG, PILL_ERR_FG).into_any());
+        elements.push(marker("Error").into_any());
     }
 
-    let inner = h_stack_from_iter(elements).style(|s| s.gap(4.).items_center().width_full());
+    let inner =
+        h_stack_from_iter(elements).style(|s| s.gap(theme::SPACE_8).items_center().width_full());
 
     let item_for_click = item;
     inner
         .on_click_stop(move |_| (on_open)(item_for_click.clone()))
         .style(move |s| {
             let s = s
-                .padding_horiz(12.)
-                .padding_vert(4.)
+                .padding_horiz(theme::SPACE_10)
+                .padding_vert(ROW_PADDING_VERT)
                 .width_full()
+                .border_radius(theme::CORNER_MD)
                 .cursor(floem::style::CursorStyle::Pointer);
             if active {
-                s.background(ACTIVE_BG)
+                s.background(theme::ROW_ACTIVE_BG)
             } else {
-                s.hover(|s| s.background(HOVER_BG))
+                s.hover(|s| s.background(theme::ROW_HOVER_BG))
             }
         })
         .into_any()
 }
 
-fn pill(text: &'static str, bg: Color, fg: Color) -> impl IntoView {
-    label(move || text.to_string()).style(move |s| {
-        s.padding_horiz(6.)
-            .padding_vert(0.)
-            .background(bg)
-            .color(fg)
-            .border_radius(8.)
-            .font_size(10.)
+/// Small red text after a row's title.
+fn marker(text: &'static str) -> impl IntoView {
+    label(move || text.to_string()).style(|s| {
+        s.flex_shrink(0.0f32)
+            .color(theme::ACCENT)
+            .font_size(theme::UI_TINY)
             .font_weight(Weight::SEMIBOLD)
     })
 }

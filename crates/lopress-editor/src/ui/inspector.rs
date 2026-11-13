@@ -10,25 +10,21 @@
 //! document, not on every keystroke in the editor pane.
 
 use chrono::NaiveDate;
-use floem::peniko::Color;
 use floem::reactive::{create_effect, create_memo, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::text::Weight;
 use floem::views::{
-    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, Checkbox, Decorators,
+    button, dyn_container, empty, h_stack, label, scroll, text_input, v_stack, Decorators,
 };
 use floem::{AnyView, IntoView};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::model::types::EditorDoc;
+use crate::ui::theme;
+use crate::ui::toggle::toggle;
 
 const PANE_WIDTH: f64 = 280.0;
-const BG: Color = Color::rgb8(250, 250, 250);
-const BORDER: Color = Color::rgb8(220, 220, 220);
-const LABEL_FG: Color = Color::rgb8(110, 110, 120);
-const ERR_FG: Color = Color::rgb8(170, 40, 40);
-const INPUT_BG: Color = Color::rgb8(255, 255, 255);
-const INPUT_BORDER: Color = Color::rgb8(210, 210, 215);
+const INPUT_HEIGHT: f64 = 32.0;
 
 /// Build the inspector view. Empty placeholder when no doc is open.
 ///
@@ -50,10 +46,9 @@ pub fn inspector_view(
 
     scroll(body).style(|s| {
         s.width(PANE_WIDTH)
+            .flex_shrink(0.0f32)
             .height_full()
-            .background(BG)
-            .border_left(1.)
-            .border_color(BORDER)
+            .background(theme::CHROME_BG)
     })
 }
 
@@ -202,7 +197,12 @@ fn form(
             String::new()
         }
     })
-    .style(|s| s.font_size(11.).color(ERR_FG).padding_top(2.));
+    .style(move |s| {
+        s.font_size(theme::UI_TINY)
+            .color(theme::ACCENT)
+            .padding_top(theme::SPACE_2)
+            .apply_if(!date_invalid.get(), |s| s.hide())
+    });
     let date_field = field_row("Date", v_stack((date_input, date_hint)).into_any());
     let tags_field = field_row(
         "Tags",
@@ -211,7 +211,12 @@ fn form(
             .style(input_style)
             .into_any(),
     );
-    let draft_field = field_row("Draft", Checkbox::new_rw(draft_sig).into_any());
+    let draft_field = h_stack((
+        label(|| "Draft".to_string()).style(field_label),
+        empty().style(|s| s.flex_grow(1.0f32)),
+        toggle(move || draft_sig.get(), move |on| draft_sig.set(on)),
+    ))
+    .style(|s| s.width_full().items_center());
 
     // ── Title / H1 divergence warning ────────────────────────────────────
     let h1_text = create_memo(move |_| {
@@ -257,13 +262,20 @@ fn form(
                     }
                 };
                 h_stack((
-                    label(|| "\u{26a0} Title differs from H1".to_string())
-                        .style(|s| s.font_size(11.).color(ERR_FG).flex_grow(1.0f32)),
+                    label(|| "\u{26a0} Title differs from H1".to_string()).style(|s| {
+                        s.font_size(theme::UI_TINY)
+                            .color(theme::ACCENT)
+                            .flex_grow(1.0f32)
+                    }),
                     button(label(|| "Sync from H1".to_string()))
                         .action(on_sync)
-                        .style(|s| s.font_size(11.).padding_horiz(6.).padding_vert(2.)),
+                        .style(|s| {
+                            s.font_size(theme::UI_TINY)
+                                .padding_horiz(theme::SPACE_6)
+                                .padding_vert(theme::SPACE_2)
+                        }),
                 ))
-                .style(|s| s.gap(4.).width_full())
+                .style(|s| s.gap(theme::SPACE_4).width_full().items_center())
                 .into_any()
             },
         )
@@ -280,10 +292,9 @@ fn form(
 
     v_stack((
         label(|| "Front matter".to_string()).style(|s| {
-            s.font_size(12.)
+            s.font_size(theme::UI_SMALL)
                 .font_weight(Weight::SEMIBOLD)
-                .color(LABEL_FG)
-                .padding_bottom(8.)
+                .color(theme::TEXT_MUTED)
         }),
         title_field,
         warning_row,
@@ -293,30 +304,29 @@ fn form(
         draft_field,
         desc_field,
     ))
-    .style(|s| s.padding(12.).gap(10.).width_full())
+    .style(|s| {
+        s.padding_vert(theme::SPACE_18)
+            .padding_horiz(theme::SPACE_16)
+            .gap(theme::SPACE_14)
+            .width_full()
+    })
     .into_any()
 }
 
 fn field_row(name: &'static str, control: AnyView) -> AnyView {
-    v_stack((
-        label(move || name.to_string()).style(|s| {
-            s.font_size(11.)
-                .color(LABEL_FG)
-                .font_weight(Weight::SEMIBOLD)
-        }),
-        control,
-    ))
-    .style(|s| s.gap(4.).width_full())
-    .into_any()
+    v_stack((label(move || name.to_string()).style(field_label), control))
+        .style(|s| s.gap(theme::SPACE_4).width_full())
+        .into_any()
+}
+
+fn field_label(s: floem::style::Style) -> floem::style::Style {
+    s.font_size(theme::UI_SMALL).color(theme::TEXT_MUTED)
 }
 
 fn input_style(s: floem::style::Style) -> floem::style::Style {
+    // text_input draws from the top of its content box, so this centres the text.
     s.width_full()
-        .padding_horiz(6.)
-        .padding_vert(4.)
-        .background(INPUT_BG)
-        .border(1.)
-        .border_color(INPUT_BORDER)
-        .border_radius(3.)
-        .font_size(13.)
+        .height(INPUT_HEIGHT)
+        .padding_top(theme::SPACE_10)
+        .padding_bottom(theme::SPACE_6)
 }

@@ -15,6 +15,7 @@
 use crate::actions::BlockAction;
 use crate::model::types::{BlockId, EditorBlock, InlineRun};
 use crate::ui::blocks::inline_editor::ActionSink;
+use crate::ui::theme;
 use floem::event::{EventListener, EventPropagation};
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -52,12 +53,6 @@ impl Default for DndState {
 /// Width reserved for the drag-handle column on the left of every block.
 pub const HANDLE_WIDTH: f32 = 20.0;
 
-const HANDLE_COLOR: Color = Color::rgb8(170, 170, 175);
-const HANDLE_COLOR_ACTIVE: Color = Color::rgb8(80, 80, 90);
-const INDICATOR_COLOR: Color = Color::rgb8(70, 130, 230);
-const INSERT_FG: Color = Color::rgb8(90, 100, 120);
-const INSERT_BG: Color = Color::rgb8(235, 238, 245);
-
 /// The drag handle shown in the left gutter of each block. Visible only when
 /// `hover` is true (block is hovered) or this block is currently being
 /// dragged. Clicking the handle is treated as a drag start by Floem; on
@@ -83,12 +78,12 @@ pub fn drag_handle(block_id: BlockId, dnd: DndState, hover: RwSignal<bool>) -> i
                 .font_size(14.)
                 .cursor(CursorStyle::Pointer);
             if visible {
-                s.color(HANDLE_COLOR)
+                s.color(theme::PLACEHOLDER)
             } else {
                 s.color(Color::TRANSPARENT)
             }
         })
-        .dragging_style(|s| s.color(HANDLE_COLOR_ACTIVE))
+        .dragging_style(|s| s.color(theme::TEXT_SOFT))
 }
 
 /// A gap drop-target between two blocks (or before the first / after the
@@ -120,7 +115,9 @@ pub fn gap_drop_zone(
             .margin_horiz(floem::unit::PxPctAuto::Auto)
             .padding_horiz(6.);
         if visible {
-            s.color(INSERT_FG).background(INSERT_BG).border_radius(7.)
+            s.color(theme::TEXT_MUTED)
+                .background(theme::ROW_HOVER_BG)
+                .border_radius(7.)
         } else {
             s.color(Color::TRANSPARENT)
         }
@@ -182,9 +179,7 @@ pub fn gap_drop_zone(
             if active {
                 // Draw the 2 px indicator as a top border, vertically
                 // centered by a 7 px top margin.
-                s.margin_top(7.)
-                    .border_top(2.)
-                    .border_color(INDICATOR_COLOR)
+                s.margin_top(7.).border_top(2.).border_color(theme::ACCENT)
             } else {
                 s
             }
@@ -197,7 +192,8 @@ pub fn gap_drop_zone(
 /// correct even if the anchor was just deleted.
 pub fn append_block_button(anchor: BlockId, on_action: ActionSink) -> impl IntoView {
     // A `stack` container, not a bare label — clicks land on containers.
-    let text = label(|| "+ Add block".to_string()).style(|s| s.font_size(12.).color(INSERT_FG));
+    let text = label(|| "+ Add block".to_string())
+        .style(|s| s.font_size(theme::UI_SMALL).color(theme::TEXT_MUTED));
     stack((text,))
         .on_click_stop(move |_| {
             on_action(BlockAction::InsertAfter {
@@ -212,11 +208,11 @@ pub fn append_block_button(anchor: BlockId, on_action: ActionSink) -> impl IntoV
             s.width_full()
                 .padding_vert(6.)
                 .border(1.)
-                .border_color(Color::rgb8(225, 225, 230))
-                .border_radius(6.)
+                .border_color(theme::RULE_SOFT)
+                .border_radius(theme::CORNER_MD)
                 .cursor(CursorStyle::Pointer)
                 .items_center()
                 .justify_center()
-                .hover(|s| s.background(INSERT_BG))
+                .hover(|s| s.background(theme::DRAWER_BG))
         })
 }

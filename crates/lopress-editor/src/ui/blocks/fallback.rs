@@ -8,8 +8,8 @@ use crate::actions::body_to_flat_text;
 use crate::model::types::{BlockBody, EditorBlock};
 use crate::ui::blocks::inline_editor::FocusPublisher;
 use crate::ui::blocks::paragraph::MONO_FAMILY;
+use crate::ui::theme;
 use floem::event::{EventListener, EventPropagation};
-use floem::peniko::Color;
 use floem::reactive::SignalUpdate;
 use floem::views::{label, text, v_stack, Decorators};
 use floem::{AnyView, IntoView};
@@ -57,9 +57,8 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
             text(json)
                 .style(|s| {
                     s.font_family(MONO_FAMILY.to_string())
-                        .font_size(12.)
-                        .padding(8.)
-                        .background(Color::rgb8(245, 245, 245))
+                        .font_size(theme::UI_SMALL)
+                        .padding(theme::SPACE_8)
                         .width_full()
                 })
                 .into_any()
@@ -67,7 +66,7 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
         _ => {
             let flat = body_to_flat_text(&block.body);
             text(flat)
-                .style(|s| s.font_size(14.).padding(8.).width_full())
+                .style(|s| s.font_size(theme::UI).padding(theme::SPACE_8).width_full())
                 .into_any()
         }
     };
@@ -76,13 +75,13 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
     // the block is recoverable via Change Type (mismatch) or only Delete (Opaque).
     let warning_text = warning_text_for(&block.body);
     let warning = label(move || warning_text.to_string()).style(|s| {
-        s.font_size(11.)
-            .color(Color::rgb8(180, 120, 40))
-            .padding_horiz(8.)
-            .padding_vert(4.)
-            .background(Color::rgb8(255, 248, 230))
-            .border_radius(4.)
-            .margin(6.)
+        s.font_size(theme::UI_TINY)
+            .color(theme::ACCENT)
+            .padding_horiz(theme::SPACE_8)
+            .padding_vert(theme::SPACE_4)
+            .background(theme::ACCENT_TINT)
+            .border_radius(theme::CORNER_SM)
+            .margin(theme::SPACE_6)
             .width_full()
     });
 
@@ -90,13 +89,7 @@ pub fn fallback_block_view(block: &EditorBlock, focus_pub: FocusPublisher) -> An
     // PointerDown that sets focus. Vertical so the banner is never clipped
     // beside the content (a horizontal stack hid the message off the edge).
     let body = v_stack((warning, content))
-        .style(|s| {
-            s.width_full()
-                .border(1.)
-                .border_color(Color::rgb8(220, 200, 160))
-                .border_radius(4.)
-                .background(Color::rgb8(255, 252, 240))
-        })
+        .style(|s| theme::card(s).width_full())
         .on_event(EventListener::PointerDown, move |_| {
             // Mount the toolbar: set the focused block id.
             focus_pub.block.set(Some(block_id));

@@ -13,8 +13,8 @@ use crate::ui::blocks::env::BlockEnv;
 use crate::ui::blocks::inline_editor::{
     build_block_editor, mount_block_editor, ActionSink, CommitClosure, StructuralKey,
 };
-use crate::ui::blocks::paragraph::MONO_FAMILY;
 use crate::ui::editing::focus::defer_focus;
+use crate::ui::theme;
 use floem::event::EventListener;
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
@@ -27,9 +27,6 @@ use floem::views::editor::Editor;
 use floem::views::{empty, h_stack, stack, text_input, Decorators};
 use floem::{AnyView, IntoView};
 use std::rc::Rc;
-
-/// Code-specific font size (logical px) for the code body.
-const CODE_FONT_SIZE: usize = 13;
 
 /// Commit closure for the code widget. Reads the editor buffer, compares
 /// against the model's current body for `block_id`, and emits
@@ -238,7 +235,7 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
     // Code has no inline styles, so InlineRun::plain (default bold/italic/
     // code = false, link = None) is exactly right.
     let runs = vec![InlineRun::plain(body)];
-    let state = build_block_editor(cx, &runs, CODE_FONT_SIZE);
+    let state = build_block_editor(cx, &runs, theme::CODE);
     let editor_sig = state.editor_sig;
     let text_sig = state.text_sig;
 
@@ -332,19 +329,18 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
             }
         })
         .style(|s| {
-            s.color(Color::rgb8(120, 120, 120))
-                .font_size(11.)
-                .padding_horiz(6.)
+            s.color(theme::TEXT_MUTED)
+                .font_size(theme::UI_TINY)
+                .padding_horiz(theme::SPACE_6)
                 .padding_vert(0.)
                 .min_width(60.)
                 .border(0.0)
                 .background(Color::TRANSPARENT)
                 .cursor(floem::style::CursorStyle::Text)
-                .hover(|s| s.background(Color::rgb8(235, 235, 235)))
+                .hover(|s| s.background(theme::ROW_HOVER_BG))
                 .focus(|s| {
-                    s.border(1.0)
-                        .border_color(Color::rgb8(180, 180, 180))
-                        .background(Color::WHITE)
+                    s.background(theme::SURFACE)
+                        .hover(|s| s.background(theme::SURFACE))
                 })
         });
 
@@ -359,8 +355,6 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
         #[allow(clippy::cast_precision_loss)]
         let lines = String::from(&text_sig.get()).split('\n').count().max(1) as f64;
         s.class(GutterClass, |s| s.hide())
-            .font_family(MONO_FAMILY.to_string())
-            .font_size(13.)
             .padding(10.)
             .width_full()
             .height(lines * line_height + 20.)
@@ -371,11 +365,8 @@ pub fn editable_code_view(body: &str, lang: &str, block_id: BlockId, env: &Block
         .style(|s| {
             s.flex_col()
                 .width_full()
-                .background(Color::rgb8(245, 245, 245))
-                .border_radius(4.)
-                .border(1.)
-                .border_color(Color::rgb8(220, 220, 220))
-                .margin_vert(8.)
+                .apply(theme::card(floem::style::Style::new()))
+                .margin_vert(theme::SPACE_8)
         })
         .into_any()
 }
